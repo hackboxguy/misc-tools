@@ -1,0 +1,13 @@
+#list of packages to be installed by sdm for custom image
+avahi-daemon
+avahi-utils
+fbi
+fxload
+i2c-tools
+iperf3
+libcurl4-openssl-dev
+libftdi1
+libhidapi-libusb0
+libi2c-dev
+libudev-dev
+nlohmann-json3-dev

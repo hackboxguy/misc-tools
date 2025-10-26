@@ -18,7 +18,7 @@ echo ""
 # Install build dependencies (no-op if already installed)
 echo "[1/5] Installing build dependencies..."
 apt-get update -qq
-apt-get install -y cmake g++ make git libusb-dev libftdi-dev libgpiod-dev
+apt-get install -y cmake g++ make git libusb-dev libftdi-dev libgpiod-dev libftdi1-dev libhidapi-dev zlib1g-dev
 
 # Clone micropanel repository
 echo "[2/5] Cloning micropanel from GitHub..."
@@ -56,6 +56,8 @@ rm -rf /tmp/$UTIL_NAME
 
 # NOTE: Build dependencies will be purged by main script
 # No apt-get purge here!
+#sudo apt-get purge libftdi1-dev libhidapi-dev zlib1g-dev
+#sudo apt-get autoremove
 
 echo ""
 echo "======================================"

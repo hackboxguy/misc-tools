@@ -6,3 +6,6 @@ git
 libusb-dev
 libftdi-dev
 libgpiod-dev
+libftdi1-dev
+libhidapi-dev
+zlib1g-dev

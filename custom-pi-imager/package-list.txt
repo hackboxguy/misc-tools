@@ -11,3 +11,7 @@ libhidapi-libusb0
 libi2c-dev
 libudev-dev
 nlohmann-json3-dev
+cmake
+g++
+make
+git

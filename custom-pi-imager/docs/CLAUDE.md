@@ -162,6 +162,7 @@ sudo ./custom-pi-imager.sh --baseimage=PATH --output=DIR [OPTIONS]
 | `--package-list=FILE` | [skip] | Path to package list file |
 | `--micropanel-source=SRC` | [skip] | Local path or user@host:/path |
 | `--scp-password=PASS` | [none] | SCP authentication password |
+| `--setup-hook=FILE` | [skip] | Setup hook script (compile/build apps in chroot) |
 | `--configure-script=FILE` | [skip] | Custom post-install script |
 
 ### Usage Patterns
@@ -355,6 +356,7 @@ md5sum ./2025-10-01-raspios-bookworm-arm64-lite-base.img.xz > base-image.md5
 
 **Objective**: Add custom application and hardware-specific configuration to the base
 
+#### Option A: Pre-built Binaries (Original Method)
 ```bash
 # Incremental (keeps brb0x password from base)
 sudo ./custom-pi-imager.sh \
@@ -367,7 +369,28 @@ sudo ./custom-pi-imager.sh \
 **What happens**:
 1. Uses previously created base image (no re-installation of packages)
 2. Preserves `brb0x` password from base (no `--password` flag)
-3. Copies `micropanel` application to `/home/pi/micropanel`
+3. Copies pre-built `micropanel` application to `/home/pi/micropanel`
+4. Runs [post-install.sh](../post-install.sh:1-30) for hardware configuration
+
+#### Option B: Compile from Source (NEW - Using Setup Hook)
+```bash
+# Compile micropanel from GitHub source
+sudo ./custom-pi-imager.sh \
+    --baseimage=./2025-10-01-raspios-bookworm-arm64-lite-base.img.xz \
+    --output=/tmp/pi-custom \
+    --setup-hook=./micropanel-setup-hook.sh \
+    --configure-script=./post-install.sh
+```
+
+**What happens**:
+1. Uses previously created base image (packages already installed)
+2. Preserves `brb0x` password from base
+3. Runs [micropanel-setup-hook.sh](../micropanel-setup-hook.sh) in chroot:
+   - Installs build dependencies (cmake, g++, make, git)
+   - Clones https://github.com/hackboxguy/micropanel.git
+   - Compiles for ARM64 via QEMU
+   - Installs to `/home/pi/micropanel`
+   - **Removes build dependencies** (keeps image clean)
 4. Runs [post-install.sh](../post-install.sh:1-30) for hardware configuration
 
 **Post-Install Configuration** (`post-install.sh`):
@@ -514,6 +537,103 @@ sudo ./custom-pi-imager.sh \
     --password=brb0x \
     --extend-size-mb=1000 \
     --package-list=./package-list.txt
+```
+
+## Setup Hook vs Configure Script
+
+The tool supports two types of customization scripts with different purposes:
+
+### Setup Hook (`--setup-hook`)
+**Purpose**: Build and install custom applications from source
+**Execution**: Runs in chroot environment (ARM64 via QEMU)
+**When to use**: Compile code, install applications, build from git
+
+**Environment Variables**:
+- `MOUNT_POINT`: Root filesystem mount point
+- `PI_PASSWORD`: User password (empty if unchanged)
+- `IMAGE_WORK_DIR`: Working directory path
+
+**Example: [micropanel-setup-hook.sh](../micropanel-setup-hook.sh)**
+```bash
+#!/bin/bash
+set -e
+
+# Install build dependencies
+apt-get install -y cmake g++ make git
+
+# Clone and build
+git clone https://github.com/hackboxguy/micropanel.git /tmp/mp
+cd /tmp/mp/build
+cmake -DCMAKE_INSTALL_PREFIX=/home/pi/micropanel ..
+make -j$(nproc) && make install
+
+# Cleanup build dependencies
+apt-get purge -y cmake g++ make git
+apt-get autoremove -y
+```
+
+**Key Features**:
+- Direct apt-get access (install/purge packages)
+- Native ARM64 compilation via QEMU
+- Can clone from git repositories
+- Automatic cleanup to avoid image bloat
+
+### Configure Script (`--configure-script`)
+**Purpose**: System-wide configuration (networking, hardware, services)
+**Execution**: Runs in chroot after setup hook completes
+**When to use**: Enable services, configure hardware, tune system settings
+
+**Environment Variables**:
+- `MOUNT_POINT`: Root filesystem mount point
+- `PI_PASSWORD`: User password
+- `MICROPANEL_INSTALLED`: "true" or "false"
+- `IMAGE_WORK_DIR`: Working directory path
+
+**Example: [post-install.sh](../post-install.sh)**
+```bash
+#!/bin/bash
+set -e
+
+# Tune network buffers
+echo "net.core.rmem_max = 26214400" >> /etc/sysctl.conf
+
+# Enable service
+if [ "$MICROPANEL_INSTALLED" = "true" ]; then
+    systemctl enable /home/pi/micropanel/micropanel.service
+fi
+
+# Configure hardware
+echo 'i2c-dev' > /etc/modules-load.d/i2c.conf
+```
+
+### Execution Order
+```
+1. install_packages (base packages from package-list.txt)
+2. copy_micropanel (if --micropanel-source provided)
+3. run_setup_hook (if --setup-hook provided) ← Build/compile apps
+4. configure_system (if --configure-script provided) ← System config
+```
+
+### When to Use Which?
+
+| Task | Use |
+|------|-----|
+| Compile C++ application | `--setup-hook` |
+| Install Python package with pip | `--setup-hook` |
+| Clone git repository and build | `--setup-hook` |
+| Enable systemd service | `--configure-script` |
+| Configure network (static IP, WiFi) | `--configure-script` |
+| Tune sysctl parameters | `--configure-script` |
+| Enable hardware (I2C, SPI, UART) | `--configure-script` |
+| Install system-wide configuration files | `--configure-script` |
+
+### Both Can Be Used Together
+```bash
+sudo ./custom-pi-imager.sh \
+    --baseimage=base.img.xz \
+    --output=/tmp/custom \
+    --setup-hook=./build-app.sh \      # Build application
+    --configure-script=./configure.sh  # Configure system
 ```
 
 ## File Formats

@@ -16,12 +16,21 @@ xz -k -9 /tmp/pi-base/*.img
 mv /tmp/pi-base/*.img.xz ./base.img.xz
 ```
 
-### Stage 2: Application Layer (Iterate)
+### Stage 2A: Application Layer - Pre-built (Iterate)
 ```bash
 sudo ./custom-pi-imager.sh \
     --baseimage=./base.img.xz \
     --output=/tmp/pi-custom \
     --micropanel-source=./micropanel \
+    --configure-script=./post-install.sh
+```
+
+### Stage 2B: Application Layer - Compile from Source (NEW)
+```bash
+sudo ./custom-pi-imager.sh \
+    --baseimage=./base.img.xz \
+    --output=/tmp/pi-custom \
+    --setup-hook=./micropanel-setup-hook.sh \
     --configure-script=./post-install.sh
 ```
 
@@ -46,8 +55,9 @@ sudo eject /dev/sdX
 | `--password` | No | `mypass` | User password (keeps existing if omitted) |
 | `--extend-size-mb` | No | `1000` | Add 1GB space (default: 0) |
 | `--package-list` | No | `packages.txt` | Packages to install |
-| `--micropanel-source` | No | `./app` or `user@host:/path` | Application files |
+| `--micropanel-source` | No | `./app` or `user@host:/path` | Application files (pre-built) |
 | `--scp-password` | No | `pass` | SCP authentication |
+| `--setup-hook` | No | `build.sh` | Setup hook (compile from source) |
 | `--configure-script` | No | `setup.sh` | Post-install script |
 
 ## File Formats
@@ -61,11 +71,35 @@ iperf3
 libcurl4-openssl-dev
 ```
 
-### post-install.sh
+### setup-hook.sh (NEW - Compile from Source)
 ```bash
 #!/bin/bash
 set -e
 
+# Runs in chroot (ARM64 via QEMU)
+# Available variables: $MOUNT_POINT, $PI_PASSWORD, $IMAGE_WORK_DIR
+
+# Install build dependencies
+apt-get install -y cmake g++ make git
+
+# Clone and build
+git clone https://github.com/user/project.git /tmp/build
+cd /tmp/build
+cmake -DCMAKE_INSTALL_PREFIX=/home/pi/app ..
+make -j$(nproc) && make install
+
+# Cleanup to avoid bloat
+apt-get purge -y cmake g++ make git
+apt-get autoremove -y
+rm -rf /tmp/build
+```
+
+### post-install.sh (System Configuration)
+```bash
+#!/bin/bash
+set -e
+
+# Runs after setup-hook
 # Available variables:
 # - $MICROPANEL_INSTALLED (true/false)
 # - $PI_PASSWORD (empty if unchanged)

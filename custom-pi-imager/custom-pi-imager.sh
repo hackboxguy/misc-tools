@@ -12,6 +12,7 @@ SOURCE_FILES_HOST=""
 SCP_PASSWORD=""
 PACKAGE_LIST_FILE=""
 CONFIGURE_SCRIPT=""
+SETUP_HOOK=""
 SKIP_MICROPANEL=false
 SKIP_PACKAGES=false
 
@@ -44,6 +45,8 @@ Optional Arguments:
   --package-list=FILE       Path to package list file (one per line, # for comments)
   --micropanel-source=SRC   Micropanel source (user@host:/path or /local/path)
   --scp-password=PASS       SCP password for remote micropanel source
+  --setup-hook=FILE         Setup hook script (runs in chroot for custom builds)
+                            Receives: MOUNT_POINT, PI_PASSWORD, IMAGE_WORK_DIR
   --configure-script=FILE   Custom configuration script (runs in chroot)
                             Receives: MOUNT_POINT, PI_PASSWORD, MICROPANEL_INSTALLED
   --help, -h                Show this help
@@ -76,6 +79,7 @@ parse_arguments() {
             --micropanel-source=*) SOURCE_FILES_HOST="${arg#*=}" ;;
             --scp-password=*) SCP_PASSWORD="${arg#*=}" ;;
             --package-list=*) PACKAGE_LIST_FILE="${arg#*=}" ;;
+            --setup-hook=*) SETUP_HOOK="${arg#*=}" ;;
             --configure-script=*) CONFIGURE_SCRIPT="${arg#*=}" ;;
             --help|-h) show_usage ;;
             *) error "Unknown argument: $arg\nUse --help for usage" ;;
@@ -118,6 +122,10 @@ parse_arguments() {
         CONFIGURE_SCRIPT="$(cd "$(dirname "$CONFIGURE_SCRIPT")" 2>/dev/null && pwd)/$(basename "$CONFIGURE_SCRIPT")" || CONFIGURE_SCRIPT="$(pwd)/$CONFIGURE_SCRIPT"
     fi
 
+    if [ -n "$SETUP_HOOK" ] && [[ "$SETUP_HOOK" != /* ]]; then
+        SETUP_HOOK="$(cd "$(dirname "$SETUP_HOOK")" 2>/dev/null && pwd)/$(basename "$SETUP_HOOK")" || SETUP_HOOK="$(pwd)/$SETUP_HOOK"
+    fi
+
     IMAGE_NAME="$(basename "$IMAGE_SOURCE")"
     IMAGE_NAME="${IMAGE_NAME%.xz}"
     MOUNT_POINT="${WORK_DIR}/mnt"
@@ -136,6 +144,7 @@ show_configuration() {
     echo "  Extend Size:     $([ "$EXTEND_SIZE_MB" -eq 0 ] && echo "[NONE]" || echo "${EXTEND_SIZE_MB} MB")"
     echo "  Package List:    $([ "$SKIP_PACKAGES" = true ] && echo "[SKIPPED]" || echo "${PACKAGE_LIST_FILE}")"
     echo "  Micropanel:      $([ "$SKIP_MICROPANEL" = true ] && echo "[SKIPPED]" || echo "${SOURCE_FILES_HOST}")"
+    echo "  Setup Hook:      $([ -z "$SETUP_HOOK" ] && echo "[NONE]" || echo "${SETUP_HOOK}")"
     echo "  Config Script:   $([ -z "$CONFIGURE_SCRIPT" ] && echo "[NONE]" || echo "${CONFIGURE_SCRIPT}")"
     echo ""
 }
@@ -331,6 +340,26 @@ copy_micropanel() {
     log "Micropanel copied: $(du -sh ${MOUNT_POINT}/home/pi/micropanel | cut -f1)"
 }
 
+run_setup_hook() {
+    [ -z "$SETUP_HOOK" ] && info "No setup hook, skipping" && return 0
+    log "Running setup hook: ${SETUP_HOOK}"
+    [ ! -f "${SETUP_HOOK}" ] && error "Not found: ${SETUP_HOOK}"
+    [ ! -x "${SETUP_HOOK}" ] && warn "Making executable..." && chmod +x "${SETUP_HOOK}"
+
+    export MOUNT_POINT="${MOUNT_POINT}"
+    export PI_PASSWORD="${PI_PASSWORD}"
+    export IMAGE_WORK_DIR="${WORK_DIR}"
+
+    local sn=$(basename "${SETUP_HOOK}")
+    cp "${SETUP_HOOK}" "${MOUNT_POINT}/tmp/${sn}"
+    chmod +x "${MOUNT_POINT}/tmp/${sn}"
+
+    info "Environment: MOUNT_POINT=${MOUNT_POINT}, IMAGE_WORK_DIR=${IMAGE_WORK_DIR}"
+    chroot "${MOUNT_POINT}" /bin/bash -c "cd /tmp && ./${sn}" || error "Setup hook failed"
+    rm -f "${MOUNT_POINT}/tmp/${sn}"
+    log "Setup hook complete"
+}
+
 configure_system() {
     [ -z "$CONFIGURE_SCRIPT" ] && info "No configuration script, skipping" && return 0
     log "Running: ${CONFIGURE_SCRIPT}"
@@ -421,6 +450,7 @@ main() {
     set_user_password
     install_packages
     copy_micropanel
+    run_setup_hook
     configure_system
     verify_image
     remove_qemu

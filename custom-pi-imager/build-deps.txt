@@ -3,3 +3,6 @@ cmake
 g++
 make
 git
+libusb-dev
+libftdi-dev
+libgpiod-dev

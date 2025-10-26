@@ -1,0 +1,5 @@
+# Build dependencies (will be purged after compilation)
+cmake
+g++
+make
+git

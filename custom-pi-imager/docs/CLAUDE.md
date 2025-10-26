@@ -6,12 +6,12 @@
 
 | Stage | Purpose | Build Time | Command |
 |-------|---------|------------|---------|
-| **1. Base** | System packages + password | ~15 min | `sudo ./custom-pi-imager.sh --baseimage=raspios.img.xz --output=/tmp/pi-base --password=brb0x --extend-size-mb=1000 --package-list=package-list.txt` |
-| **2. Custom** | Application layer | ~5 min | `sudo ./custom-pi-imager.sh --baseimage=base.img.xz --output=/tmp/pi-custom --micropanel-source=./micropanel --configure-script=post-install.sh` |
+| **1. Base** | System packages + build deps | ~15 min | `sudo ./custom-pi-imager.sh --mode=base --baseimage=raspios.img.xz --output=/tmp/pi-base --password=brb0x --extend-size-mb=1000 --runtime-package=runtime-deps.txt --builddep-package=build-deps.txt` |
+| **2. Incremental** | Compile apps + purge deps | ~5 min | `sudo ./custom-pi-imager.sh --mode=incremental --baseimage=base.img.xz --output=/tmp/pi-custom --builddep-package=build-deps.txt --setup-hook=./app-build-hook.sh --post-build-script=finalize.sh` |
 
-**What you get**: Bootable Pi4 image with hardware interfaces (I2C, UART), network tools (avahi, iperf3), and custom application pre-configured.
+**What you get**: Bootable Pi4 image with hardware interfaces (I2C, UART), network tools (avahi, iperf3), and custom applications compiled from source with zero build dependency bloat.
 
-**Jump to**: [Real-World Workflow](#real-world-workflow-example) | [Package List](#stage-1-base-image-creation) | [Post-Install Script](#stage-2-incremental-customization)
+**Jump to**: [Real-World Workflow](#real-world-workflow-example) | [Package Lists](#file-formats) | [Setup Hooks](#setup-hook-vs-post-build-script)
 
 ---
 
@@ -38,45 +38,49 @@
 
 ## Overview
 
-The `custom-pi-imager.sh` script is a comprehensive Bash-based automation tool designed for customizing Raspberry Pi OS (Debian-based) images on Arch Linux hosts. It creates bootable disk images for Raspberry Pi 4 with pre-configured settings, packages, and custom software, enabling streamlined distribution of ready-to-use Pi images.
+The `custom-pi-imager.sh` script is a comprehensive Bash-based automation tool designed for customizing Raspberry Pi OS (Debian-based) images on Arch Linux hosts. It uses a **mode-based two-stage workflow** to create bootable disk images with pre-configured settings, packages, and custom software compiled from source—all while maintaining zero build dependency bloat in the final image.
 
 ## Purpose
 
 This tool addresses the need for reproducible, customized Raspberry Pi OS deployments by:
 - Automating base image extraction and modification
 - Enabling ARM64 image customization on x86_64 hosts via QEMU emulation
-- Supporting package pre-installation
-- Facilitating custom software deployment (e.g., micropanel applications)
+- Separating runtime dependencies from build dependencies (dual-purpose package management)
+- Supporting compilation from source via generic setup hooks
+- Auto-purging build tools after compilation (keeps images clean)
 - Providing extensibility through custom configuration scripts
 
 ## Key Features
 
-### 1. Base Image Management
+### 1. Mode-Based Architecture
+- **Base Mode** (`--mode=base`): Install runtime packages + build dependencies
+- **Incremental Mode** (`--mode=incremental`): Run setup hooks, compile from source, auto-purge build deps
+- Mode-aware validation (only validates files needed for specific mode)
+- Clear separation of concerns (system vs application layer)
+
+### 2. Dual-Purpose Package Management
+- **Runtime packages** (`--runtime-package`): Kept in final image (libraries, tools)
+- **Build dependencies** (`--builddep-package`): Installed in base, purged in incremental
+- Same file used in both modes (e.g., `build-deps.txt`)
+- Zero bloat: Build tools downloaded once, used for compilation, then removed
+
+### 3. Generic Setup Hooks
+- Multiple `--setup-hook` scripts supported (compile different apps)
+- Runs in ARM64 chroot via QEMU (native compilation experience)
+- Access to apt-get for additional dependencies
+- Environment variables: `MOUNT_POINT`, `PI_PASSWORD`, `IMAGE_WORK_DIR`
+
+### 4. Base Image Management
 - Accepts compressed (`.img.xz`) or uncompressed (`.img`) Raspberry Pi OS images
 - Automatic extraction and validation
-- Optional image extension for additional storage space
+- Optional image extension (base mode only)
 - Disk space checking with user warnings
 
-### 2. User Authentication
+### 5. User Authentication
 - Configurable password for the `pi` user
 - Preserves existing passwords when not specified
 - Automatic SSH configuration with password authentication
 - Security hardening (root login disabled)
-
-### 3. Package Installation
-- Batch package installation from text files
-- Comment support in package lists (`#` prefix)
-- Automated apt-get operations in chroot environment
-
-### 4. Micropanel Integration
-- Support for local or remote (SCP) micropanel sources
-- Automatic directory detection and installation
-- Proper ownership configuration (uid:gid 1000:1000)
-
-### 5. Custom Configuration
-- Execute arbitrary scripts in chroot environment
-- Environment variable passing (mount point, password, etc.)
-- Post-installation customization hook
 
 ### 6. ARM64 Emulation
 - QEMU-based ARM64 emulation on x86_64 hosts
@@ -85,24 +89,79 @@ This tool addresses the need for reproducible, customized Raspberry Pi OS deploy
 
 ## Architecture
 
-### Execution Flow
+### Mode-Based Workflow
 
 ```
-1. Argument Parsing → Validation
-2. Environment Check → Prerequisites
-3. Workspace Setup → Cleanup old runs
-4. Image Extraction → Decompression
-5. SDM Integration → Resize/customize
-6. Image Mounting → Loop device setup
-7. QEMU Setup → ARM64 emulation
-8. Password Config → User management
-9. Package Install → APT operations
-10. Micropanel Copy → Software deployment
-11. Custom Script → Post-configuration
-12. Verification → Image validation
-13. Cleanup → Unmount/detach
-14. Summary → Usage instructions
+┌──────────────────────────────────────────────────────────────┐
+│                     BASE MODE (--mode=base)                  │
+├──────────────────────────────────────────────────────────────┤
+│ 1. Argument Parsing → Mode validation                       │
+│ 2. Environment Check → Prerequisites                        │
+│ 3. Workspace Setup → Cleanup old runs                       │
+│ 4. Image Extraction → Decompression                         │
+│ 5. SDM Integration → Resize/customize                       │
+│ 6. Image Mounting → Loop device setup                       │
+│ 7. QEMU Setup → ARM64 emulation                             │
+│ 8. Password Config → User management                        │
+│ 9. Package Install → Runtime + Build deps (both installed)  │
+│10. Verification → Image validation                          │
+│11. Cleanup → Unmount/detach                                 │
+│12. Summary → Compress for incremental use                   │
+└──────────────────────────────────────────────────────────────┘
+                            ↓ compress with xz
+┌──────────────────────────────────────────────────────────────┐
+│                INCREMENTAL MODE (--mode=incremental)         │
+├──────────────────────────────────────────────────────────────┤
+│ 1. Argument Parsing → Mode validation                       │
+│ 2. Environment Check → Prerequisites                        │
+│ 3. Workspace Setup → Cleanup old runs                       │
+│ 4. Image Extraction → Use base image                        │
+│ 5. SDM Integration → Redo-customize (no resize)             │
+│ 6. Image Mounting → Loop device setup                       │
+│ 7. QEMU Setup → ARM64 emulation                             │
+│ 8. Password Config → Preserved from base                    │
+│ 9. Package Install → SKIPPED (already in base)              │
+│10. Setup Hooks → Compile from source (multiple allowed)     │
+│11. Post-Build Script → System configuration                 │
+│12. Purge Build Deps → Remove cmake, g++, make, git, etc.    │
+│13. Verification → Image validation                          │
+│14. Cleanup → Unmount/detach                                 │
+│15. Summary → Ready for deployment                           │
+└──────────────────────────────────────────────────────────────┘
 ```
+
+### Execution Flow (Detailed)
+
+**Base Mode**:
+1. Argument Parsing → Validate `--mode=base`, `--runtime-package`, `--builddep-package`
+2. Environment Check → QEMU, SDM, binfmt prerequisites
+3. Workspace Setup → Create `WORK_DIR`, cleanup old mounts
+4. Image Extraction → Decompress `.img.xz` to `.img`
+5. SDM Integration → Extend image by `--extend-size-mb`
+6. Image Mounting → Loop device + partition mounting
+7. QEMU Setup → Copy `qemu-aarch64-static`, mount proc/sys/dev
+8. Password Config → Set/preserve pi user password
+9. **Package Install** → Install runtime-package + builddep-package (both)
+10. Verification → Check critical directories
+11. Cleanup → Unmount, detach loop device
+12. Summary → Instruct user to compress for reuse
+
+**Incremental Mode**:
+1. Argument Parsing → Validate `--mode=incremental`, `--builddep-package`, `--setup-hook`
+2. Environment Check → QEMU, SDM, binfmt prerequisites
+3. Workspace Setup → Create `WORK_DIR`, cleanup old mounts
+4. Image Extraction → Decompress base image
+5. SDM Integration → Redo-customize (no resize)
+6. Image Mounting → Loop device + partition mounting
+7. QEMU Setup → Copy `qemu-aarch64-static`, mount proc/sys/dev
+8. Password Config → Inherited from base (skip if not specified)
+9. **Package Install** → SKIPPED (packages already installed in base)
+10. **Setup Hooks** → Run all `--setup-hook` scripts in chroot (compile apps)
+11. **Post-Build Script** → System configuration (services, hardware)
+12. **Purge Build Deps** → Remove packages from `--builddep-package`
+13. Verification → Check critical directories
+14. Cleanup → Unmount, detach loop device
+15. Summary → Image ready for SD card writing
 
 ### Directory Structure
 
@@ -112,8 +171,8 @@ WORK_DIR/
 ├── mnt/                   # Mount point for image
 │   ├── boot/firmware/     # Boot partition (p1)
 │   ├── etc/, home/, ...   # Root filesystem (p2)
-│   └── usr/bin/qemu-*     # QEMU binary (temporary)
-├── micropanel-temp/       # Temporary download location
+│   ├── usr/bin/qemu-*     # QEMU binary (temporary)
+│   └── tmp/               # Setup hooks copied here for execution
 └── loop_device            # Loop device tracking file
 ```
 
@@ -130,8 +189,6 @@ sudo pacman -S qemu-user-static qemu-user-static-binfmt
 - `losetup` - Loop device management
 - `mount/umount` - Filesystem mounting
 - `chroot` - Change root environment
-- `rsync` - File synchronization
-- `scp/sshpass` - Remote file transfer (optional)
 - `openssl` - Password hashing
 
 ### System Requirements
@@ -143,76 +200,112 @@ sudo pacman -S qemu-user-static qemu-user-static-binfmt
 
 ### Basic Syntax
 ```bash
-sudo ./custom-pi-imager.sh --baseimage=PATH --output=DIR [OPTIONS]
+sudo ./custom-pi-imager.sh --mode=MODE --baseimage=PATH --output=DIR --builddep-package=FILE [OPTIONS]
 ```
 
 ### Mandatory Arguments
 
 | Argument | Description |
 |----------|-------------|
+| `--mode=MODE` | Build mode: `base` or `incremental` (REQUIRED) |
 | `--baseimage=PATH` | Path to base Raspberry Pi OS image (.img.xz or .img) |
 | `--output=DIR` | Output directory for image customization |
+| `--builddep-package=FILE` | Build dependencies file (use `none` if not needed) |
 
-### Optional Arguments
+### Optional Arguments (Base Mode)
 
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `--password=PASS` | [keep existing] | Password for 'pi' user |
 | `--extend-size-mb=SIZE` | 0 | Image extension size in MB |
-| `--package-list=FILE` | [skip] | Path to package list file |
-| `--micropanel-source=SRC` | [skip] | Local path or user@host:/path |
-| `--scp-password=PASS` | [none] | SCP authentication password |
-| `--setup-hook=FILE` | [skip] | Setup hook script (compile/build apps in chroot) |
-| `--configure-script=FILE` | [skip] | Custom post-install script |
+| `--runtime-package=FILE` | [none] | Runtime dependencies (kept in final image) |
+
+### Optional Arguments (Incremental Mode)
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--setup-hook=FILE` | [none] | Setup hook script (multiple allowed, runs in chroot) |
+| `--post-build-script=FILE` | [none] | Post-build configuration script (runs in chroot) |
+
+### Optional Arguments (Both Modes)
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--password=PASS` | [keep existing] | Override password from base (incremental) or set new (base) |
+| `--help, -h` | - | Show usage information |
 
 ### Usage Patterns
 
-#### Pattern 1: Minimal Customization
+#### Pattern 1: Base Image Only (No Build Dependencies)
 ```bash
 sudo ./custom-pi-imager.sh \
+  --mode=base \
   --baseimage=./2024-07-04-raspios-bookworm-arm64.img.xz \
-  --output=/tmp/pi-custom
+  --output=/tmp/pi-base \
+  --password=mypass \
+  --extend-size-mb=1000 \
+  --runtime-package=./runtime-deps.txt \
+  --builddep-package=none
 ```
-- Keeps default 'raspberry' password
-- No image extension
-- No packages or micropanel
+- Sets password to 'mypass'
+- Extends image by 1GB
+- Installs runtime packages only
+- No build dependencies (useful for runtime-only images)
 
-#### Pattern 2: Full Customization
+#### Pattern 2: Base with Build Dependencies
 ```bash
 sudo ./custom-pi-imager.sh \
+  --mode=base \
   --baseimage=./raspios.img.xz \
-  --output=/tmp/pi-custom \
+  --output=/tmp/pi-base \
   --password=secure123 \
   --extend-size-mb=2000 \
-  --package-list=./packages.txt \
-  --micropanel-source=admin@server:/opt/micropanel \
-  --scp-password=remotepass \
-  --configure-script=./post-install.sh
+  --runtime-package=./runtime-deps.txt \
+  --builddep-package=./build-deps.txt
 ```
 - Custom password
 - 2GB additional space
-- Package installation
-- Remote micropanel download
-- Post-configuration script
+- Installs both runtime and build dependencies
+- Ready for incremental compilation stage
 
-#### Pattern 3: Incremental Build (Recommended Workflow)
+#### Pattern 3: Incremental Build (Recommended Two-Stage Workflow)
 ```bash
-# Base build
+# Stage 1: Base image with dependencies
 sudo ./custom-pi-imager.sh \
-  --baseimage=./base.img.xz \
-  --output=/tmp/pi-v1 \
+  --mode=base \
+  --baseimage=./raspios.img.xz \
+  --output=/tmp/pi-base \
   --password=mypass \
-  --package-list=./core-packages.txt
+  --extend-size-mb=1000 \
+  --runtime-package=./runtime-deps.txt \
+  --builddep-package=./build-deps.txt
 
-# Use output as new base (compress first)
-xz -k /tmp/pi-v1/*.img
+# Compress base for reuse
+xz -k -9 /tmp/pi-base/*.img
 
-# Incremental build
+# Stage 2: Compile applications and purge build deps
 sudo ./custom-pi-imager.sh \
-  --baseimage=/tmp/pi-v1/*.img.xz \
-  --output=/tmp/pi-v2 \
-  --micropanel-source=./micropanel-dir \
-  --configure-script=./final-config.sh
+  --mode=incremental \
+  --baseimage=/tmp/pi-base/*.img.xz \
+  --output=/tmp/pi-custom \
+  --builddep-package=./build-deps.txt \
+  --setup-hook=./app1-build-hook.sh \
+  --setup-hook=./app2-build-hook.sh \
+  --post-build-script=./finalize.sh
+```
+
+#### Pattern 4: Multiple Setup Hooks
+```bash
+# Compile multiple applications from source
+sudo ./custom-pi-imager.sh \
+  --mode=incremental \
+  --baseimage=./base.img.xz \
+  --output=/tmp/multi-app \
+  --builddep-package=./build-deps.txt \
+  --setup-hook=./micropanel-build.sh \
+  --setup-hook=./data-logger-build.sh \
+  --setup-hook=./web-server-build.sh \
+  --post-build-script=./configure-all.sh
 ```
 
 ## Real-World Workflow Example
@@ -223,17 +316,19 @@ This section demonstrates the actual production workflow used to create distribu
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        STAGE 1: BASE IMAGE                      │
+│                   STAGE 1: BASE IMAGE (--mode=base)             │
 ├─────────────────────────────────────────────────────────────────┤
 │ Input:  2025-10-01-raspios-bookworm-arm64-lite.img.xz         │
-│ Args:   --password=brb0x --extend-size-mb=1000                 │
-│         --package-list=package-list.txt                         │
+│ Args:   --mode=base --password=brb0x --extend-size-mb=1000    │
+│         --runtime-package=runtime-deps.txt                      │
+│         --builddep-package=build-deps.txt                       │
 │                                                                 │
 │ Process:                                                        │
 │   1. Extract RaspiOS Lite → 3.2GB                              │
 │   2. Extend by 1GB → 4.2GB                                      │
 │   3. Set password & enable SSH                                  │
-│   4. Install 13 packages (i2c-tools, avahi, iperf3, etc.)      │
+│   4. Install runtime packages (i2c-tools, avahi, iperf3, etc.) │
+│   5. Install build dependencies (cmake, g++, make, git)         │
 │                                                                 │
 │ Output: 2025-10-01-raspios-bookworm-arm64-lite.img (4.2GB)    │
 │         ↓ compress (xz -k -9)                                   │
@@ -241,28 +336,36 @@ This section demonstrates the actual production workflow used to create distribu
 │                                                                 │
 │ ⏱️  Time: ~15 minutes                                           │
 │ 💾 Store: Reusable base for multiple applications              │
+│ 📦 Contains: Runtime deps + Build tools (cmake, g++, make)     │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│                    STAGE 2: APPLICATION LAYER                   │
+│              STAGE 2: INCREMENTAL (--mode=incremental)          │
 ├─────────────────────────────────────────────────────────────────┤
 │ Input:  2025-10-01-raspios-bookworm-arm64-lite-base.img.xz    │
-│ Args:   --micropanel-source=./micropanel                        │
-│         --configure-script=post-install.sh                      │
+│ Args:   --mode=incremental                                      │
+│         --builddep-package=build-deps.txt                       │
+│         --setup-hook=./micropanel-setup-hook.sh                 │
+│         --post-build-script=./finalize.sh                       │
 │                                                                 │
 │ Process:                                                        │
 │   1. Use base image (password brb0x preserved)                  │
-│   2. Copy micropanel → /home/pi/micropanel                      │
-│   3. Run post-install.sh:                                       │
+│   2. Run micropanel-setup-hook.sh in chroot:                    │
+│      • Clone https://github.com/hackboxguy/micropanel.git       │
+│      • cmake → make → make install                              │
+│      • Install to /home/pi/micropanel                           │
+│   3. Run finalize.sh:                                           │
 │      • Tune network buffers (25MB)                              │
 │      • Enable micropanel.service                                │
 │      • Disable UART console                                     │
 │      • Auto-load i2c-dev module                                 │
+│   4. PURGE build dependencies (cmake, g++, make, git)           │
 │                                                                 │
-│ Output: 2025-10-01-raspios-bookworm-arm64-lite.img (4.3GB)    │
+│ Output: 2025-10-01-raspios-bookworm-arm64-lite.img (4.1GB)    │
 │                                                                 │
 │ ⏱️  Time: ~5 minutes (no package reinstall!)                    │
 │ 🚀 Deploy: Write to SD card → Boot Pi4                         │
+│ ✨ Clean: Build tools auto-purged, zero bloat!                  │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
@@ -285,39 +388,39 @@ This section demonstrates the actual production workflow used to create distribu
 ### Project Structure
 ```
 custom-pi-imager/
-├── custom-pi-imager.sh           # Main script
-├── package-list.txt               # System packages for base image
-├── post-install.sh                # Hardware configuration script
-├── micropanel/                    # Custom application directory
-│   ├── micropanel.service         # Systemd service file
-│   ├── configs/
-│   │   └── config.txt            # Hardware config overlay
-│   └── [application files]
+├── custom-pi-imager.sh                 # Main script (mode-based)
+├── runtime-deps.txt                    # Runtime packages (kept in final image)
+├── build-deps.txt                      # Build tools (purged after compilation)
+├── micropanel-setup-hook.sh            # Example: Compile micropanel from GitHub
+├── finalize.sh                         # Example: System configuration
 └── docs/
-    └── CLAUDE.md                  # This file
+    └── CLAUDE.md                        # This file
 ```
 
 ### Stage 1: Base Image Creation
 
-**Objective**: Create a reusable base image with all system dependencies
+**Objective**: Create a reusable base image with runtime + build dependencies
 
 ```bash
-# Base with custom password and core packages
+# Base image with runtime and build dependencies
 sudo ./custom-pi-imager.sh \
+    --mode=base \
     --baseimage=./2025-10-01-raspios-bookworm-arm64-lite.img.xz \
     --output=/tmp/pi-base \
     --password=brb0x \
     --extend-size-mb=1000 \
-    --package-list=./package-list.txt
+    --runtime-package=./runtime-deps.txt \
+    --builddep-package=./build-deps.txt
 ```
 
 **What happens**:
 1. Extracts Raspberry Pi OS Lite (minimal, no desktop)
-2. Extends image by 1GB for packages and future tools
+2. Extends image by 1GB for packages and future compilations
 3. Sets user `pi` password to `brb0x`
-4. Installs hardware interface libraries and development tools (see [package-list.txt](../package-list.txt))
+4. Installs **runtime packages** (hardware libraries, tools - kept in final image)
+5. Installs **build dependencies** (cmake, g++, make - will be purged in incremental stage)
 
-**Installed Packages** (`package-list.txt`):
+**Runtime Packages** ([runtime-deps.txt](../runtime-deps.txt)):
 ```txt
 # Network discovery and mDNS
 avahi-daemon          # Enables raspberrypi.local hostname
@@ -340,6 +443,15 @@ libcurl4-openssl-dev  # cURL with OpenSSL
 nlohmann-json3-dev    # Modern C++ JSON library
 ```
 
+**Build Dependencies** ([build-deps.txt](../build-deps.txt)):
+```txt
+# Build tools (will be purged in incremental mode)
+cmake
+g++
+make
+git
+```
+
 **Output**: `/tmp/pi-base/2025-10-01-raspios-bookworm-arm64-lite.img`
 
 **Preserve the base**:
@@ -354,68 +466,85 @@ md5sum ./2025-10-01-raspios-bookworm-arm64-lite-base.img.xz > base-image.md5
 
 ### Stage 2: Incremental Customization
 
-**Objective**: Add custom application and hardware-specific configuration to the base
+**Objective**: Compile applications from source and configure system
 
-#### Option A: Pre-built Binaries (Original Method)
 ```bash
-# Incremental (keeps brb0x password from base)
+# Incremental: Compile from source + configure + purge build deps
 sudo ./custom-pi-imager.sh \
+    --mode=incremental \
     --baseimage=./2025-10-01-raspios-bookworm-arm64-lite-base.img.xz \
     --output=/tmp/pi-custom \
-    --micropanel-source=./micropanel \
-    --configure-script=./post-install.sh
-```
-
-**What happens**:
-1. Uses previously created base image (no re-installation of packages)
-2. Preserves `brb0x` password from base (no `--password` flag)
-3. Copies pre-built `micropanel` application to `/home/pi/micropanel`
-4. Runs [post-install.sh](../post-install.sh:1-30) for hardware configuration
-
-#### Option B: Compile from Source (NEW - Using Setup Hook)
-```bash
-# Compile micropanel from GitHub source
-sudo ./custom-pi-imager.sh \
-    --baseimage=./2025-10-01-raspios-bookworm-arm64-lite-base.img.xz \
-    --output=/tmp/pi-custom \
+    --builddep-package=./build-deps.txt \
     --setup-hook=./micropanel-setup-hook.sh \
-    --configure-script=./post-install.sh
+    --post-build-script=./finalize.sh
 ```
 
 **What happens**:
-1. Uses previously created base image (packages already installed)
-2. Preserves `brb0x` password from base
-3. Runs [micropanel-setup-hook.sh](../micropanel-setup-hook.sh) in chroot:
-   - Installs build dependencies (cmake, g++, make, git)
+1. Uses previously created base image (runtime + build deps already installed)
+2. Preserves `brb0x` password from base (inherited automatically)
+3. Runs [micropanel-setup-hook.sh](../micropanel-setup-hook.sh) in ARM64 chroot:
    - Clones https://github.com/hackboxguy/micropanel.git
-   - Compiles for ARM64 via QEMU
+   - Compiles with cmake → make → make install (via QEMU)
    - Installs to `/home/pi/micropanel`
-   - **Removes build dependencies** (keeps image clean)
-4. Runs [post-install.sh](../post-install.sh:1-30) for hardware configuration
+   - Configures systemd service, hardware (I2C, UART)
+4. Runs [finalize.sh](../finalize.sh) for system-wide configuration (if provided)
+5. **Automatically purges** build dependencies (cmake, g++, make, git) based on `build-deps.txt`
 
-**Post-Install Configuration** (`post-install.sh`):
+**Setup Hook Example** ([micropanel-setup-hook.sh](../micropanel-setup-hook.sh)):
 
 ```bash
 #!/bin/bash
 set -e
 
-# 1. Network buffer tuning for high-throughput applications
-update_sysctl "net.core.rmem_max" "26214400"      # 25MB receive buffer
-update_sysctl "net.core.wmem_max" "26214400"      # 25MB send buffer
-update_sysctl "net.core.rmem_default" "1310720"   # 1.25MB default receive
-update_sysctl "net.core.wmem_default" "1310720"   # 1.25MB default send
+update_sysctl() {
+    local key=$1
+    local value=$2
+    echo "${key} = ${value}" >> /etc/sysctl.conf
+}
 
-# 2. Enable micropanel systemd service (auto-start on boot)
-if [ "$MICROPANEL_INSTALLED" = "true" ]; then
-    systemctl enable /home/pi/micropanel/micropanel.service
-    cp /home/pi/micropanel/configs/config.txt /boot/firmware/
-fi
+# [1/5] Install build dependencies (no-op if already in base)
+apt-get install -y cmake g++ make git
 
-# 3. Disable console on UART (free up UART for hardware communication)
+# [2/5] Clone micropanel from GitHub
+cd /tmp
+git clone https://github.com/hackboxguy/micropanel.git
+cd micropanel/build
+
+# [3/5] Configure CMake
+cmake -DCMAKE_INSTALL_PREFIX=/home/pi/micropanel \
+      -DINSTALL_SYSTEMD_SERVICE=ON \
+      -DSYSTEMD_UNITFILE_ARGS="-a -i gpio -s /dev/i2c-3" ..
+
+# [4/5] Build (parallel compilation)
+make -j$(nproc)
+
+# [5/5] Install
+make install
+chown -R 1000:1000 /home/pi/micropanel
+
+###### Finalize micropanel installation ######
+# Update sysctl settings
+update_sysctl "net.core.rmem_max" "26214400"      # 25MB
+update_sysctl "net.core.wmem_max" "26214400"
+
+# Resolve config paths
+cp /home/pi/micropanel/etc/micropanel/config.json \
+   /home/pi/micropanel/etc/micropanel/config-temp.json
+/home/pi/micropanel/usr/bin/update-config-path.sh \
+   --path=/home/pi/micropanel \
+   --output=/home/pi/micropanel/etc/micropanel/config.json \
+   --input=/home/pi/micropanel/etc/micropanel/config-temp.json
+
+# Enable service
+systemctl enable /home/pi/micropanel/lib/systemd/system/micropanel.service
+
+# Configure hardware
+cp /home/pi/micropanel/usr/share/micropanel/configs/config.txt /boot/firmware/
 sed -i 's/^console=serial0,115200 //' /boot/firmware/cmdline.txt
-
-# 4. Load I2C kernel module on boot
 echo 'i2c-dev' > /etc/modules-load.d/i2c.conf
+
+# Cleanup source (build deps purged automatically by main script)
+rm -rf /tmp/micropanel
 ```
 
 **Hardware Optimizations**:
@@ -539,14 +668,15 @@ sudo ./custom-pi-imager.sh \
     --package-list=./package-list.txt
 ```
 
-## Setup Hook vs Configure Script
+## Setup Hook vs Post-Build Script
 
 The tool supports two types of customization scripts with different purposes:
 
 ### Setup Hook (`--setup-hook`)
 **Purpose**: Build and install custom applications from source
-**Execution**: Runs in chroot environment (ARM64 via QEMU)
+**Execution**: Runs in chroot environment (ARM64 via QEMU) during incremental mode
 **When to use**: Compile code, install applications, build from git
+**Multiple allowed**: Yes - you can specify multiple `--setup-hook` arguments
 
 **Environment Variables**:
 - `MOUNT_POINT`: Root filesystem mount point
@@ -558,99 +688,122 @@ The tool supports two types of customization scripts with different purposes:
 #!/bin/bash
 set -e
 
-# Install build dependencies
-apt-get install -y cmake g++ make git
-
+# Build dependencies already installed in base mode
 # Clone and build
 git clone https://github.com/hackboxguy/micropanel.git /tmp/mp
 cd /tmp/mp/build
 cmake -DCMAKE_INSTALL_PREFIX=/home/pi/micropanel ..
 make -j$(nproc) && make install
+chown -R 1000:1000 /home/pi/micropanel
 
-# Cleanup build dependencies
-apt-get purge -y cmake g++ make git
-apt-get autoremove -y
+# Configure systemd, hardware
+systemctl enable /home/pi/micropanel/lib/systemd/system/micropanel.service
+cp /home/pi/micropanel/usr/share/micropanel/configs/config.txt /boot/firmware/
+echo 'i2c-dev' > /etc/modules-load.d/i2c.conf
+
+# Cleanup source (build deps purged automatically by main script)
+rm -rf /tmp/mp
 ```
 
 **Key Features**:
-- Direct apt-get access (install/purge packages)
+- Build dependencies already installed (from base mode)
 - Native ARM64 compilation via QEMU
 - Can clone from git repositories
-- Automatic cleanup to avoid image bloat
+- **No manual purge needed** - main script auto-purges build deps after all hooks complete
 
-### Configure Script (`--configure-script`)
-**Purpose**: System-wide configuration (networking, hardware, services)
-**Execution**: Runs in chroot after setup hook completes
-**When to use**: Enable services, configure hardware, tune system settings
+### Post-Build Script (`--post-build-script`)
+**Purpose**: System-wide configuration (networking, static IP, additional services)
+**Execution**: Runs in chroot after all setup hooks complete (incremental mode only)
+**When to use**: Additional system configuration not handled by setup hooks
 
 **Environment Variables**:
 - `MOUNT_POINT`: Root filesystem mount point
 - `PI_PASSWORD`: User password
-- `MICROPANEL_INSTALLED`: "true" or "false"
 - `IMAGE_WORK_DIR`: Working directory path
 
-**Example: [post-install.sh](../post-install.sh)**
+**Example: finalize.sh**
 ```bash
 #!/bin/bash
 set -e
 
-# Tune network buffers
-echo "net.core.rmem_max = 26214400" >> /etc/sysctl.conf
+# Additional network tuning
+echo "net.ipv4.tcp_window_scaling = 1" >> /etc/sysctl.conf
 
-# Enable service
-if [ "$MICROPANEL_INSTALLED" = "true" ]; then
-    systemctl enable /home/pi/micropanel/micropanel.service
-fi
+# Configure static IP
+cat >> /etc/dhcpcd.conf <<EOF
+interface eth0
+static ip_address=192.168.1.100/24
+static routers=192.168.1.1
+EOF
 
-# Configure hardware
-echo 'i2c-dev' > /etc/modules-load.d/i2c.conf
+# Set hostname
+echo "pi-device-001" > /etc/hostname
 ```
 
-### Execution Order
+### Execution Order (Incremental Mode)
 ```
-1. install_packages (base packages from package-list.txt)
-2. copy_micropanel (if --micropanel-source provided)
-3. run_setup_hook (if --setup-hook provided) ← Build/compile apps
-4. configure_system (if --configure-script provided) ← System config
+1. install_packages    → SKIPPED (already in base)
+2. run_setup_hooks     → Execute all --setup-hook scripts
+3. run_post_build_script → Execute --post-build-script
+4. purge_build_dependencies → Auto-purge build deps from --builddep-package
 ```
 
 ### When to Use Which?
 
 | Task | Use |
 |------|-----|
-| Compile C++ application | `--setup-hook` |
-| Install Python package with pip | `--setup-hook` |
+| Compile C++ application from GitHub | `--setup-hook` |
+| Build Rust/Go/Python app from source | `--setup-hook` |
 | Clone git repository and build | `--setup-hook` |
-| Enable systemd service | `--configure-script` |
-| Configure network (static IP, WiFi) | `--configure-script` |
-| Tune sysctl parameters | `--configure-script` |
-| Enable hardware (I2C, SPI, UART) | `--configure-script` |
-| Install system-wide configuration files | `--configure-script` |
+| Enable systemd service for built app | `--setup-hook` (same script) |
+| Configure hardware (I2C, SPI, UART) for app | `--setup-hook` (same script) |
+| Additional network configuration | `--post-build-script` |
+| Configure static IP / WiFi | `--post-build-script` |
+| Additional sysctl tuning | `--post-build-script` |
+| Install system-wide config files | `--post-build-script` |
+
+**Best Practice**: Include hardware/service configuration in the same `--setup-hook` script that builds the application. Use `--post-build-script` only for additional system-wide configuration not tied to a specific application.
 
 ### Both Can Be Used Together
 ```bash
 sudo ./custom-pi-imager.sh \
+    --mode=incremental \
     --baseimage=base.img.xz \
     --output=/tmp/custom \
-    --setup-hook=./build-app.sh \      # Build application
-    --configure-script=./configure.sh  # Configure system
+    --builddep-package=./build-deps.txt \
+    --setup-hook=./micropanel-build.sh \  # Build + configure micropanel
+    --setup-hook=./logger-build.sh \      # Build + configure data logger
+    --post-build-script=./finalize.sh     # System-wide final config
 ```
 
 ## File Formats
 
-### Package List File
+### Runtime Package File (runtime-deps.txt)
 ```bash
-# Core utilities
-vim
-git
-htop
-
-# Development tools
-python3-pip
-nodejs
-npm
+# Runtime dependencies (kept in final image)
+avahi-daemon
+avahi-utils
+i2c-tools
+iperf3
+libcurl4-openssl-dev
+libi2c-dev
+nlohmann-json3-dev
 
 # Empty lines and comments ignored
+```
+
+### Build Dependency File (build-deps.txt)
+```bash
+# Build tools (purged after compilation in incremental mode)
+cmake
+g++
+make
+git
+
+# Can also include language-specific build tools
+# python3-dev
+# cargo
+# golang-go
 ```
 
 ### Custom Configuration Script
@@ -1254,35 +1407,40 @@ journalctl -u micropanel -f
 
 ### What This Tool Does
 
-The `custom-pi-imager.sh` script automates the creation of production-ready Raspberry Pi 4 SD card images with:
+The `custom-pi-imager.sh` script automates the creation of production-ready Raspberry Pi 4 SD card images using a **mode-based two-stage workflow**:
 
-1. **System Layer**: Pre-installed packages, configured users, SSH access
-2. **Application Layer**: Custom software with systemd services
-3. **Hardware Layer**: I2C, UART, SPI, network tuning
+1. **Base Mode**: Pre-install runtime packages + build dependencies
+2. **Incremental Mode**: Compile applications from source + auto-purge build tools
+3. **Result**: Clean images with zero build dependency bloat
 
-### Why Two-Stage Build?
+### Why Mode-Based Two-Stage Build?
 
 | Need | Solution |
 |------|----------|
 | **Fast iteration** | Base image cached, only rebuild application (5 min vs 15 min) |
-| **Multiple variants** | One base → sensor image, display image, gateway image |
+| **Zero bloat** | Build tools (cmake, g++, make) auto-purged after compilation |
+| **Multiple variants** | One base → multiple applications (sensor, display, gateway) |
+| **Network efficiency** | Build deps downloaded once in base, reused across builds |
 | **Dependency stability** | Package versions locked in base, app versions independent |
-| **Reduced risk** | Test base once, iterate on application safely |
+| **Clear workflow** | Required `--mode` argument prevents user confusion |
 
 ### Key Technologies
 
+- **Mode-Based Architecture**: Explicit base vs incremental separation
+- **Dual-Purpose Packages**: Install in base, purge in incremental (same file)
 - **SDM**: Raspberry Pi image manager (resize, customize, plugins)
-- **QEMU**: ARM64 emulation on x86_64 (run ARM binaries natively)
-- **Chroot**: Isolated environment for package installation
-- **Loop devices**: Mount images as block devices for modification
+- **QEMU**: ARM64 emulation on x86_64 (compile natively from source)
+- **Generic Setup Hooks**: Multiple hooks for building different applications
+- **Auto-Purge**: Automatic cleanup of build dependencies
 
 ### Production Use Case
 
 This tool is designed for embedded systems developers who need to:
-- Distribute pre-configured Pi images to customers
-- Deploy fleet of Pis with identical configuration
-- Test hardware applications without manual setup
-- Version control entire system state (packages + config + app)
+- **Compile from source**: Build applications from GitHub within the image
+- **Distribute clean images**: Zero build dependency bloat in final image
+- **Deploy fleet of Pis**: Identical configuration, versioned base images
+- **Network efficiency**: Download build tools once, compile multiple apps
+- **Version control**: Separate base (system) and application layers
 
 ### Typical Hardware Integrations
 
@@ -1296,29 +1454,42 @@ Based on the package list and configuration:
 
 | File | Purpose | When to Edit |
 |------|---------|--------------|
-| [custom-pi-imager.sh](../custom-pi-imager.sh) | Main build script | Adding features, fixing bugs |
-| [package-list.txt](../package-list.txt) | System packages | New dependencies, libraries |
-| [post-install.sh](../post-install.sh) | Hardware config | UART, I2C, services, networking |
-| `micropanel/` | Your application | Application code changes |
+| [custom-pi-imager.sh](../custom-pi-imager.sh) | Main build script (mode-based) | Adding features, fixing bugs |
+| [runtime-deps.txt](../runtime-deps.txt) | Runtime packages (kept in image) | New library dependencies |
+| [build-deps.txt](../build-deps.txt) | Build tools (auto-purged) | New compiler/build tool needs |
+| [micropanel-setup-hook.sh](../micropanel-setup-hook.sh) | Compile micropanel from GitHub | Application build process |
+| [finalize.sh](../finalize.sh) | System-wide config (optional) | Network, static IP, etc. |
 
 ### Common Workflows
 
 ```bash
-# Initial setup (once)
-sudo ./custom-pi-imager.sh --baseimage=raspios.img.xz --output=/tmp/base \
-  --password=mypass --extend-size-mb=1000 --package-list=package-list.txt
+# Stage 1: Create base (once, or when dependencies change)
+sudo ./custom-pi-imager.sh --mode=base \
+  --baseimage=raspios.img.xz --output=/tmp/base \
+  --password=mypass --extend-size-mb=1000 \
+  --runtime-package=runtime-deps.txt \
+  --builddep-package=build-deps.txt
 
-# Develop application (iterative)
-# 1. Edit micropanel code
+# Compress base for reuse
+xz -k -9 /tmp/base/*.img
+
+# Stage 2: Develop application (iterative)
+# 1. Edit setup hook script (e.g., micropanel-setup-hook.sh)
 # 2. Rebuild from base:
-sudo ./custom-pi-imager.sh --baseimage=base.img.xz --output=/tmp/test \
-  --micropanel-source=./micropanel --configure-script=post-install.sh
+sudo ./custom-pi-imager.sh --mode=incremental \
+  --baseimage=/tmp/base/*.img.xz --output=/tmp/test \
+  --builddep-package=build-deps.txt \
+  --setup-hook=./micropanel-setup-hook.sh \
+  --post-build-script=./finalize.sh
 # 3. Test on Pi
 # 4. Repeat
 
 # Production release
-sudo ./custom-pi-imager.sh --baseimage=base.img.xz --output=/tmp/release-v1.2 \
-  --micropanel-source=./micropanel --configure-script=post-install.sh
+sudo ./custom-pi-imager.sh --mode=incremental \
+  --baseimage=/tmp/base/*.img.xz --output=/tmp/release-v1.2 \
+  --builddep-package=build-deps.txt \
+  --setup-hook=./micropanel-setup-hook.sh \
+  --post-build-script=./finalize.sh
 xz -k -9 /tmp/release-v1.2/*.img  # Compress for distribution
 ```
 
@@ -1346,7 +1517,7 @@ This script is designed for Arch Linux hosts and optimized for Raspberry Pi OS D
 
 ---
 
-**Document Version**: 2.0
-**Last Updated**: 2025-10-25
+**Document Version**: 3.0 (Mode-Based Architecture)
+**Last Updated**: 2025-10-26
 **Compatible With**: Raspberry Pi OS (Bookworm/Bullseye), Raspberry Pi 4
-**Example Files**: Real production usage with [package-list.txt](../package-list.txt) and [post-install.sh](../post-install.sh)
+**Example Files**: Real production usage with [runtime-deps.txt](../runtime-deps.txt), [build-deps.txt](../build-deps.txt), and [micropanel-setup-hook.sh](../micropanel-setup-hook.sh)

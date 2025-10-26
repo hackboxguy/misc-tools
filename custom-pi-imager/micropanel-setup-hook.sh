@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+update_sysctl() {
+    local key=$1
+    local value=$2
+    echo "${key} = ${value}" >> /etc/sysctl.conf
+}
+
 echo "======================================"
 echo "  Micropanel Setup Hook"
 echo "======================================"
@@ -15,19 +21,19 @@ echo "Running inside chroot environment"
 echo "Building micropanel from source..."
 echo ""
 
-# Install build dependencies
-echo "[1/6] Installing build dependencies..."
+# Install build dependencies (no-op if already installed)
+echo "[1/5] Installing build dependencies..."
 apt-get update -qq
 apt-get install -y cmake g++ make git
 
 # Clone micropanel repository
-echo "[2/6] Cloning micropanel from GitHub..."
+echo "[2/5] Cloning micropanel from GitHub..."
 cd /tmp
 git clone https://github.com/hackboxguy/micropanel.git
 cd micropanel
 
 # Create build directory and configure micropanel
-echo "[3/6] Configuring CMake..."
+echo "[3/5] Configuring CMake..."
 mkdir -p build && cd build
 cmake -DCMAKE_INSTALL_PREFIX=/home/pi/micropanel \
       -DCMAKE_BUILD_TYPE=Release \
@@ -41,26 +47,45 @@ cmake -DCMAKE_INSTALL_PREFIX=/home/pi/micropanel \
 
 
 # Build micropanel
-echo "[4/6] Building micropanel (this may take a few minutes)..."
+echo "[4/5] Building micropanel (this may take a few minutes)..."
 make -j$(nproc) > /dev/null 2>&1
 
 # Install micropanel
-echo "[5/6] Installing micropanel to /home/pi/micropanel..."
+echo "[5/5] Installing micropanel to /home/pi/micropanel..."
 make install > /dev/null
 
 # Set correct ownership (pi user is uid:gid 1000:1000)
 chown -R 1000:1000 /home/pi/micropanel
 
+######finalize the micropanel installation######
+echo ""
+echo "Finalizing micropanel installation..."
+# Update sysctl settings
+update_sysctl "net.core.rmem_max" "26214400"
+update_sysctl "net.core.wmem_max" "26214400"
+update_sysctl "net.core.rmem_default" "1310720"
+update_sysctl "net.core.wmem_default" "1310720"
+#update-config-path.sh cannot do inplace editing of config.json
+sync
+cp /home/pi/micropanel/etc/micropanel/config.json /home/pi/micropanel/etc/micropanel/config-temp.json
+#resolve $MICROPANEL_HOME
+/home/pi/micropanel/usr/bin/update-config-path.sh --path=/home/pi/micropanel --output=/home/pi/micropanel/etc/micropanel/config.json --input=/home/pi/micropanel/etc/micropanel/config-temp.json
+systemctl enable /home/pi/micropanel/lib/systemd/system/micropanel.service
+cp /home/pi/micropanel/usr/share/micropanel/configs/config.txt /boot/firmware/
+# Enable high-speed UART
+sed -i 's/^console=serial0,115200 //' /boot/firmware/cmdline.txt
+# Enable i2c module
+echo 'i2c-dev' > /etc/modules-load.d/i2c.conf
+################################################
+
+
 # Cleanup build artifacts and source
-echo "[6/6] Cleaning up..."
+echo "Cleaning up build artifacts..."
 cd /
 rm -rf /tmp/micropanel
 
-# Remove build dependencies
-echo "Removing build dependencies..."
-apt-get purge -y cmake g++ make git > /dev/null 2>&1
-apt-get autoremove -y > /dev/null 2>&1
-apt-get clean
+# NOTE: Build dependencies will be purged by main script
+# No apt-get purge here!
 
 echo ""
 echo "======================================"
@@ -72,5 +97,5 @@ echo "  - micropanel (main daemon)"
 echo "  - patch-generator"
 echo "  - launcher-client"
 echo ""
-echo "Note: Service enablement handled by post-install.sh"
+echo "Note: Build deps purged by main script"
 echo "======================================"

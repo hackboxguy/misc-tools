@@ -2,19 +2,17 @@
 set -e
 
 # Configuration
+MODE=""
 PI_PASSWORD=""
 EXTEND_SIZE_MB=""
 IMAGE_SOURCE=""
 IMAGE_NAME=""
 WORK_DIR=""
 MOUNT_POINT=""
-SOURCE_FILES_HOST=""
-SCP_PASSWORD=""
-PACKAGE_LIST_FILE=""
-CONFIGURE_SCRIPT=""
-SETUP_HOOK=""
-SKIP_MICROPANEL=false
-SKIP_PACKAGES=false
+RUNTIME_PACKAGE=""
+BUILDDEP_PACKAGE=""
+POST_BUILD_SCRIPT=""
+SETUP_HOOKS=()
 
 # Colors
 RED='\033[0;31m'
@@ -33,35 +31,46 @@ show_usage() {
 Raspberry Pi Image Customization Script for Arch Linux
 
 Usage:
-  sudo $0 --baseimage=PATH --output=DIR [OPTIONS]
+  sudo $0 --mode=MODE --baseimage=PATH --output=DIR [OPTIONS]
 
 Mandatory Arguments:
+  --mode=MODE               Build mode: 'base' or 'incremental'
   --baseimage=PATH          Path to base Raspberry Pi OS image (.img.xz)
   --output=DIR              Output directory for image customization
+  --builddep-package=FILE   Build dependencies (use 'none' if not needed)
 
-Optional Arguments:
-  --password=PASS           Password for 'pi' user (default: keep existing/raspberry)
-  --extend-size-mb=SIZE     Image extension size in MB (default: 0, no extension)
-  --package-list=FILE       Path to package list file (one per line, # for comments)
-  --micropanel-source=SRC   Micropanel source (user@host:/path or /local/path)
-  --scp-password=PASS       SCP password for remote micropanel source
-  --setup-hook=FILE         Setup hook script (runs in chroot for custom builds)
+Optional Arguments (Base Mode):
+  --password=PASS           Password for 'pi' user (default: keep existing)
+  --extend-size-mb=SIZE     Image extension size in MB (default: 0)
+  --runtime-package=FILE    Runtime dependencies
+
+Optional Arguments (Incremental Mode):
+  --setup-hook=FILE         Setup hook script (multiple allowed, runs in chroot)
                             Receives: MOUNT_POINT, PI_PASSWORD, IMAGE_WORK_DIR
-  --configure-script=FILE   Custom configuration script (runs in chroot)
-                            Receives: MOUNT_POINT, PI_PASSWORD, MICROPANEL_INSTALLED
+  --post-build-script=FILE  Post-build configuration script (runs in chroot)
+                            Receives: MOUNT_POINT, PI_PASSWORD, IMAGE_WORK_DIR
+
+Optional Arguments (Both Modes):
   --help, -h                Show this help
 
 Examples:
-  # Minimal (keeps default raspberry password)
-  sudo $0 --baseimage=./image.img.xz --output=/tmp/pi
+  # Stage 1: Base image with dependencies
+  sudo $0 --mode=base --baseimage=./raspios.img.xz --output=/tmp/base \\
+    --password=brb0x --extend-size-mb=1000 \\
+    --runtime-package=./runtime-deps.txt \\
+    --builddep-package=./build-deps.txt
 
-  # Base image with custom password
-  sudo $0 --baseimage=./image.img.xz --output=/tmp/pi \\
-    --password=mypass --extend-size-mb=1000 --package-list=./packages.txt
+  # Stage 2: Incremental build with compilation and purge
+  sudo $0 --mode=incremental --baseimage=./base.img.xz --output=/tmp/custom \\
+    --builddep-package=./build-deps.txt \\
+    --setup-hook=./micropanel-hook.sh \\
+    --setup-hook=./test-daemon-hook.sh \\
+    --post-build-script=./finalize.sh
 
-  # Incremental build (keeps base image password)
-  sudo $0 --baseimage=./base.img.xz --output=/tmp/pi \\
-    --micropanel-source=./mp --configure-script=./post-install.sh
+  # Base mode with no build dependencies
+  sudo $0 --mode=base --baseimage=./raspios.img.xz --output=/tmp/base \\
+    --runtime-package=./runtime-deps.txt \\
+    --builddep-package=none
 
 EOF
     exit 0
@@ -72,28 +81,48 @@ parse_arguments() {
 
     for arg in "$@"; do
         case $arg in
+            --mode=*) MODE="${arg#*=}" ;;
             --baseimage=*) IMAGE_SOURCE="${arg#*=}" ;;
             --output=*) WORK_DIR="${arg#*=}" ;;
             --password=*) PI_PASSWORD="${arg#*=}" ;;
             --extend-size-mb=*) EXTEND_SIZE_MB="${arg#*=}" ;;
-            --micropanel-source=*) SOURCE_FILES_HOST="${arg#*=}" ;;
-            --scp-password=*) SCP_PASSWORD="${arg#*=}" ;;
-            --package-list=*) PACKAGE_LIST_FILE="${arg#*=}" ;;
-            --setup-hook=*) SETUP_HOOK="${arg#*=}" ;;
-            --configure-script=*) CONFIGURE_SCRIPT="${arg#*=}" ;;
+            --runtime-package=*) RUNTIME_PACKAGE="${arg#*=}" ;;
+            --builddep-package=*) BUILDDEP_PACKAGE="${arg#*=}" ;;
+            --setup-hook=*) SETUP_HOOKS+=("${arg#*=}") ;;
+            --post-build-script=*) POST_BUILD_SCRIPT="${arg#*=}" ;;
             --help|-h) show_usage ;;
             *) error "Unknown argument: $arg\nUse --help for usage" ;;
         esac
     done
 
+    # Validate required arguments
     local missing=()
+    [ -z "$MODE" ] && missing+=("--mode")
     [ -z "$IMAGE_SOURCE" ] && missing+=("--baseimage")
     [ -z "$WORK_DIR" ] && missing+=("--output")
-    [ ${#missing[@]} -gt 0 ] && error "Missing: ${missing[*]}\nUse --help"
-    
-    # Set defaults if not provided
+    [ -z "$BUILDDEP_PACKAGE" ] && missing+=("--builddep-package")
+    [ ${#missing[@]} -gt 0 ] && error "Missing required arguments: ${missing[*]}\nUse --help for usage"
+
+    # Validate mode value
+    case "$MODE" in
+        base|incremental) ;;
+        *)
+            echo -e "${RED}Error: Invalid --mode value: '$MODE'${NC}"
+            echo "Must be 'base' or 'incremental'"
+            echo ""
+            show_usage
+            ;;
+    esac
+
+    # Handle 'none' keyword for builddep-package
+    if [ "$BUILDDEP_PACKAGE" = "none" ]; then
+        info "No build dependencies specified"
+        BUILDDEP_PACKAGE=""
+    fi
+
+    # Set defaults
     [ -z "$EXTEND_SIZE_MB" ] && EXTEND_SIZE_MB=0
-    [ -z "$PI_PASSWORD" ] && PI_PASSWORD="" && info "No password specified, keeping existing password"
+    [ -z "$PI_PASSWORD" ] && info "No password specified, keeping existing password"
 
     # Convert to absolute paths
     if [[ "$IMAGE_SOURCE" != /* ]]; then
@@ -109,43 +138,104 @@ parse_arguments() {
             WORK_DIR="$(pwd)/$WORK_DIR"
         fi
     fi
-    
-    if [ -n "$SOURCE_FILES_HOST" ] && [[ "$SOURCE_FILES_HOST" != *@*:* ]] && [[ "$SOURCE_FILES_HOST" != /* ]]; then
-        SOURCE_FILES_HOST="$(cd "$(dirname "$SOURCE_FILES_HOST")" 2>/dev/null && pwd)/$(basename "$SOURCE_FILES_HOST")" || SOURCE_FILES_HOST="$(pwd)/$SOURCE_FILES_HOST"
-    fi
-    
-    if [ -n "$PACKAGE_LIST_FILE" ] && [[ "$PACKAGE_LIST_FILE" != /* ]]; then
-        PACKAGE_LIST_FILE="$(cd "$(dirname "$PACKAGE_LIST_FILE")" 2>/dev/null && pwd)/$(basename "$PACKAGE_LIST_FILE")" || PACKAGE_LIST_FILE="$(pwd)/$PACKAGE_LIST_FILE"
-    fi
-    
-    if [ -n "$CONFIGURE_SCRIPT" ] && [[ "$CONFIGURE_SCRIPT" != /* ]]; then
-        CONFIGURE_SCRIPT="$(cd "$(dirname "$CONFIGURE_SCRIPT")" 2>/dev/null && pwd)/$(basename "$CONFIGURE_SCRIPT")" || CONFIGURE_SCRIPT="$(pwd)/$CONFIGURE_SCRIPT"
+
+    # Normalize runtime-package path
+    if [ -n "$RUNTIME_PACKAGE" ] && [[ "$RUNTIME_PACKAGE" != /* ]]; then
+        RUNTIME_PACKAGE="$(cd "$(dirname "$RUNTIME_PACKAGE")" 2>/dev/null && pwd)/$(basename "$RUNTIME_PACKAGE")" || RUNTIME_PACKAGE="$(pwd)/$RUNTIME_PACKAGE"
     fi
 
-    if [ -n "$SETUP_HOOK" ] && [[ "$SETUP_HOOK" != /* ]]; then
-        SETUP_HOOK="$(cd "$(dirname "$SETUP_HOOK")" 2>/dev/null && pwd)/$(basename "$SETUP_HOOK")" || SETUP_HOOK="$(pwd)/$SETUP_HOOK"
+    # Normalize builddep-package path (skip if empty after 'none' handling)
+    if [ -n "$BUILDDEP_PACKAGE" ] && [[ "$BUILDDEP_PACKAGE" != /* ]]; then
+        BUILDDEP_PACKAGE="$(cd "$(dirname "$BUILDDEP_PACKAGE")" 2>/dev/null && pwd)/$(basename "$BUILDDEP_PACKAGE")" || BUILDDEP_PACKAGE="$(pwd)/$BUILDDEP_PACKAGE"
+    fi
+
+    # Normalize setup-hooks paths (array)
+    for i in "${!SETUP_HOOKS[@]}"; do
+        if [[ "${SETUP_HOOKS[$i]}" != /* ]]; then
+            SETUP_HOOKS[$i]="$(cd "$(dirname "${SETUP_HOOKS[$i]}")" 2>/dev/null && pwd)/$(basename "${SETUP_HOOKS[$i]}")" || SETUP_HOOKS[$i]="$(pwd)/${SETUP_HOOKS[$i]}"
+        fi
+    done
+
+    # Normalize post-build-script path
+    if [ -n "$POST_BUILD_SCRIPT" ] && [[ "$POST_BUILD_SCRIPT" != /* ]]; then
+        POST_BUILD_SCRIPT="$(cd "$(dirname "$POST_BUILD_SCRIPT")" 2>/dev/null && pwd)/$(basename "$POST_BUILD_SCRIPT")" || POST_BUILD_SCRIPT="$(pwd)/$POST_BUILD_SCRIPT"
     fi
 
     IMAGE_NAME="$(basename "$IMAGE_SOURCE")"
     IMAGE_NAME="${IMAGE_NAME%.xz}"
     MOUNT_POINT="${WORK_DIR}/mnt"
-    
-    [ -z "$SOURCE_FILES_HOST" ] && SKIP_MICROPANEL=true && warn "Micropanel installation will be skipped"
-    [ -z "$PACKAGE_LIST_FILE" ] && SKIP_PACKAGES=true && warn "Package installation will be skipped"
-    
+
+    # Mode-aware file validation
+    validate_files
+
     return 0
+}
+
+validate_files() {
+    log "Validating files..."
+
+    # Always validate base image
+    [ ! -f "$IMAGE_SOURCE" ] && error "Base image not found: $IMAGE_SOURCE"
+
+    # Mode-specific validation
+    if [ "$MODE" = "base" ]; then
+        # Base mode: validate runtime and builddep packages
+        [ -n "$RUNTIME_PACKAGE" ] && [ ! -f "$RUNTIME_PACKAGE" ] && error "Runtime package file not found: $RUNTIME_PACKAGE"
+        [ -n "$BUILDDEP_PACKAGE" ] && [ ! -f "$BUILDDEP_PACKAGE" ] && error "Build dependency file not found: $BUILDDEP_PACKAGE"
+
+        # Warn about ignored arguments
+        [ ${#SETUP_HOOKS[@]} -gt 0 ] && warn "Ignoring --setup-hook in base mode"
+        [ -n "$POST_BUILD_SCRIPT" ] && warn "Ignoring --post-build-script in base mode"
+    fi
+
+    if [ "$MODE" = "incremental" ]; then
+        # Incremental mode: validate builddep, hooks, post-build script
+        [ -n "$BUILDDEP_PACKAGE" ] && [ ! -f "$BUILDDEP_PACKAGE" ] && error "Build dependency file not found: $BUILDDEP_PACKAGE"
+
+        # Validate all setup hooks
+        for hook in "${SETUP_HOOKS[@]}"; do
+            [ ! -f "$hook" ] && error "Setup hook not found: $hook"
+        done
+
+        # Validate post-build script
+        [ -n "$POST_BUILD_SCRIPT" ] && [ ! -f "$POST_BUILD_SCRIPT" ] && error "Post-build script not found: $POST_BUILD_SCRIPT"
+
+        # Silent ignore for runtime-package (user might keep it in script)
+        # Warn about extend-size-mb
+        [ "$EXTEND_SIZE_MB" -gt 0 ] && warn "Cannot extend image size in incremental mode (ignoring)"
+    fi
+
+    log "File validation complete"
 }
 
 show_configuration() {
     info "Configuration:"
+    echo "  Mode:            ${MODE}"
     echo "  Base Image:      ${IMAGE_SOURCE}"
     echo "  Output Dir:      ${WORK_DIR}"
     echo "  Password:        $([ -z "$PI_PASSWORD" ] && echo "[KEEP EXISTING]" || echo "${PI_PASSWORD//?/*}")"
-    echo "  Extend Size:     $([ "$EXTEND_SIZE_MB" -eq 0 ] && echo "[NONE]" || echo "${EXTEND_SIZE_MB} MB")"
-    echo "  Package List:    $([ "$SKIP_PACKAGES" = true ] && echo "[SKIPPED]" || echo "${PACKAGE_LIST_FILE}")"
-    echo "  Micropanel:      $([ "$SKIP_MICROPANEL" = true ] && echo "[SKIPPED]" || echo "${SOURCE_FILES_HOST}")"
-    echo "  Setup Hook:      $([ -z "$SETUP_HOOK" ] && echo "[NONE]" || echo "${SETUP_HOOK}")"
-    echo "  Config Script:   $([ -z "$CONFIGURE_SCRIPT" ] && echo "[NONE]" || echo "${CONFIGURE_SCRIPT}")"
+
+    if [ "$MODE" = "base" ]; then
+        echo ""
+        echo "  Base Mode Settings:"
+        echo "  ├─ Extend Size:     $([ "$EXTEND_SIZE_MB" -eq 0 ] && echo "[NONE]" || echo "${EXTEND_SIZE_MB} MB")"
+        echo "  ├─ Runtime Pkgs:    $([ -z "$RUNTIME_PACKAGE" ] && echo "[NONE]" || echo "${RUNTIME_PACKAGE}")"
+        echo "  └─ Build Deps:      $([ -z "$BUILDDEP_PACKAGE" ] && echo "[NONE]" || echo "${BUILDDEP_PACKAGE}")"
+    fi
+
+    if [ "$MODE" = "incremental" ]; then
+        echo ""
+        echo "  Incremental Mode Settings:"
+        echo "  ├─ Build Deps:      $([ -z "$BUILDDEP_PACKAGE" ] && echo "[NONE]" || echo "${BUILDDEP_PACKAGE} [WILL PURGE]")"
+        echo "  ├─ Setup Hooks:     $([ ${#SETUP_HOOKS[@]} -eq 0 ] && echo "[NONE]" || echo "${#SETUP_HOOKS[@]} hook(s)")"
+        if [ ${#SETUP_HOOKS[@]} -gt 0 ]; then
+            for i in "${!SETUP_HOOKS[@]}"; do
+                echo "  │  $((i+1)). ${SETUP_HOOKS[$i]}"
+            done
+        fi
+        echo "  └─ Post-Build:      $([ -z "$POST_BUILD_SCRIPT" ] && echo "[NONE]" || echo "${POST_BUILD_SCRIPT}")"
+    fi
+
     echo ""
 }
 
@@ -164,18 +254,10 @@ check_prerequisites() {
     command -v sdm >/dev/null 2>&1 || error "sdm not found"
     info "SDM version: $(sdm --version 2>&1 | head -n1 | awk '{print $2}')"
     
-    for tool in unxz losetup mount umount chroot rsync; do
+    for tool in unxz losetup mount umount chroot; do
         command -v $tool >/dev/null 2>&1 || error "Missing: $tool"
     done
-    
-    if [ "$SKIP_MICROPANEL" = false ] && [[ "$SOURCE_FILES_HOST" == *@*:* ]]; then
-        command -v scp >/dev/null 2>&1 || error "Missing: scp"
-    fi
-    
-    if [ "$SKIP_MICROPANEL" = false ] && [ -n "$SCP_PASSWORD" ]; then
-        command -v sshpass >/dev/null 2>&1 || error "Install: sudo pacman -S sshpass"
-    fi
-    
+
     log "Prerequisites OK"
 }
 
@@ -296,89 +378,115 @@ set_user_password() {
 }
 
 install_packages() {
-    [ "$SKIP_PACKAGES" = true ] && info "Skipping packages" && return 0
-    log "Installing packages from: ${PACKAGE_LIST_FILE}"
-    [ ! -f "${PACKAGE_LIST_FILE}" ] && error "Not found: ${PACKAGE_LIST_FILE}"
-    local pkgs=$(grep -v '^#' "${PACKAGE_LIST_FILE}" | grep -v '^[[:space:]]*$' | tr '\n' ' ')
-    [ -z "$pkgs" ] && warn "No packages" && return 0
-    info "Packages: ${pkgs}"
+    # Only run in base mode
+    [ "$MODE" != "base" ] && info "Skipping package installation (incremental mode)" && return 0
+
+    local all_packages=""
+
+    # Add runtime packages
+    if [ -n "$RUNTIME_PACKAGE" ]; then
+        log "Reading runtime packages from: ${RUNTIME_PACKAGE}"
+        local runtime=$(grep -v '^#' "${RUNTIME_PACKAGE}" | grep -v '^[[:space:]]*$' | tr '\n' ' ')
+        all_packages+="$runtime "
+        info "Runtime packages: ${runtime}"
+    fi
+
+    # Add build dependencies
+    if [ -n "$BUILDDEP_PACKAGE" ]; then
+        log "Reading build dependencies from: ${BUILDDEP_PACKAGE}"
+        local builddeps=$(grep -v '^#' "${BUILDDEP_PACKAGE}" | grep -v '^[[:space:]]*$' | tr '\n' ' ')
+        all_packages+="$builddeps "
+        info "Build dependencies: ${builddeps}"
+    fi
+
+    [ -z "$all_packages" ] && info "No packages to install" && return 0
+
+    log "Installing packages..."
     chroot "${MOUNT_POINT}" /bin/bash <<CHROOT_EOF
 set -e
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y ${pkgs}
+DEBIAN_FRONTEND=noninteractive apt-get install -y ${all_packages}
 CHROOT_EOF
-    log "Packages installed"
+
+    log "Packages installed successfully"
 }
 
-copy_micropanel() {
-    [ "$SKIP_MICROPANEL" = true ] && info "Skipping micropanel" && return 0
-    log "Copying micropanel..."
-    local tmp="${WORK_DIR}/micropanel-temp"
-    mkdir -p "${tmp}"
-    
-    if [[ "$SOURCE_FILES_HOST" == *@*:* ]]; then
-        info "Downloading via SCP..."
-        if [ -n "$SCP_PASSWORD" ]; then
-            sshpass -p "$SCP_PASSWORD" scp -r "${SOURCE_FILES_HOST}" "${tmp}/" || error "SCP failed"
-        else
-            scp -r "${SOURCE_FILES_HOST}" "${tmp}/" || error "SCP failed"
-        fi
-    else
-        info "Copying local..."
-        [ ! -d "${SOURCE_FILES_HOST}" ] && [ ! -f "${SOURCE_FILES_HOST}" ] && error "Not found: ${SOURCE_FILES_HOST}"
-        cp -r "${SOURCE_FILES_HOST}" "${tmp}/" || error "Copy failed"
-    fi
-    
-    local src
-    [ -d "${tmp}/micropanel-install-dump" ] && src="${tmp}/micropanel-install-dump" || \
-        src=$(find "${tmp}" -mindepth 1 -maxdepth 1 -type d | head -n1)
-    [ -z "$src" ] && error "Micropanel dir not found"
-    
-    mkdir -p "${MOUNT_POINT}/home/pi"
-    cp -r "${src}" "${MOUNT_POINT}/home/pi/micropanel"
-    chown -R 1000:1000 "${MOUNT_POINT}/home/pi/micropanel"
-    log "Micropanel copied: $(du -sh ${MOUNT_POINT}/home/pi/micropanel | cut -f1)"
+run_setup_hooks() {
+    # Only run in incremental mode
+    [ "$MODE" != "incremental" ] && info "Skipping setup hooks (base mode)" && return 0
+
+    [ ${#SETUP_HOOKS[@]} -eq 0 ] && info "No setup hooks to run" && return 0
+
+    log "Running ${#SETUP_HOOKS[@]} setup hook(s)..."
+
+    for i in "${!SETUP_HOOKS[@]}"; do
+        local hook="${SETUP_HOOKS[$i]}"
+        log "[$((i+1))/${#SETUP_HOOKS[@]}] Running: ${hook}"
+
+        [ ! -x "$hook" ] && warn "Making executable..." && chmod +x "$hook"
+
+        export MOUNT_POINT="${MOUNT_POINT}"
+        export PI_PASSWORD="${PI_PASSWORD}"
+        export IMAGE_WORK_DIR="${WORK_DIR}"
+
+        local hook_name=$(basename "$hook")
+        cp "$hook" "${MOUNT_POINT}/tmp/${hook_name}"
+        chmod +x "${MOUNT_POINT}/tmp/${hook_name}"
+
+        info "Environment: MOUNT_POINT=${MOUNT_POINT}, IMAGE_WORK_DIR=${IMAGE_WORK_DIR}"
+        chroot "${MOUNT_POINT}" /bin/bash -c "cd /tmp && ./${hook_name}" || error "Setup hook failed: ${hook}"
+        rm -f "${MOUNT_POINT}/tmp/${hook_name}"
+
+        log "[$((i+1))/${#SETUP_HOOKS[@]}] Complete: ${hook}"
+    done
+
+    log "All setup hooks completed successfully"
 }
 
-run_setup_hook() {
-    [ -z "$SETUP_HOOK" ] && info "No setup hook, skipping" && return 0
-    log "Running setup hook: ${SETUP_HOOK}"
-    [ ! -f "${SETUP_HOOK}" ] && error "Not found: ${SETUP_HOOK}"
-    [ ! -x "${SETUP_HOOK}" ] && warn "Making executable..." && chmod +x "${SETUP_HOOK}"
+run_post_build_script() {
+    # Only run in incremental mode
+    [ "$MODE" != "incremental" ] && info "Skipping post-build script (base mode)" && return 0
+
+    [ -z "$POST_BUILD_SCRIPT" ] && info "No post-build script specified" && return 0
+    log "Running post-build script: ${POST_BUILD_SCRIPT}"
+    [ ! -f "${POST_BUILD_SCRIPT}" ] && error "Not found: ${POST_BUILD_SCRIPT}"
+    [ ! -x "${POST_BUILD_SCRIPT}" ] && warn "Making executable..." && chmod +x "${POST_BUILD_SCRIPT}"
 
     export MOUNT_POINT="${MOUNT_POINT}"
     export PI_PASSWORD="${PI_PASSWORD}"
     export IMAGE_WORK_DIR="${WORK_DIR}"
 
-    local sn=$(basename "${SETUP_HOOK}")
-    cp "${SETUP_HOOK}" "${MOUNT_POINT}/tmp/${sn}"
-    chmod +x "${MOUNT_POINT}/tmp/${sn}"
+    local script_name=$(basename "${POST_BUILD_SCRIPT}")
+    cp "${POST_BUILD_SCRIPT}" "${MOUNT_POINT}/tmp/${script_name}"
+    chmod +x "${MOUNT_POINT}/tmp/${script_name}"
 
     info "Environment: MOUNT_POINT=${MOUNT_POINT}, IMAGE_WORK_DIR=${IMAGE_WORK_DIR}"
-    chroot "${MOUNT_POINT}" /bin/bash -c "cd /tmp && ./${sn}" || error "Setup hook failed"
-    rm -f "${MOUNT_POINT}/tmp/${sn}"
-    log "Setup hook complete"
+    chroot "${MOUNT_POINT}" /bin/bash -c "cd /tmp && ./${script_name}" || error "Post-build script failed"
+    rm -f "${MOUNT_POINT}/tmp/${script_name}"
+    log "Post-build script complete"
 }
 
-configure_system() {
-    [ -z "$CONFIGURE_SCRIPT" ] && info "No configuration script, skipping" && return 0
-    log "Running: ${CONFIGURE_SCRIPT}"
-    [ ! -f "${CONFIGURE_SCRIPT}" ] && error "Not found: ${CONFIGURE_SCRIPT}"
-    [ ! -x "${CONFIGURE_SCRIPT}" ] && warn "Making executable..." && chmod +x "${CONFIGURE_SCRIPT}"
-    
-    export MOUNT_POINT="${MOUNT_POINT}"
-    export PI_PASSWORD="${PI_PASSWORD}"
-    export MICROPANEL_INSTALLED="$([ "$SKIP_MICROPANEL" = false ] && echo "true" || echo "false")"
-    export IMAGE_WORK_DIR="${WORK_DIR}"
-    
-    local sn=$(basename "${CONFIGURE_SCRIPT}")
-    cp "${CONFIGURE_SCRIPT}" "${MOUNT_POINT}/tmp/${sn}"
-    chmod +x "${MOUNT_POINT}/tmp/${sn}"
-    
-    info "Environment: MOUNT_POINT=${MOUNT_POINT}, MICROPANEL_INSTALLED=${MICROPANEL_INSTALLED}"
-    chroot "${MOUNT_POINT}" /bin/bash -c "cd /tmp && ./${sn}" || error "Script failed"
-    rm -f "${MOUNT_POINT}/tmp/${sn}"
-    log "Configuration complete"
+purge_build_dependencies() {
+    # Only run in incremental mode
+    [ "$MODE" != "incremental" ] && info "Skipping build dependency purge (base mode)" && return 0
+
+    [ -z "$BUILDDEP_PACKAGE" ] && info "No build dependencies to purge" && return 0
+
+    log "Purging build dependencies from: ${BUILDDEP_PACKAGE}"
+
+    local pkgs=$(grep -v '^#' "${BUILDDEP_PACKAGE}" | grep -v '^[[:space:]]*$' | tr '\n' ' ')
+    [ -z "$pkgs" ] && warn "Build dependency file is empty, nothing to purge" && return 0
+
+    info "Removing packages: ${pkgs}"
+
+    chroot "${MOUNT_POINT}" /bin/bash <<CHROOT_EOF
+set -e
+apt-get purge -y ${pkgs}
+apt-get autoremove -y
+apt-get clean
+CHROOT_EOF
+
+    log "Build dependencies purged successfully"
 }
 
 remove_qemu() {
@@ -416,14 +524,25 @@ show_summary() {
     echo "=================================="
     log "✓ Customization complete!"
     echo "=================================="
+    echo "Mode:  ${MODE}"
     echo "Image: ${WORK_DIR}/${IMAGE_NAME}"
     echo "Size:  $(du -h ${WORK_DIR}/${IMAGE_NAME} | cut -f1)"
     echo ""
     echo "Write to SD: sudo dd if=${WORK_DIR}/${IMAGE_NAME} of=/dev/sdX bs=8M status=progress"
     echo ""
     info "First boot will auto-expand root"
-    [ "$SKIP_PACKAGES" = true ] && warn "Packages NOT installed"
-    [ "$SKIP_MICROPANEL" = true ] && warn "Micropanel NOT installed"
+
+    if [ "$MODE" = "base" ]; then
+        [ -z "$RUNTIME_PACKAGE" ] && warn "No runtime packages installed"
+        [ -z "$BUILDDEP_PACKAGE" ] && warn "No build dependencies installed"
+    fi
+
+    if [ "$MODE" = "incremental" ]; then
+        [ ${#SETUP_HOOKS[@]} -eq 0 ] && warn "No setup hooks executed"
+        [ -z "$POST_BUILD_SCRIPT" ] && warn "No post-build script executed"
+        [ -n "$BUILDDEP_PACKAGE" ] && info "Build dependencies purged"
+    fi
+
     echo ""
 }
 
@@ -437,7 +556,7 @@ parse_arguments "$@"
 trap cleanup EXIT
 
 main() {
-    log "Starting..."
+    log "Starting Custom Pi Imager..."
     echo ""
     show_configuration
     check_arch_linux
@@ -448,10 +567,10 @@ main() {
     mount_image
     setup_qemu_chroot
     set_user_password
-    install_packages
-    copy_micropanel
-    run_setup_hook
-    configure_system
+    install_packages           # Base mode only
+    run_setup_hooks            # Incremental mode only
+    run_post_build_script      # Incremental mode only
+    purge_build_dependencies   # Incremental mode only
     verify_image
     remove_qemu
     show_summary

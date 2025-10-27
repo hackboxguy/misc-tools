@@ -52,7 +52,8 @@ Optional Arguments (Incremental Mode):
   --setup-hook-list=FILE    File containing list of setup hooks (one per line)
                             Format: HOOK_SCRIPT[|GIT_REPO|TAG|DEST|DEPS]
                             Simple: packages/my-hook.sh
-                            Parameterized: packages/generic-hook.sh|https://github.com/user/repo.git|v1.0|/home/pi/app|lib1,lib2
+                            Git source: packages/generic-hook.sh|https://github.com/user/repo.git|v1.0|/home/pi/app|lib1,lib2
+                            Local source: packages/generic-hook.sh|file:///path/to/local/src|local|/home/pi/app|lib1,lib2
   --post-build-script=FILE  Post-build configuration script (runs in chroot)
                             Receives: MOUNT_POINT, PI_PASSWORD, IMAGE_WORK_DIR
 
@@ -86,6 +87,16 @@ Examples:
   sudo $0 --mode=base --baseimage=./raspios.img.xz --output=/tmp/base \\
     --runtime-package=./runtime-deps.txt \\
     --builddep-package=none
+
+Hook List File Format (hook-packages.txt):
+  # Simple hook (no parameters)
+  packages/micropanel-hook.sh
+
+  # Git-based package (will clone from GitHub)
+  packages/generic-package-hook.sh|https://github.com/user/xc3sprog.git|master|/home/pi/fpga|libusb-dev,libftdi-dev
+
+  # Local source package (will copy from host)
+  packages/generic-package-hook.sh|file:///home/user/my-project|local|/home/pi/app|cmake,build-essential
 
 EOF
     exit 0
@@ -498,6 +509,26 @@ load_hooks_from_file() {
             error "Hook script not found at line $line_num in $SETUP_HOOKS_FILE\nScript: $hook_script\nLine: $line"
         fi
 
+        # For parameterized hooks, check if using local source (file:// prefix)
+        if [ "$field_count" = "5" ] && [[ "$git_repo" == file://* ]]; then
+            # Extract local path from file:// URL
+            local local_source="${git_repo#file://}"
+
+            # Normalize local source path (relative to absolute)
+            if [[ "$local_source" != /* ]]; then
+                local hooks_dir="$(dirname "$SETUP_HOOKS_FILE")"
+                local_source="${hooks_dir}/${local_source}"
+            fi
+
+            # Validate that local source directory exists
+            if [ ! -d "$local_source" ]; then
+                error "Local source directory not found at line $line_num in $SETUP_HOOKS_FILE\nPath: $local_source\nLine: $line"
+            fi
+
+            # Rebuild git_repo with normalized absolute path
+            git_repo="file://${local_source}"
+        fi
+
         # Reconstruct line with absolute path
         if [ "$field_count" = "1" ]; then
             # Simple format: just the normalized path
@@ -512,6 +543,37 @@ load_hooks_from_file() {
     info "Loaded ${#SETUP_HOOKS[@]} hook(s) from file"
 }
 
+copy_local_sources() {
+    [ ${#SETUP_HOOKS[@]} -eq 0 ] && return 0
+
+    log "Checking for local sources to copy..."
+    local sources_copied=0
+
+    for hook_line in "${SETUP_HOOKS[@]}"; do
+        # Parse hook line
+        IFS='|' read -r hook_script git_repo git_tag install_dest dep_list <<< "$hook_line"
+
+        # Skip if not parameterized or not a local source
+        [ -z "$git_repo" ] && continue
+        [[ "$git_repo" != file://* ]] && continue
+
+        # Extract local source path
+        local local_source="${git_repo#file://}"
+        local source_name=$(basename "$local_source")
+
+        # Create build-sources directory in chroot if it doesn't exist
+        mkdir -p "${MOUNT_POINT}/tmp/build-sources"
+
+        # Copy local source into chroot
+        log "Copying local source: ${source_name}"
+        cp -r "$local_source" "${MOUNT_POINT}/tmp/build-sources/${source_name}" || error "Failed to copy local source: $local_source"
+
+        sources_copied=$((sources_copied + 1))
+    done
+
+    [ $sources_copied -gt 0 ] && info "Copied $sources_copied local source(s) into chroot"
+}
+
 run_setup_hooks() {
     # Only run in incremental mode
     [ "$MODE" != "incremental" ] && info "Skipping setup hooks (base mode)" && return 0
@@ -520,6 +582,9 @@ run_setup_hooks() {
     load_hooks_from_file
 
     [ ${#SETUP_HOOKS[@]} -eq 0 ] && info "No setup hooks to run" && return 0
+
+    # Copy local sources into chroot (if any)
+    copy_local_sources
 
     log "Running ${#SETUP_HOOKS[@]} setup hook(s)..."
 
@@ -536,10 +601,26 @@ run_setup_hooks() {
             log "[$((i+1))/${#SETUP_HOOKS[@]}] Running: ${hook_script}"
         else
             # Parameterized format: all fields present
-            # Extract HOOK_NAME from git repo URL (last path component, remove .git)
-            local hook_name=$(basename "$git_repo" .git)
+            # Check if this is a local source (file:// prefix)
+            local is_local_source=0
+            [[ "$git_repo" == file://* ]] && is_local_source=1
 
-            log "[$((i+1))/${#SETUP_HOOKS[@]}] Running: ${hook_script} (${hook_name} ${git_tag})"
+            # Extract HOOK_NAME from git repo URL (last path component, remove .git)
+            local hook_name
+            if [ $is_local_source -eq 1 ]; then
+                # For local sources, extract name from path
+                local local_path="${git_repo#file://}"
+                hook_name=$(basename "$local_path")
+            else
+                # For Git sources, extract from URL and remove .git suffix
+                hook_name=$(basename "$git_repo" .git)
+            fi
+
+            if [ $is_local_source -eq 1 ]; then
+                log "[$((i+1))/${#SETUP_HOOKS[@]}] Running: ${hook_script} (${hook_name} [LOCAL])"
+            else
+                log "[$((i+1))/${#SETUP_HOOKS[@]}] Running: ${hook_script} (${hook_name} ${git_tag})"
+            fi
 
             # Export parameterized environment variables
             export HOOK_GIT_REPO="$git_repo"
@@ -548,7 +629,15 @@ run_setup_hooks() {
             export HOOK_NAME="$hook_name"
             export HOOK_DEP_LIST="$dep_list"
 
-            info "  HOOK_NAME=$hook_name, HOOK_GIT_TAG=$git_tag"
+            # For local sources, export the chroot path to the copied source
+            if [ $is_local_source -eq 1 ]; then
+                export HOOK_LOCAL_SOURCE="/tmp/build-sources/${hook_name}"
+                info "  HOOK_NAME=$hook_name [LOCAL SOURCE]"
+                info "  HOOK_LOCAL_SOURCE=$HOOK_LOCAL_SOURCE"
+            else
+                info "  HOOK_NAME=$hook_name, HOOK_GIT_TAG=$git_tag"
+            fi
+
             info "  HOOK_INSTALL_DEST=$install_dest"
             [ -n "$dep_list" ] && info "  HOOK_DEP_LIST=$dep_list"
         fi
@@ -572,7 +661,7 @@ run_setup_hooks() {
 
         # Unset parameterized environment variables
         if [ "$field_count" != "1" ]; then
-            unset HOOK_GIT_REPO HOOK_GIT_TAG HOOK_INSTALL_DEST HOOK_NAME HOOK_DEP_LIST
+            unset HOOK_GIT_REPO HOOK_GIT_TAG HOOK_INSTALL_DEST HOOK_NAME HOOK_DEP_LIST HOOK_LOCAL_SOURCE
         fi
 
         log "[$((i+1))/${#SETUP_HOOKS[@]}] Complete: ${hook_script}"

@@ -5,11 +5,12 @@ set -e
 # - MOUNT_POINT: Root filesystem mount point
 # - PI_PASSWORD: User password (empty if unchanged)
 # - IMAGE_WORK_DIR: Working directory path
-# - HOOK_GIT_REPO
-# - HOOK_GIT_TAG
-# - HOOK_INSTALL_DEST
-# - HOOK_NAME : extracted from git repo name
-# - HOOK_DEP_LIST : comma separated package list (e.g: libftdi1-dev,libhidapi-dev,zlib1g-dev)
+# - HOOK_GIT_REPO: Git repository URL or file:// path for local sources
+# - HOOK_GIT_TAG: Git tag/branch (ignored for local sources)
+# - HOOK_INSTALL_DEST: Installation destination path
+# - HOOK_NAME: Extracted from git repo name or local directory name
+# - HOOK_DEP_LIST: Comma separated package list (e.g: libftdi1-dev,libhidapi-dev,zlib1g-dev)
+# - HOOK_LOCAL_SOURCE: Path to local source in chroot (set only for file:// sources)
 
 
 echo "======================================"
@@ -34,11 +35,21 @@ else
     echo "No additional dependencies specified"
 fi
 
-# Clone micropanel repository
-echo "[2/5] Cloning micropanel from GitHub..."
+# Get source code (either clone from Git or use local source)
+echo "[2/5] Obtaining source code..."
 cd /tmp
-git clone --branch $HOOK_GIT_TAG $HOOK_GIT_REPO
-cd $HOOK_NAME
+
+if [ -n "$HOOK_LOCAL_SOURCE" ]; then
+    # Using local source (already copied into chroot)
+    echo "Using local source from: $HOOK_LOCAL_SOURCE"
+    [ ! -d "$HOOK_LOCAL_SOURCE" ] && echo "ERROR: Local source not found at $HOOK_LOCAL_SOURCE" && exit 1
+    cd "$HOOK_LOCAL_SOURCE"
+else
+    # Clone from Git repository
+    echo "Cloning from Git: $HOOK_GIT_REPO (branch: $HOOK_GIT_TAG)"
+    git clone --branch $HOOK_GIT_TAG $HOOK_GIT_REPO
+    cd $HOOK_NAME
+fi
 
 # Create build directory and configure micropanel
 echo "[3/5] Configuring CMake..."
@@ -66,7 +77,15 @@ echo "Finalizing $HOOK_NAME installation..."
 # Cleanup build artifacts and source
 echo "Cleaning up build artifacts..."
 cd /
-rm -rf /tmp/$HOOK_NAME
+
+if [ -n "$HOOK_LOCAL_SOURCE" ]; then
+    # For local sources, clean up the copied directory
+    echo "Removing local source copy: $HOOK_LOCAL_SOURCE"
+    rm -rf "$HOOK_LOCAL_SOURCE"
+else
+    # For Git sources, clean up the cloned repository
+    rm -rf /tmp/$HOOK_NAME
+fi
 
 # Purge build dependencies installed by this hook
 if [ -n "$HOOK_DEP_LIST" ]; then

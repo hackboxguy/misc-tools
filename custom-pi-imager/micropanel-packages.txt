@@ -5,4 +5,4 @@ packages/micropanel-hook.sh
 packages/generic-package-hook.sh|https://github.com/hackboxguy/xc3sprog.git|master|/home/pi/micropanel/fpga|libusb-dev,libftdi-dev,libgpiod-dev
 
 #openFPGALoader hook - this is the generic one
-packages/generic-package-hook.sh|https://github.com/trabucayre/openFPGALoader.git|v1.0.0|/home/pi/micropanel/fpga|libftdi1-dev,libhidapi-dev,zlib1g-dev
+packages/generic-package-hook.sh|https://github.com/trabucayre/openFPGALoader.git|v1.0.0|/home/pi/micropanel/fpga|libusb-dev,libftdi-dev,libgpiod-dev,libftdi1-dev,libhidapi-dev,zlib1g-dev

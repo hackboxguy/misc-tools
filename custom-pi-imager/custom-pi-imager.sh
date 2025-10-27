@@ -14,6 +14,7 @@ BUILDDEP_PACKAGE=""
 POST_BUILD_SCRIPT=""
 SETUP_HOOKS=()
 SETUP_HOOKS_FILE=""
+VERSION=""
 
 # Colors
 RED='\033[0;31m'
@@ -56,6 +57,7 @@ Optional Arguments (Incremental Mode):
                             Receives: MOUNT_POINT, PI_PASSWORD, IMAGE_WORK_DIR
 
 Optional Arguments (Both Modes):
+  --version=STRING          Version identifier (creates /etc/base-version.txt or /etc/incremental-version.txt)
   --help, -h                Show this help
 
 Examples:
@@ -63,7 +65,8 @@ Examples:
   sudo $0 --mode=base --baseimage=./raspios.img.xz --output=/tmp/base \\
     --password=brb0x --extend-size-mb=1000 \\
     --runtime-package=./runtime-deps.txt \\
-    --builddep-package=./build-deps.txt
+    --builddep-package=./build-deps.txt \\
+    --version="01.10"
 
   # Stage 2: Incremental build with individual hooks
   sudo $0 --mode=incremental --baseimage=./base.img.xz --output=/tmp/custom \\
@@ -76,7 +79,8 @@ Examples:
   sudo $0 --mode=incremental --baseimage=./base.img.xz --output=/tmp/custom \\
     --builddep-package=./build-deps.txt \\
     --setup-hook-list=./hook-packages.txt \\
-    --post-build-script=./finalize.sh
+    --post-build-script=./finalize.sh \\
+    --version="02.05"
 
   # Base mode with no build dependencies
   sudo $0 --mode=base --baseimage=./raspios.img.xz --output=/tmp/base \\
@@ -102,6 +106,7 @@ parse_arguments() {
             --setup-hook=*) SETUP_HOOKS+=("${arg#*=}") ;;
             --setup-hook-list=*) SETUP_HOOKS_FILE="${arg#*=}" ;;
             --post-build-script=*) POST_BUILD_SCRIPT="${arg#*=}" ;;
+            --version=*) VERSION="${arg#*=}" ;;
             --help|-h) show_usage ;;
             *) error "Unknown argument: $arg\nUse --help for usage" ;;
         esac
@@ -234,6 +239,7 @@ show_configuration() {
     echo "  Base Image:      ${IMAGE_SOURCE}"
     echo "  Output Dir:      ${WORK_DIR}"
     echo "  Password:        $([ -z "$PI_PASSWORD" ] && echo "[KEEP EXISTING]" || echo "${PI_PASSWORD//?/*}")"
+    echo "  Version:         $([ -z "$VERSION" ] && echo "[NONE]" || echo "${VERSION}")"
 
     if [ "$MODE" = "base" ]; then
         echo ""
@@ -396,6 +402,28 @@ set_user_password() {
     fi
     
     log "Password and SSH configured"
+}
+
+write_version_file() {
+    [ -z "$VERSION" ] && info "No version specified, skipping version file" && return 0
+
+    local version_file
+    if [ "$MODE" = "base" ]; then
+        version_file="${MOUNT_POINT}/etc/base-version.txt"
+    else
+        version_file="${MOUNT_POINT}/etc/incremental-version.txt"
+    fi
+
+    log "Writing version file: $(basename "$version_file")"
+
+    # Write version and build timestamp
+    cat > "$version_file" <<EOF
+VERSION=$VERSION
+BUILD_DATE=$(date -u +%Y-%m-%d_%H:%M:%S_UTC)
+EOF
+
+    info "Version: $VERSION"
+    log "Version file created: $version_file"
 }
 
 install_packages() {
@@ -677,10 +705,12 @@ main() {
     mount_image
     setup_qemu_chroot
     set_user_password
+    write_version_file         # Write version after password (base) or after purge (incremental)
     install_packages           # Base mode only
     run_setup_hooks            # Incremental mode only
     run_post_build_script      # Incremental mode only
     purge_build_dependencies   # Incremental mode only
+    write_version_file         # Write version after purge in incremental mode
     verify_image
     remove_qemu
     show_summary

@@ -13,6 +13,7 @@ RUNTIME_PACKAGE=""
 BUILDDEP_PACKAGE=""
 POST_BUILD_SCRIPT=""
 SETUP_HOOKS=()
+SETUP_HOOKS_FILE=""
 
 # Colors
 RED='\033[0;31m'
@@ -47,6 +48,10 @@ Optional Arguments (Base Mode):
 Optional Arguments (Incremental Mode):
   --setup-hook=FILE         Setup hook script (multiple allowed, runs in chroot)
                             Receives: MOUNT_POINT, PI_PASSWORD, IMAGE_WORK_DIR
+  --setup-hook-list=FILE    File containing list of setup hooks (one per line)
+                            Format: HOOK_SCRIPT[|GIT_REPO|TAG|DEST|DEPS]
+                            Simple: packages/my-hook.sh
+                            Parameterized: packages/generic-hook.sh|https://github.com/user/repo.git|v1.0|/home/pi/app|lib1,lib2
   --post-build-script=FILE  Post-build configuration script (runs in chroot)
                             Receives: MOUNT_POINT, PI_PASSWORD, IMAGE_WORK_DIR
 
@@ -60,11 +65,17 @@ Examples:
     --runtime-package=./runtime-deps.txt \\
     --builddep-package=./build-deps.txt
 
-  # Stage 2: Incremental build with compilation and purge
+  # Stage 2: Incremental build with individual hooks
   sudo $0 --mode=incremental --baseimage=./base.img.xz --output=/tmp/custom \\
     --builddep-package=./build-deps.txt \\
     --setup-hook=./micropanel-hook.sh \\
     --setup-hook=./test-daemon-hook.sh \\
+    --post-build-script=./finalize.sh
+
+  # Stage 2: Incremental build with hook list file
+  sudo $0 --mode=incremental --baseimage=./base.img.xz --output=/tmp/custom \\
+    --builddep-package=./build-deps.txt \\
+    --setup-hook-list=./hook-packages.txt \\
     --post-build-script=./finalize.sh
 
   # Base mode with no build dependencies
@@ -89,6 +100,7 @@ parse_arguments() {
             --runtime-package=*) RUNTIME_PACKAGE="${arg#*=}" ;;
             --builddep-package=*) BUILDDEP_PACKAGE="${arg#*=}" ;;
             --setup-hook=*) SETUP_HOOKS+=("${arg#*=}") ;;
+            --setup-hook-list=*) SETUP_HOOKS_FILE="${arg#*=}" ;;
             --post-build-script=*) POST_BUILD_SCRIPT="${arg#*=}" ;;
             --help|-h) show_usage ;;
             *) error "Unknown argument: $arg\nUse --help for usage" ;;
@@ -161,6 +173,11 @@ parse_arguments() {
         POST_BUILD_SCRIPT="$(cd "$(dirname "$POST_BUILD_SCRIPT")" 2>/dev/null && pwd)/$(basename "$POST_BUILD_SCRIPT")" || POST_BUILD_SCRIPT="$(pwd)/$POST_BUILD_SCRIPT"
     fi
 
+    # Normalize setup-hook-list path
+    if [ -n "$SETUP_HOOKS_FILE" ] && [[ "$SETUP_HOOKS_FILE" != /* ]]; then
+        SETUP_HOOKS_FILE="$(cd "$(dirname "$SETUP_HOOKS_FILE")" 2>/dev/null && pwd)/$(basename "$SETUP_HOOKS_FILE")" || SETUP_HOOKS_FILE="$(pwd)/$SETUP_HOOKS_FILE"
+    fi
+
     IMAGE_NAME="$(basename "$IMAGE_SOURCE")"
     IMAGE_NAME="${IMAGE_NAME%.xz}"
     MOUNT_POINT="${WORK_DIR}/mnt"
@@ -191,6 +208,9 @@ validate_files() {
     if [ "$MODE" = "incremental" ]; then
         # Incremental mode: validate builddep, hooks, post-build script
         [ -n "$BUILDDEP_PACKAGE" ] && [ ! -f "$BUILDDEP_PACKAGE" ] && error "Build dependency file not found: $BUILDDEP_PACKAGE"
+
+        # Validate setup-hook-list file
+        [ -n "$SETUP_HOOKS_FILE" ] && [ ! -f "$SETUP_HOOKS_FILE" ] && error "Setup hook list file not found: $SETUP_HOOKS_FILE"
 
         # Validate all setup hooks
         for hook in "${SETUP_HOOKS[@]}"; do
@@ -227,6 +247,7 @@ show_configuration() {
         echo ""
         echo "  Incremental Mode Settings:"
         echo "  ├─ Build Deps:      $([ -z "$BUILDDEP_PACKAGE" ] && echo "[NONE]" || echo "${BUILDDEP_PACKAGE} [WILL PURGE]")"
+        echo "  ├─ Hook List File:  $([ -z "$SETUP_HOOKS_FILE" ] && echo "[NONE]" || echo "${SETUP_HOOKS_FILE}")"
         echo "  ├─ Setup Hooks:     $([ ${#SETUP_HOOKS[@]} -eq 0 ] && echo "[NONE]" || echo "${#SETUP_HOOKS[@]} hook(s)")"
         if [ ${#SETUP_HOOKS[@]} -gt 0 ]; then
             for i in "${!SETUP_HOOKS[@]}"; do
@@ -411,33 +432,122 @@ CHROOT_EOF
     log "Packages installed successfully"
 }
 
+load_hooks_from_file() {
+    [ -z "$SETUP_HOOKS_FILE" ] && return 0
+
+    log "Loading hooks from: $SETUP_HOOKS_FILE"
+    local line_num=0
+
+    while IFS= read -r line; do
+        line_num=$((line_num + 1))
+
+        # Skip comments and empty lines
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${line// }" ]] && continue
+
+        # Parse line: HOOK_SCRIPT[|GIT_REPO|GIT_TAG|INSTALL_DEST|DEP_LIST]
+        # Use pipe (|) as separator to avoid conflicts with URLs (https://)
+        IFS='|' read -r hook_script git_repo git_tag install_dest dep_list <<< "$line"
+
+        # Determine field count
+        local field_count=1
+        [ -n "$git_repo" ] && field_count=5
+
+        # Validate field count (1 = simple, 5 = parameterized)
+        if [ "$field_count" != "1" ] && [ "$field_count" != "5" ]; then
+            error "Invalid format at line $line_num in $SETUP_HOOKS_FILE\nExpected 1 or 5 pipe-separated fields\nLine: $line"
+        fi
+
+        # Normalize hook script path (relative to absolute)
+        if [[ "$hook_script" != /* ]]; then
+            # Get directory of hook-packages.txt file
+            local hooks_dir="$(dirname "$SETUP_HOOKS_FILE")"
+            hook_script="${hooks_dir}/${hook_script}"
+        fi
+
+        # Validate that hook script exists
+        if [ ! -f "$hook_script" ]; then
+            error "Hook script not found at line $line_num in $SETUP_HOOKS_FILE\nScript: $hook_script\nLine: $line"
+        fi
+
+        # Reconstruct line with absolute path
+        if [ "$field_count" = "1" ]; then
+            # Simple format: just the normalized path
+            SETUP_HOOKS+=("$hook_script")
+        else
+            # Parameterized format: rebuild with normalized path using pipe separator
+            SETUP_HOOKS+=("$hook_script|$git_repo|$git_tag|$install_dest|$dep_list")
+        fi
+
+    done < "$SETUP_HOOKS_FILE"
+
+    info "Loaded ${#SETUP_HOOKS[@]} hook(s) from file"
+}
+
 run_setup_hooks() {
     # Only run in incremental mode
     [ "$MODE" != "incremental" ] && info "Skipping setup hooks (base mode)" && return 0
+
+    # Load hooks from file if specified
+    load_hooks_from_file
 
     [ ${#SETUP_HOOKS[@]} -eq 0 ] && info "No setup hooks to run" && return 0
 
     log "Running ${#SETUP_HOOKS[@]} setup hook(s)..."
 
     for i in "${!SETUP_HOOKS[@]}"; do
-        local hook="${SETUP_HOOKS[$i]}"
-        log "[$((i+1))/${#SETUP_HOOKS[@]}] Running: ${hook}"
+        local hook_line="${SETUP_HOOKS[$i]}"
 
-        [ ! -x "$hook" ] && warn "Making executable..." && chmod +x "$hook"
+        # Parse hook line: could be simple (1 field) or parameterized (5 fields)
+        # Use pipe (|) as separator to avoid conflicts with URLs
+        IFS='|' read -r hook_script git_repo git_tag install_dest dep_list <<< "$hook_line"
 
+        # Determine if simple or parameterized
+        if [ -z "$git_repo" ]; then
+            # Simple format: just the hook script path
+            log "[$((i+1))/${#SETUP_HOOKS[@]}] Running: ${hook_script}"
+        else
+            # Parameterized format: all fields present
+            # Extract HOOK_NAME from git repo URL (last path component, remove .git)
+            local hook_name=$(basename "$git_repo" .git)
+
+            log "[$((i+1))/${#SETUP_HOOKS[@]}] Running: ${hook_script} (${hook_name} ${git_tag})"
+
+            # Export parameterized environment variables
+            export HOOK_GIT_REPO="$git_repo"
+            export HOOK_GIT_TAG="$git_tag"
+            export HOOK_INSTALL_DEST="$install_dest"
+            export HOOK_NAME="$hook_name"
+            export HOOK_DEP_LIST="$dep_list"
+
+            info "  HOOK_NAME=$hook_name, HOOK_GIT_TAG=$git_tag"
+            info "  HOOK_INSTALL_DEST=$install_dest"
+            [ -n "$dep_list" ] && info "  HOOK_DEP_LIST=$dep_list"
+        fi
+
+        # Validate and prepare hook script
+        [ ! -f "$hook_script" ] && error "Hook script not found: $hook_script"
+        [ ! -x "$hook_script" ] && warn "Making executable..." && chmod +x "$hook_script"
+
+        # Export common environment variables
         export MOUNT_POINT="${MOUNT_POINT}"
         export PI_PASSWORD="${PI_PASSWORD}"
         export IMAGE_WORK_DIR="${WORK_DIR}"
 
-        local hook_name=$(basename "$hook")
-        cp "$hook" "${MOUNT_POINT}/tmp/${hook_name}"
-        chmod +x "${MOUNT_POINT}/tmp/${hook_name}"
+        # Copy hook to chroot and execute
+        local hook_basename=$(basename "$hook_script")
+        cp "$hook_script" "${MOUNT_POINT}/tmp/${hook_basename}"
+        chmod +x "${MOUNT_POINT}/tmp/${hook_basename}"
 
-        info "Environment: MOUNT_POINT=${MOUNT_POINT}, IMAGE_WORK_DIR=${IMAGE_WORK_DIR}"
-        chroot "${MOUNT_POINT}" /bin/bash -c "cd /tmp && ./${hook_name}" || error "Setup hook failed: ${hook}"
-        rm -f "${MOUNT_POINT}/tmp/${hook_name}"
+        chroot "${MOUNT_POINT}" /bin/bash -c "cd /tmp && ./${hook_basename}" || error "Setup hook failed: ${hook_script}"
+        rm -f "${MOUNT_POINT}/tmp/${hook_basename}"
 
-        log "[$((i+1))/${#SETUP_HOOKS[@]}] Complete: ${hook}"
+        # Unset parameterized environment variables
+        if [ "$field_count" != "1" ]; then
+            unset HOOK_GIT_REPO HOOK_GIT_TAG HOOK_INSTALL_DEST HOOK_NAME HOOK_DEP_LIST
+        fi
+
+        log "[$((i+1))/${#SETUP_HOOKS[@]}] Complete: ${hook_script}"
     done
 
     log "All setup hooks completed successfully"

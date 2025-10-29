@@ -8,7 +8,7 @@ packages/generic-package-hook.sh|https://github.com/hackboxguy/xc3sprog.git|mast
 packages/generic-package-hook.sh|https://github.com/trabucayre/openFPGALoader.git|v1.0.0|/home/pi/micropanel/fpga|libusb-dev,libftdi-dev,libgpiod-dev,libftdi1-dev,libhidapi-dev,zlib1g-dev
 
 #qt-apps
-packages/generic-package-hook.sh|https://github.com/hackboxguy/br-wrapper.git|pi4-983-interrupt-touch|/home/pi/micropanel||systemctl enable /home/pi/micropanel/lib/systemd/system/qt-demo-launcher.service
+packages/generic-package-hook.sh|https://github.com/hackboxguy/br-wrapper.git|pi4-983-interrupt-touch|/home/pi/micropanel||systemctl mask getty@tty1.service;systemctl enable /home/pi/micropanel/lib/systemd/system/qt-demo-launcher.service
 
 #fpga binaries as a Local source package
 packages/generic-package-hook.sh|file:///home/user/git-repos/misc-tools/fpga-bins|local|/home/pi/micropanel

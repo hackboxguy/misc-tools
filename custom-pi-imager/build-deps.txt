@@ -9,3 +9,8 @@ libgpiod-dev
 libftdi1-dev
 libhidapi-dev
 zlib1g-dev
+build-essential
+qtbase5-dev
+qtbase5-dev-tools
+qtdeclarative5-dev
+qtdeclarative5-dev-tools

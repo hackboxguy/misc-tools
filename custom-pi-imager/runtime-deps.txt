@@ -11,10 +11,10 @@ libhidapi-libusb0
 libi2c-dev
 libudev-dev
 nlohmann-json3-dev
-libqt5core5t64
-libqt5gui5t64
-libqt5widgets5t64
-libqt5network5t64
+libqt5core5a
+libqt5gui5
+libqt5widgets5
+libqt5network5
 libqt5qml5
 libqt5quick5
 qml-module-qtquick2

@@ -50,10 +50,11 @@ Optional Arguments (Incremental Mode):
   --setup-hook=FILE         Setup hook script (multiple allowed, runs in chroot)
                             Receives: MOUNT_POINT, PI_PASSWORD, IMAGE_WORK_DIR
   --setup-hook-list=FILE    File containing list of setup hooks (one per line)
-                            Format: HOOK_SCRIPT[|GIT_REPO|TAG|DEST|DEPS]
+                            Format: HOOK_SCRIPT[|GIT_REPO|TAG|DEST|DEPS|POST_CMDS]
                             Simple: packages/my-hook.sh
                             Git source: packages/generic-hook.sh|https://github.com/user/repo.git|v1.0|/home/pi/app|lib1,lib2
                             Local source: packages/generic-hook.sh|file:///path/to/local/src|local|/home/pi/app|lib1,lib2
+                            With post-install: packages/generic-hook.sh|https://github.com/user/repo.git|v1.0|/home/pi/app|deps|systemctl enable myservice.service
   --post-build-script=FILE  Post-build configuration script (runs in chroot)
                             Receives: MOUNT_POINT, PI_PASSWORD, IMAGE_WORK_DIR
 
@@ -97,6 +98,9 @@ Hook List File Format (hook-packages.txt):
 
   # Local source package (will copy from host)
   packages/generic-package-hook.sh|file:///home/user/my-project|local|/home/pi/app|cmake,build-essential
+
+  # Package with post-install commands (enable systemd service and copy config)
+  packages/generic-package-hook.sh|https://github.com/user/qt-app.git|v1.0|/home/pi/app||systemctl enable /home/pi/app/lib/systemd/system/myapp.service;cp /home/pi/app/config.txt /etc/
 
 EOF
     exit 0
@@ -484,17 +488,20 @@ load_hooks_from_file() {
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
         [[ -z "${line// }" ]] && continue
 
-        # Parse line: HOOK_SCRIPT[|GIT_REPO|GIT_TAG|INSTALL_DEST|DEP_LIST]
+        # Parse line: HOOK_SCRIPT[|GIT_REPO|GIT_TAG|INSTALL_DEST|DEP_LIST|POST_INSTALL_CMDS]
         # Use pipe (|) as separator to avoid conflicts with URLs (https://)
-        IFS='|' read -r hook_script git_repo git_tag install_dest dep_list <<< "$line"
+        IFS='|' read -r hook_script git_repo git_tag install_dest dep_list post_install_cmds <<< "$line"
 
         # Determine field count
         local field_count=1
-        [ -n "$git_repo" ] && field_count=5
+        if [ -n "$git_repo" ]; then
+            field_count=5
+            [ -n "$post_install_cmds" ] && field_count=6
+        fi
 
-        # Validate field count (1 = simple, 5 = parameterized)
-        if [ "$field_count" != "1" ] && [ "$field_count" != "5" ]; then
-            error "Invalid format at line $line_num in $SETUP_HOOKS_FILE\nExpected 1 or 5 pipe-separated fields\nLine: $line"
+        # Validate field count (1 = simple, 5 = parameterized, 6 = parameterized with post-install)
+        if [ "$field_count" != "1" ] && [ "$field_count" != "5" ] && [ "$field_count" != "6" ]; then
+            error "Invalid format at line $line_num in $SETUP_HOOKS_FILE\nExpected 1, 5, or 6 pipe-separated fields\nLine: $line"
         fi
 
         # Normalize hook script path (relative to absolute)
@@ -533,8 +540,11 @@ load_hooks_from_file() {
         if [ "$field_count" = "1" ]; then
             # Simple format: just the normalized path
             SETUP_HOOKS+=("$hook_script")
+        elif [ "$field_count" = "6" ]; then
+            # Parameterized format with post-install commands
+            SETUP_HOOKS+=("$hook_script|$git_repo|$git_tag|$install_dest|$dep_list|$post_install_cmds")
         else
-            # Parameterized format: rebuild with normalized path using pipe separator
+            # Parameterized format without post-install commands (5 fields)
             SETUP_HOOKS+=("$hook_script|$git_repo|$git_tag|$install_dest|$dep_list")
         fi
 
@@ -550,8 +560,8 @@ copy_local_sources() {
     local sources_copied=0
 
     for hook_line in "${SETUP_HOOKS[@]}"; do
-        # Parse hook line
-        IFS='|' read -r hook_script git_repo git_tag install_dest dep_list <<< "$hook_line"
+        # Parse hook line (6th field post_install_cmds ignored here)
+        IFS='|' read -r hook_script git_repo git_tag install_dest dep_list post_install_cmds <<< "$hook_line"
 
         # Skip if not parameterized or not a local source
         [ -z "$git_repo" ] && continue
@@ -591,9 +601,9 @@ run_setup_hooks() {
     for i in "${!SETUP_HOOKS[@]}"; do
         local hook_line="${SETUP_HOOKS[$i]}"
 
-        # Parse hook line: could be simple (1 field) or parameterized (5 fields)
+        # Parse hook line: could be simple (1 field), parameterized (5 fields), or parameterized with post-install (6 fields)
         # Use pipe (|) as separator to avoid conflicts with URLs
-        IFS='|' read -r hook_script git_repo git_tag install_dest dep_list <<< "$hook_line"
+        IFS='|' read -r hook_script git_repo git_tag install_dest dep_list post_install_cmds <<< "$hook_line"
 
         # Determine if simple or parameterized
         if [ -z "$git_repo" ]; then
@@ -640,6 +650,12 @@ run_setup_hooks() {
 
             info "  HOOK_INSTALL_DEST=$install_dest"
             [ -n "$dep_list" ] && info "  HOOK_DEP_LIST=$dep_list"
+
+            # Export post-install commands if present
+            if [ -n "$post_install_cmds" ]; then
+                export HOOK_POST_INSTALL_CMDS="$post_install_cmds"
+                info "  HOOK_POST_INSTALL_CMDS=$post_install_cmds"
+            fi
         fi
 
         # Validate and prepare hook script
@@ -661,7 +677,7 @@ run_setup_hooks() {
 
         # Unset parameterized environment variables
         if [ "$field_count" != "1" ]; then
-            unset HOOK_GIT_REPO HOOK_GIT_TAG HOOK_INSTALL_DEST HOOK_NAME HOOK_DEP_LIST HOOK_LOCAL_SOURCE
+            unset HOOK_GIT_REPO HOOK_GIT_TAG HOOK_INSTALL_DEST HOOK_NAME HOOK_DEP_LIST HOOK_LOCAL_SOURCE HOOK_POST_INSTALL_CMDS
         fi
 
         log "[$((i+1))/${#SETUP_HOOKS[@]}] Complete: ${hook_script}"

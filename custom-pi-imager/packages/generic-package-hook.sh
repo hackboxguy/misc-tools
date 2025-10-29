@@ -11,6 +11,7 @@ set -e
 # - HOOK_NAME: Extracted from git repo name or local directory name
 # - HOOK_DEP_LIST: Comma separated package list (e.g: libftdi1-dev,libhidapi-dev,zlib1g-dev)
 # - HOOK_LOCAL_SOURCE: Path to local source in chroot (set only for file:// sources)
+# - HOOK_POST_INSTALL_CMDS: Optional semicolon-separated shell commands to run after install
 
 
 echo "======================================"
@@ -73,6 +74,21 @@ chown -R 1000:1000 $HOOK_INSTALL_DEST
 echo ""
 echo "Finalizing $HOOK_NAME installation..."
 
+# Run post-install commands if specified
+if [ -n "$HOOK_POST_INSTALL_CMDS" ]; then
+    echo ""
+    echo "Running post-install commands..."
+    echo "Commands: $HOOK_POST_INSTALL_CMDS"
+
+    # Execute the commands using eval (semicolon-separated)
+    # This will fail the entire hook if any command fails (set -e is active)
+    eval "$HOOK_POST_INSTALL_CMDS" || {
+        echo "ERROR: Post-install commands failed!"
+        exit 1
+    }
+
+    echo "Post-install commands completed successfully"
+fi
 
 # Cleanup build artifacts and source
 echo "Cleaning up build artifacts..."

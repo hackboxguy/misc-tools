@@ -15,6 +15,8 @@ POST_BUILD_SCRIPT=""
 SETUP_HOOKS=()
 SETUP_HOOKS_FILE=""
 VERSION=""
+DEBUG_MODE=false
+KEEP_BUILD_DEPS=false
 
 # Colors
 RED='\033[0;31m'
@@ -24,9 +26,14 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 log() { echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1"; }
-error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+    ERROR_OCCURRED=1  # Set flag for cleanup trap
+    exit 1
+}
 warn() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+debug_log() { [ "$DEBUG_MODE" = true ] && echo -e "${YELLOW}[DEBUG]${NC} $1" || true; }
 
 show_usage() {
     cat <<EOF
@@ -60,6 +67,8 @@ Optional Arguments (Incremental Mode):
 
 Optional Arguments (Both Modes):
   --version=STRING          Version identifier (creates /etc/base-version.txt or /etc/incremental-version.txt)
+  --debug                   Debug mode: Keep image mounted on error, skip cleanup
+  --keep-build-deps         Keep build dependencies (skip purge even on success)
   --help, -h                Show this help
 
 Examples:
@@ -122,6 +131,8 @@ parse_arguments() {
             --setup-hook-list=*) SETUP_HOOKS_FILE="${arg#*=}" ;;
             --post-build-script=*) POST_BUILD_SCRIPT="${arg#*=}" ;;
             --version=*) VERSION="${arg#*=}" ;;
+            --debug) DEBUG_MODE=true ;;
+            --keep-build-deps) KEEP_BUILD_DEPS=true ;;
             --help|-h) show_usage ;;
             *) error "Unknown argument: $arg\nUse --help for usage" ;;
         esac
@@ -581,7 +592,9 @@ copy_local_sources() {
         sources_copied=$((sources_copied + 1))
     done
 
-    [ $sources_copied -gt 0 ] && info "Copied $sources_copied local source(s) into chroot"
+    if [ $sources_copied -gt 0 ]; then
+        info "Copied $sources_copied local source(s) into chroot"
+    fi
 }
 
 run_setup_hooks() {
@@ -667,12 +680,21 @@ run_setup_hooks() {
         export PI_PASSWORD="${PI_PASSWORD}"
         export IMAGE_WORK_DIR="${WORK_DIR}"
 
+        # Export debug mode flags
+        if [ "$DEBUG_MODE" = true ]; then
+            export DEBUG_MODE=1
+            debug_log "Exporting DEBUG_MODE=1 to hook environment"
+        fi
+        if [ "$KEEP_BUILD_DEPS" = true ]; then
+            export KEEP_BUILD_DEPS=1
+        fi
+
         # Copy hook to chroot and execute
         local hook_basename=$(basename "$hook_script")
         cp "$hook_script" "${MOUNT_POINT}/tmp/${hook_basename}"
         chmod +x "${MOUNT_POINT}/tmp/${hook_basename}"
 
-        chroot "${MOUNT_POINT}" /bin/bash -c "cd /tmp && ./${hook_basename}" || error "Setup hook failed: ${hook_script}"
+        chroot "${MOUNT_POINT}" /bin/bash -c "cd /tmp && DEBUG_MODE=$DEBUG_MODE KEEP_BUILD_DEPS=$KEEP_BUILD_DEPS ./${hook_basename}" || error "Setup hook failed: ${hook_script}"
         rm -f "${MOUNT_POINT}/tmp/${hook_basename}"
 
         # Unset parameterized environment variables
@@ -713,6 +735,13 @@ purge_build_dependencies() {
     # Only run in incremental mode
     [ "$MODE" != "incremental" ] && info "Skipping build dependency purge (base mode)" && return 0
 
+    # Skip if --keep-build-deps flag is set
+    if [ "$KEEP_BUILD_DEPS" = true ]; then
+        warn "Skipping build dependency purge (--keep-build-deps flag set)"
+        info "Build tools will remain in the image for debugging/development"
+        return 0
+    fi
+
     [ -z "$BUILDDEP_PACKAGE" ] && info "No build dependencies to purge" && return 0
 
     log "Purging build dependencies from: ${BUILDDEP_PACKAGE}"
@@ -746,6 +775,21 @@ verify_image() {
 }
 
 cleanup() {
+    local exit_code=$?
+
+    # Check if error occurred (either from exit code or ERROR_OCCURRED flag)
+    if [ -n "${ERROR_OCCURRED}" ]; then
+        exit_code=1
+    fi
+
+    # If debug mode is enabled and exit code is non-zero (error), keep mounted
+    if [ "$DEBUG_MODE" = true ] && [ $exit_code -ne 0 ]; then
+        echo ""
+        echo "=========================================="
+        error_on_debug_exit
+        exit $exit_code
+    fi
+
     log "Cleaning up..."
     umount -l "${MOUNT_POINT}/dev/pts" 2>/dev/null || true
     umount -l "${MOUNT_POINT}/dev" 2>/dev/null || true
@@ -760,6 +804,71 @@ cleanup() {
         rm "${WORK_DIR}/loop_device"
     fi
     log "Done"
+}
+
+error_on_debug_exit() {
+    echo -e "${RED}[ERROR] Build failed!${NC}"
+    echo -e "${YELLOW}[DEBUG MODE ACTIVE]${NC}"
+    echo ""
+    echo "Image is still mounted for inspection:"
+    echo -e "  Mount point: ${GREEN}${MOUNT_POINT}${NC}"
+
+    if [ -f "${WORK_DIR}/loop_device" ]; then
+        local ld=$(cat "${WORK_DIR}/loop_device")
+        echo -e "  Loop device: ${GREEN}${ld}${NC}"
+    fi
+
+    echo ""
+    echo "To inspect the chroot environment:"
+    echo -e "  ${GREEN}sudo chroot ${MOUNT_POINT} /bin/bash${NC}"
+    echo ""
+    echo "To manually retry the failed hook:"
+    if [ ${#SETUP_HOOKS[@]} -gt 0 ]; then
+        # Extract just the hook script path (first field before |)
+        local last_hook="${SETUP_HOOKS[-1]}"
+        local hook_script_path="${last_hook%%|*}"  # Get everything before first |
+        echo -e "  ${GREEN}sudo chroot ${MOUNT_POINT} /tmp/$(basename "$hook_script_path")${NC}"
+    fi
+    echo ""
+    echo "To check available space:"
+    echo -e "  ${GREEN}df -h ${MOUNT_POINT}${NC}"
+    echo ""
+    echo "To cleanup manually when done:"
+    echo -e "  ${GREEN}sudo ./cleanup-debug.sh ${WORK_DIR}${NC}"
+    echo ""
+    echo "Or cleanup automatically:"
+    cat <<'CLEANUP_SCRIPT' > "${WORK_DIR}/cleanup.sh"
+#!/bin/bash
+WORK_DIR="$1"
+MOUNT_POINT="${WORK_DIR}/mnt"
+
+echo "Cleaning up debug session..."
+sudo umount -l "${MOUNT_POINT}/dev/pts" 2>/dev/null || true
+sudo umount -l "${MOUNT_POINT}/dev" 2>/dev/null || true
+sudo umount -l "${MOUNT_POINT}/sys" 2>/dev/null || true
+sudo umount -l "${MOUNT_POINT}/proc" 2>/dev/null || true
+sudo umount -l "${MOUNT_POINT}/boot/firmware" 2>/dev/null || true
+sudo umount -l "${MOUNT_POINT}" 2>/dev/null || true
+sleep 2
+
+if [ -f "${WORK_DIR}/loop_device" ]; then
+    ld=$(cat "${WORK_DIR}/loop_device")
+    [ -n "$ld" ] && sudo losetup -d "${ld}" 2>/dev/null || true
+    rm "${WORK_DIR}/loop_device"
+fi
+
+echo "Cleanup complete"
+CLEANUP_SCRIPT
+    chmod +x "${WORK_DIR}/cleanup.sh"
+    echo -e "  ${GREEN}sudo ${WORK_DIR}/cleanup.sh ${WORK_DIR}${NC}"
+    echo ""
+    echo "=========================================="
+
+    # Save mount info for later reference
+    echo "${MOUNT_POINT}" > "${WORK_DIR}/.mount-point"
+    if [ -f "${WORK_DIR}/loop_device" ]; then
+        cat "${WORK_DIR}/loop_device" > "${WORK_DIR}/.loop-device"
+    fi
 }
 
 show_summary() {

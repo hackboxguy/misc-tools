@@ -1,0 +1,54 @@
+# Unified Build Dependencies
+# Combines application build dependencies + kernel build dependencies
+# These packages will be installed in base mode and purged in incremental mode
+
+# ===================================================================
+# Core Compilation Tools (shared by both apps and kernel)
+# ===================================================================
+build-essential
+cmake
+make
+g++
+git
+
+# ===================================================================
+# Kernel-Specific Build Requirements
+# ===================================================================
+bc
+bison
+flex
+libssl-dev
+libncurses-dev
+libelf-dev
+kmod
+cpio
+xz-utils
+
+# ===================================================================
+# Application-Specific Build Requirements
+# ===================================================================
+libusb-dev
+libftdi-dev
+libftdi1-dev
+libhidapi-dev
+libgpiod-dev
+zlib1g-dev
+
+# Qt development (for Qt-based applications)
+qtbase5-dev
+qtbase5-dev-tools
+qtdeclarative5-dev
+qtdeclarative5-dev-tools
+
+# ===================================================================
+# Additional Utilities
+# ===================================================================
+wget
+rsync
+
+# ===================================================================
+# Optional: Uncomment if needed
+# ===================================================================
+# libzstd-dev
+# pahole
+# dwarves

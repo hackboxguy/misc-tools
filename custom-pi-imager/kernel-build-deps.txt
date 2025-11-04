@@ -1,0 +1,31 @@
+# Kernel Compilation Build Dependencies
+# These packages will be installed in base mode and purged in incremental mode
+# after kernel compilation is complete
+
+# Core compilation tools
+build-essential
+bc
+bison
+flex
+
+# Kernel-specific build requirements
+libssl-dev
+libncurses-dev
+libelf-dev
+
+# Module and kernel utilities
+kmod
+
+# Source code management
+git
+
+# Additional utilities
+wget
+rsync
+cpio
+xz-utils
+
+# Optional: Uncomment if building with additional features
+# libzstd-dev
+# pahole
+# dwarves

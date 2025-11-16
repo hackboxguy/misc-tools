@@ -6,7 +6,7 @@ set -e
 # - PI_PASSWORD: User password (empty if unchanged)
 # - IMAGE_WORK_DIR: Working directory path
 # - HOOK_GIT_REPO: Git repository URL or file:// path for local sources
-# - HOOK_GIT_TAG: Git tag/branch (ignored for local sources)
+# - HOOK_GIT_TAG: Git branch/tag/commit-id (ignored for local sources)
 # - HOOK_INSTALL_DEST: Installation destination path
 # - HOOK_NAME: Extracted from git repo name or local directory name
 # - HOOK_DEP_LIST: Comma separated package list (e.g: libftdi1-dev,libhidapi-dev,zlib1g-dev)
@@ -47,9 +47,15 @@ if [ -n "$HOOK_LOCAL_SOURCE" ]; then
     cd "$HOOK_LOCAL_SOURCE"
 else
     # Clone from Git repository
-    echo "Cloning from Git: $HOOK_GIT_REPO (branch: $HOOK_GIT_TAG)"
-    git clone --branch $HOOK_GIT_TAG $HOOK_GIT_REPO
+    echo "Cloning from Git: $HOOK_GIT_REPO (ref: $HOOK_GIT_TAG)"
+
+    # Clone the repository (without --branch to support commit IDs)
+    git clone $HOOK_GIT_REPO
     cd $HOOK_NAME
+
+    # Checkout the specified branch/tag/commit
+    echo "Checking out: $HOOK_GIT_TAG"
+    git checkout $HOOK_GIT_TAG
 fi
 
 # Create build directory and configure micropanel
@@ -119,7 +125,7 @@ echo "  $HOOK_NAME Setup Complete"
 echo "======================================"
 echo "Installation path: $HOOK_INSTALL_DEST"
 echo "Repository: $HOOK_GIT_REPO"
-echo "Version/Tag: $HOOK_GIT_TAG"
+echo "Ref (branch/tag/commit): $HOOK_GIT_TAG"
 echo ""
 echo "Build dependencies purged by this hook"
 echo "======================================"

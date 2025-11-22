@@ -18,7 +18,7 @@ echo ""
 # Install build dependencies (no-op if already installed)
 echo "[1/5] Installing build dependencies..."
 apt-get update -qq
-apt-get install -y cmake g++ make git
+apt-get install -y cmake g++ make git libddcutil-dev
 
 # Clone als-dimmer repository
 echo "[2/5] Cloning als-dimmer from GitHub..."

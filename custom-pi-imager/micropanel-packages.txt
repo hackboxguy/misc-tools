@@ -12,3 +12,9 @@ packages/generic-package-hook.sh|https://github.com/hackboxguy/br-wrapper.git|pi
 
 #fpga binaries as a Local source package
 packages/generic-package-hook.sh|file:///home/adav/git-repos/misc-tools/fpga-bins|local|/home/pi/micropanel
+
+#mcu binaries as a Local source package
+packages/generic-package-hook.sh|file:///home/adav/git-repos/tmp/sp6bins|local|/home/pi/micropanel
+
+#als-dimmer hook - cannot be generic as it has some special cmake flags
+packages/als-dimmer-hook.sh

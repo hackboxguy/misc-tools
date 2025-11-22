@@ -28,3 +28,5 @@ qml-module-qtquick-controls2
 qml-module-qtquick2
 qml-module-qtqml-models2
 qml-module-qt-labs-folderlistmodel
+ddcutil
+libddcutil-dev

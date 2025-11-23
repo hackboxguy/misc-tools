@@ -30,3 +30,4 @@ qml-module-qtqml-models2
 qml-module-qt-labs-folderlistmodel
 ddcutil
 libddcutil-dev
+argyll

@@ -31,3 +31,5 @@ qml-module-qt-labs-folderlistmodel
 ddcutil
 libddcutil-dev
 argyll
+jq
+bc

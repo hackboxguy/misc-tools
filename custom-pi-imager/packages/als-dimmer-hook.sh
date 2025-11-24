@@ -31,7 +31,7 @@ echo "[3/5] Configuring CMake..."
 mkdir -p build && cd build
 cmake -DCMAKE_INSTALL_PREFIX=/home/pi/als-dimmer \
       -DCMAKE_BUILD_TYPE=Release \
-      -DCONFIG_FILE="config_opti4001_ddcutil.json" \
+      -DCONFIG_FILE="config_fpga_opti4001_dimmer800.json" \
       -DUSE_DDCUTIL=ON \
       -DINSTALL_SYSTEMD_SERVICE=ON \
       .. > /dev/null

@@ -18,3 +18,6 @@ packages/generic-package-hook.sh|file:///home/adav/git-repos/tmp/sp6bins|local|/
 
 #als-dimmer hook - cannot be generic as it has some special cmake flags
 packages/als-dimmer-hook.sh
+
+#disptool
+packages/generic-package-hook.sh|file:///home/adav/git-repos/tmp/archsp6|local|/home/pi/micropanel

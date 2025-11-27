@@ -125,8 +125,16 @@ Examples:
   # Quick rebuild with defaults
   ./00-build-all.sh --image /path/to/raspios.img
 
-Note: This script must NOT be run as root. It will use sudo only for the
-      final installation step (05-install-to-image.sh).
+Usage modes:
+  1. Normal user (recommended for interactive use):
+     ./00-build-all.sh --image /path/to/image.img
+     (Will prompt for sudo password at install step)
+
+  2. With sudo (recommended for unattended builds):
+     sudo ./00-build-all.sh --image /path/to/image.img
+     (Drops privileges for build steps, runs install as root)
+
+Note: Running as root directly (not via sudo) is not supported.
 EOF
 }
 
@@ -233,15 +241,40 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ------------------------------------------------------------------------------
-# Validate Arguments
+# Validate Arguments and Detect Sudo
 # ------------------------------------------------------------------------------
 
-# Must not run as root
+# Detect if running as root/sudo and set up user context
 if [[ $EUID -eq 0 ]]; then
-    log_error "This script should NOT be run as root"
-    log_error "It will use sudo only for the installation step"
-    exit 1
+    # Running as root - check if via sudo
+    if [[ -n "$SUDO_USER" ]]; then
+        REAL_USER="$SUDO_USER"
+        REAL_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+        RUN_MODE="sudo"
+        log_info "Running as root via sudo (original user: $REAL_USER)"
+    else
+        log_error "Running as root directly is not supported"
+        log_error "Please run with: sudo ./00-build-all.sh [OPTIONS]"
+        log_error "Or run as normal user (will prompt for sudo at install step)"
+        exit 1
+    fi
+else
+    # Running as normal user
+    REAL_USER="$USER"
+    REAL_HOME="$HOME"
+    RUN_MODE="user"
 fi
+
+# Helper function to run commands as the original user (for build steps)
+run_as_user() {
+    if [[ "$RUN_MODE" == "sudo" ]]; then
+        # Running as root via sudo - drop privileges for build steps
+        sudo -u "$REAL_USER" -H "$@"
+    else
+        # Running as normal user - execute directly
+        "$@"
+    fi
+}
 
 # Image is required
 if [[ -z "$ARG_IMAGE" ]]; then
@@ -280,8 +313,8 @@ if [[ -n "$ARG_DRIVERS" ]]; then
     fi
 fi
 
-# Set defaults
-BUILD_DIR="${ARG_BUILD_DIR:-$HOME/rpi-kernel-build}"
+# Set defaults (use REAL_HOME to handle sudo case correctly)
+BUILD_DIR="${ARG_BUILD_DIR:-$REAL_HOME/rpi-kernel-build}"
 OUTPUT_DIR="${ARG_OUTPUT:-$BUILD_DIR/output}"
 KERNEL_SRC="$BUILD_DIR/linux"
 
@@ -296,6 +329,11 @@ echo " Build Configuration:"
 echo "   Build directory : $BUILD_DIR"
 echo "   Output directory: $OUTPUT_DIR"
 echo "   Target image    : $ARG_IMAGE"
+if [[ "$RUN_MODE" == "sudo" ]]; then
+    echo "   Run mode        : sudo (build as $REAL_USER, install as root)"
+else
+    echo "   Run mode        : user (will prompt for sudo at install)"
+fi
 echo ""
 if [[ $ARG_SKIP_KERNEL -eq 0 ]]; then
     echo " Kernel Configuration:"
@@ -327,17 +365,6 @@ if [[ $ARG_DRY_RUN -eq 1 ]]; then
 fi
 
 # ------------------------------------------------------------------------------
-# Helper: Run or show command
-# ------------------------------------------------------------------------------
-run_cmd() {
-    if [[ $ARG_DRY_RUN -eq 1 ]]; then
-        echo "  [DRY-RUN] $*"
-    else
-        "$@"
-    fi
-}
-
-# ------------------------------------------------------------------------------
 # Step 02: Download and Configure Kernel
 # ------------------------------------------------------------------------------
 if [[ $ARG_SKIP_KERNEL -eq 0 ]]; then
@@ -352,7 +379,11 @@ if [[ $ARG_SKIP_KERNEL -eq 0 ]]; then
     # Export BUILD_BASE for sub-script
     export BUILD_BASE="$BUILD_DIR"
 
-    run_cmd "$SCRIPT_DIR/02-download-kernel.sh" "${CMD_ARGS[@]}"
+    if [[ $ARG_DRY_RUN -eq 1 ]]; then
+        echo "  [DRY-RUN] $SCRIPT_DIR/02-download-kernel.sh ${CMD_ARGS[*]}"
+    else
+        run_as_user env BUILD_BASE="$BUILD_DIR" "$SCRIPT_DIR/02-download-kernel.sh" "${CMD_ARGS[@]}"
+    fi
 
     if [[ $ARG_DRY_RUN -eq 0 ]]; then
         log_success "Kernel downloaded and configured"
@@ -379,7 +410,11 @@ if [[ $ARG_SKIP_KERNEL -eq 0 ]]; then
 
     export BUILD_BASE="$BUILD_DIR"
 
-    run_cmd "$SCRIPT_DIR/03-build-kernel.sh" "${CMD_ARGS[@]}"
+    if [[ $ARG_DRY_RUN -eq 1 ]]; then
+        echo "  [DRY-RUN] $SCRIPT_DIR/03-build-kernel.sh ${CMD_ARGS[*]}"
+    else
+        run_as_user env BUILD_BASE="$BUILD_DIR" "$SCRIPT_DIR/03-build-kernel.sh" "${CMD_ARGS[@]}"
+    fi
 
     if [[ $ARG_DRY_RUN -eq 0 ]]; then
         log_success "Kernel built successfully"
@@ -409,7 +444,11 @@ if [[ $ARG_SKIP_DRIVERS -eq 0 ]]; then
 
     export BUILD_BASE="$BUILD_DIR"
 
-    run_cmd "$SCRIPT_DIR/04-build-drivers.sh" "${CMD_ARGS[@]}"
+    if [[ $ARG_DRY_RUN -eq 1 ]]; then
+        echo "  [DRY-RUN] $SCRIPT_DIR/04-build-drivers.sh ${CMD_ARGS[*]}"
+    else
+        run_as_user env BUILD_BASE="$BUILD_DIR" "$SCRIPT_DIR/04-build-drivers.sh" "${CMD_ARGS[@]}"
+    fi
 
     if [[ $ARG_DRY_RUN -eq 0 ]]; then
         log_success "Drivers built successfully"
@@ -419,9 +458,9 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# Step 05: Install to Image (requires sudo)
+# Step 05: Install to Image (requires root)
 # ------------------------------------------------------------------------------
-log_step "Step 4/4: Installing to image (requires sudo)..."
+log_step "Step 4/4: Installing to image..."
 
 CMD_ARGS=()
 CMD_ARGS+=("--image" "$ARG_IMAGE")
@@ -431,9 +470,19 @@ CMD_ARGS+=("--image" "$ARG_IMAGE")
 export BUILD_BASE="$BUILD_DIR"
 
 if [[ $ARG_DRY_RUN -eq 1 ]]; then
-    echo "  [DRY-RUN] sudo $SCRIPT_DIR/05-install-to-image.sh ${CMD_ARGS[*]}"
+    if [[ "$RUN_MODE" == "sudo" ]]; then
+        echo "  [DRY-RUN] $SCRIPT_DIR/05-install-to-image.sh ${CMD_ARGS[*]}"
+    else
+        echo "  [DRY-RUN] sudo $SCRIPT_DIR/05-install-to-image.sh ${CMD_ARGS[*]}"
+    fi
 else
-    sudo "$SCRIPT_DIR/05-install-to-image.sh" "${CMD_ARGS[@]}"
+    if [[ "$RUN_MODE" == "sudo" ]]; then
+        # Already running as root - execute directly
+        "$SCRIPT_DIR/05-install-to-image.sh" "${CMD_ARGS[@]}"
+    else
+        # Running as normal user - need sudo
+        sudo BUILD_BASE="$BUILD_DIR" "$SCRIPT_DIR/05-install-to-image.sh" "${CMD_ARGS[@]}"
+    fi
 fi
 
 # ------------------------------------------------------------------------------

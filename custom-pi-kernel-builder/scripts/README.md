@@ -10,8 +10,16 @@ These scripts automate the process of cross-compiling a Raspberry Pi 4 Linux ker
 # First time: Install dependencies
 sudo ./01-setup-arch-deps.sh
 
-# Then: Build everything with a single command
+# Interactive build (prompts for sudo at install step)
 ./00-build-all.sh \
+    --branch rpi-6.12.y \
+    --config /path/to/config-6.12.47+rpt-rpi-v8 \
+    --drivers /path/to/br-wrapper/package \
+    --image /path/to/raspios.img \
+    --backup
+
+# Unattended build (use sudo to avoid password timeout)
+sudo ./00-build-all.sh \
     --branch rpi-6.12.y \
     --config /path/to/config-6.12.47+rpt-rpi-v8 \
     --drivers /path/to/br-wrapper/package \
@@ -124,7 +132,21 @@ Top-level wrapper script that orchestrates the complete build process. Calls all
     --image /path/to/raspios.img
 ```
 
-**Note:** This script must NOT be run as root. It will automatically use sudo only for the final installation step (05-install-to-image.sh).
+**Usage Modes:**
+
+1. **Normal user** (recommended for interactive use):
+   ```bash
+   ./00-build-all.sh --image /path/to/image.img
+   ```
+   Will prompt for sudo password at the final install step.
+
+2. **With sudo** (recommended for unattended builds):
+   ```bash
+   sudo ./00-build-all.sh --image /path/to/image.img
+   ```
+   Automatically drops privileges for build steps (runs as `$SUDO_USER`), then runs the install step directly as root. This avoids sudo timeout issues during long builds.
+
+**Note:** Running as root directly (not via sudo) is not supported.
 
 ---
 

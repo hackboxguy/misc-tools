@@ -25,6 +25,7 @@ echo ""
 echo "[1/5] Installing build dependencies..."
 apt-get update -qq
 apt-get install -y cmake g++ make git
+# libudev-dev libi2c-dev i2c-tools libcurl4-openssl-dev nlohmann-json3-dev
 
 # Clone micropanel repository
 echo "[2/5] Cloning micropanel from GitHub..."

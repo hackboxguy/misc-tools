@@ -11,13 +11,16 @@ packages/generic-package-hook.sh|https://github.com/trabucayre/openFPGALoader.gi
 packages/generic-package-hook.sh|https://github.com/hackboxguy/br-wrapper.git|pi4-983-interrupt-touch|/home/pi/micropanel||systemctl mask getty@tty1.service;systemctl enable /home/pi/micropanel/lib/systemd/system/qt-demo-launcher.service
 
 #fpga binaries as a Local source package
-packages/generic-package-hook.sh|file:///home/adav/git-repos/misc-tools/fpga-bins|local|/home/pi/micropanel
+#packages/generic-package-hook.sh|file:///home/adav/git-repos/misc-tools/fpga-bins|local|/home/pi/micropanel
+packages/generic-package-hook.sh|file:///home/adav/repobins/fpga-bins|local|/home/pi/micropanel
 
 #mcu binaries as a Local source package
-packages/generic-package-hook.sh|file:///home/adav/git-repos/tmp/sp6bins|local|/home/pi/micropanel
+#packages/generic-package-hook.sh|file:///home/adav/git-repos/tmp/sp6bins|local|/home/pi/micropanel
+packages/generic-package-hook.sh|file:///home/adav/repobins/sp6bins|local|/home/pi/micropanel
 
 #als-dimmer hook - cannot be generic as it has some special cmake flags
 packages/als-dimmer-hook.sh
 
 #disptool/automated-test-scripts
-packages/generic-package-hook.sh|file:///home/adav/git-repos/tmp/archsp6|local|/home/pi/micropanel
+#packages/generic-package-hook.sh|file:///home/adav/git-repos/tmp/archsp6|local|/home/pi/micropanel
+packages/generic-package-hook.sh|file:///home/adav/repobins/archsp6|local|/home/pi/micropanel

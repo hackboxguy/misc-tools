@@ -1,0 +1,8 @@
+# Media-Mux Optimized Build - Pre-compiled Binaries
+#
+# Uses pre-compiled media-mux-controller and bundled node_modules
+# No git, gcc, npm, or build-essential required on target
+#
+# Format: HOOK_SCRIPT[|DOWNLOAD_URL|...|INSTALL_DEST|...]
+
+packages/media-mux-bins-hook.sh

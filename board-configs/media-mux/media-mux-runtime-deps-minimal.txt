@@ -1,0 +1,24 @@
+# Media-Mux Minimal Runtime Dependencies
+# No build tools, no npm - uses pre-compiled binaries
+
+# Avahi/mDNS for device discovery
+avahi-daemon
+avahi-discover
+avahi-utils
+libnss-mdns
+
+# Kodi media player
+kodi
+
+# JSON processing and HTTP
+jq
+curl
+
+# Node.js runtime only (NOT npm - node_modules pre-bundled)
+nodejs
+
+# Audio
+pulseaudio
+
+# Network tools (for ifconfig in avahi-publish)
+net-tools

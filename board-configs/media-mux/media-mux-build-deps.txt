@@ -1,0 +1,9 @@
+# Media-Mux Build Dependencies
+# These packages are needed during setup but can be purged after
+
+# Compiler for media-mux-controller.c
+build-essential
+gcc
+
+# Git for cloning repo and submodules
+git

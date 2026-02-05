@@ -1,0 +1,27 @@
+# Media-Mux Runtime Dependencies
+# These packages remain in the final image
+
+# Avahi/mDNS for device discovery
+avahi-daemon
+avahi-discover
+avahi-utils
+libnss-mdns
+
+# Kodi media player
+kodi
+
+# JSON processing for sync scripts
+jq
+
+# HTTP requests for Kodi JSON-RPC
+curl
+
+# Node.js runtime for kodisync
+nodejs
+npm
+
+# Audio subsystem
+pulseaudio
+
+# Network tools (for ifconfig in avahi-publish)
+net-tools

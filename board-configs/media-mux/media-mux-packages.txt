@@ -1,0 +1,9 @@
+# Media-Mux Hook List for custom-pi-imager incremental mode
+#
+# Format: HOOK_SCRIPT[|GIT_REPO|GIT_TAG|INSTALL_DEST|DEP_LIST|POST_CMDS]
+#
+# Simple format (uses defaults in hook script):
+packages/media-mux-hook.sh
+
+# Alternative: Parameterized format (override defaults):
+# packages/media-mux-hook.sh|https://github.com/hackboxguy/media-mux.git|dynamic-config|/home/pi/media-mux|

@@ -12,7 +12,7 @@ set -e
 
 BINS_VERSION="01"
 # Note: Change branch from 'dynamic-config' to 'master' once merged
-RELEASE_URL="${HOOK_GIT_REPO:-https://raw.githubusercontent.com/hackboxguy/media-mux/dynamic-config/bins/media-mux-bins-${BINS_VERSION}-arm64.tar.gz}"
+RELEASE_URL="${HOOK_GIT_REPO:-https://raw.githubusercontent.com/hackboxguy/media-mux/master/bins/media-mux-bins-${BINS_VERSION}-arm64.tar.gz}"
 INSTALL_DIR="${HOOK_INSTALL_DEST:-/home/pi/media-mux}"
 LOG_FILE="/var/log/media-mux-setup.log"
 

@@ -34,7 +34,7 @@ misc-tools/
         ├── media-mux-runtime-deps-minimal.txt
         ├── media-mux-build-deps.txt
         ├── media-mux-packages.txt
-        ├── media-mux-bins-packages.txt
+        ├── media-mux-packages-extern-dlna.txt
         └── packages/
             ├── media-mux-hook.sh
             └── media-mux-bins-hook.sh
@@ -168,7 +168,7 @@ sudo ./misc-tools/custom-pi-imager/custom-pi-imager.sh \
   --baseimage=/tmp/media-mux-base/*.img \
   --output=/tmp/media-mux-final \
   --builddep-package=none \
-  --setup-hook-list=./misc-tools/board-configs/media-mux/media-mux-bins-packages.txt \
+  --setup-hook-list=./misc-tools/board-configs/media-mux/media-mux-packages-extern-dlna.txt \
   --version="01.00"
 ```
 
@@ -231,7 +231,7 @@ Board-specific configurations are stored in `misc-tools/board-configs/<board-nam
 | `media-mux-runtime-deps-minimal.txt` | Minimal runtime (no npm - for pre-compiled builds) |
 | `media-mux-build-deps.txt` | Build tools (gcc, git) |
 | `media-mux-packages.txt` | Hook list for standard build |
-| `media-mux-bins-packages.txt` | Hook list for pre-compiled build |
+| `media-mux-packages-extern-dlna.txt` | Hook list for pre-compiled build |
 | `packages/media-mux-hook.sh` | Standard build hook (clone + compile) |
 | `packages/media-mux-bins-hook.sh` | Pre-compiled binary installation hook |
 
@@ -311,7 +311,7 @@ sudo ./custom-pi-imager/custom-pi-imager.sh \
   --baseimage=/tmp/media-mux-base/*.img \
   --output=/tmp/media-mux-final \
   --builddep-package=none \
-  --setup-hook-list=./board-configs/media-mux/media-mux-bins-packages.txt \
+  --setup-hook-list=./board-configs/media-mux/media-mux-packages-extern-dlna.txt \
   --version="01.00"
 ```
 

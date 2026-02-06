@@ -1,0 +1,12 @@
+# Media-Mux Self-Hosted Build - Pre-compiled Binaries + Built-in DLNA/DHCP
+#
+# Includes USB-based master/slave detection:
+# - USB storage attached → Master mode (static IP, DHCP server, DLNA server)
+# - No USB storage → Slave mode (DHCP client, connects to external DLNA)
+#
+# For external DLNA only (pocket router), use: media-mux-packages-extern-dlna.txt
+#
+# Format: HOOK_SCRIPT[|DOWNLOAD_URL|...|INSTALL_DEST|...]
+
+packages/media-mux-bins-hook.sh
+packages/media-mux-selfhosted-addon-hook.sh

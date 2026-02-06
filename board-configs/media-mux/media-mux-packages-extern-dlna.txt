@@ -1,7 +1,9 @@
-# Media-Mux Optimized Build - Pre-compiled Binaries
+# Media-Mux Optimized Build - Pre-compiled Binaries (External DLNA)
 #
 # Uses pre-compiled media-mux-controller and bundled node_modules
 # No git, gcc, npm, or build-essential required on target
+#
+# For self-hosted DLNA, use: media-mux-packages-selfhosted-dlna.txt
 #
 # Format: HOOK_SCRIPT[|DOWNLOAD_URL|...|INSTALL_DEST|...]
 

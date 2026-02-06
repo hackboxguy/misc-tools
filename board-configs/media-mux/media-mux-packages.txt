@@ -1,4 +1,6 @@
-# Media-Mux Hook List for custom-pi-imager incremental mode
+# Media-Mux Hook List for custom-pi-imager incremental mode (External DLNA)
+#
+# For self-hosted DLNA, use: media-mux-packages-selfhosted-dlna.txt
 #
 # Format: HOOK_SCRIPT[|GIT_REPO|GIT_TAG|INSTALL_DEST|DEP_LIST|POST_CMDS]
 #

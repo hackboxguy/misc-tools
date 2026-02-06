@@ -136,7 +136,7 @@ sudo ./misc-tools/custom-pi-imager/custom-pi-imager.sh \
 # Stage 2: Clone, compile, configure
 sudo ./misc-tools/custom-pi-imager/custom-pi-imager.sh \
   --mode=incremental \
-  --baseimage=/tmp/media-mux-base/*.img \
+  --baseimage=/tmp/media-mux-base/2024-10-22-raspios-bookworm-arm64-lite.img \
   --output=/tmp/media-mux-final \
   --builddep-package=./misc-tools/board-configs/media-mux/media-mux-build-deps.txt \
   --setup-hook-list=./misc-tools/board-configs/media-mux/media-mux-packages.txt \
@@ -165,7 +165,7 @@ sudo ./misc-tools/custom-pi-imager/custom-pi-imager.sh \
 # Stage 2: Download and install pre-compiled binaries
 sudo ./misc-tools/custom-pi-imager/custom-pi-imager.sh \
   --mode=incremental \
-  --baseimage=/tmp/media-mux-base/*.img \
+  --baseimage=/tmp/media-mux-base/2024-10-22-raspios-bookworm-arm64-lite.img \
   --output=/tmp/media-mux-final \
   --builddep-package=none \
   --setup-hook-list=./misc-tools/board-configs/media-mux/media-mux-packages-extern-dlna.txt \
@@ -308,7 +308,7 @@ sudo ./custom-pi-imager/custom-pi-imager.sh \
 ```bash
 sudo ./custom-pi-imager/custom-pi-imager.sh \
   --mode=incremental \
-  --baseimage=/tmp/media-mux-base/*.img \
+  --baseimage=/tmp/media-mux-base/2024-10-22-raspios-bookworm-arm64-lite.img \
   --output=/tmp/media-mux-final \
   --builddep-package=none \
   --setup-hook-list=./board-configs/media-mux/media-mux-packages-extern-dlna.txt \

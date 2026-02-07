@@ -23,6 +23,7 @@ pulseaudio
 # Network tools (for ifconfig in avahi-publish)
 net-tools
 
-# Self-hosted DLNA/DHCP (activated by USB detection at boot)
+# Self-hosted DLNA/DHCP/NTP (activated by USB detection at boot)
 dnsmasq
 minidlna
+chrony

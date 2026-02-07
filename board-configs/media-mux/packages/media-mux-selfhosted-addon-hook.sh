@@ -47,19 +47,21 @@ log_fail() {
 }
 
 #------------------------------------------------------------------------------
-# Step 1: Disable dnsmasq and minidlna auto-start
+# Step 1: Disable dnsmasq, minidlna, and chrony auto-start
 #------------------------------------------------------------------------------
-log_step "[1/6] Disabling dnsmasq/minidlna auto-start..."
+log_step "[1/7] Disabling dnsmasq/minidlna/chrony auto-start..."
 systemctl stop dnsmasq 2>/dev/null || true
 systemctl stop minidlna 2>/dev/null || true
+systemctl stop chrony 2>/dev/null || true
 systemctl disable dnsmasq 2>/dev/null || true
 systemctl disable minidlna 2>/dev/null || true
+systemctl disable chrony 2>/dev/null || true
 log_ok "services disabled"
 
 #------------------------------------------------------------------------------
 # Step 2: Create dnsmasq configuration
 #------------------------------------------------------------------------------
-log_step "[2/6] Creating dnsmasq configuration..."
+log_step "[2/7] Creating dnsmasq configuration..."
 cat > /etc/dnsmasq.d/media-mux-selfhosted.conf << EOF
 # Media-Mux Self-Hosted DHCP/DNS Configuration
 # This file is managed by media-mux-selfhosted-addon-hook.sh
@@ -73,6 +75,9 @@ dhcp-range=${DHCP_RANGE_START},${DHCP_RANGE_END},${DHCP_LEASE_TIME}
 
 # Gateway (this device)
 dhcp-option=3,${STATIC_IP}
+
+# NTP server (this device)
+dhcp-option=42,${STATIC_IP}
 
 # DNS (forward to public DNS)
 server=8.8.8.8
@@ -93,7 +98,7 @@ log_ok "dnsmasq config"
 #------------------------------------------------------------------------------
 # Step 3: Create minidlna configuration
 #------------------------------------------------------------------------------
-log_step "[3/6] Creating minidlna configuration..."
+log_step "[3/7] Creating minidlna configuration..."
 cat > /etc/minidlna-selfhosted.conf << EOF
 # Media-Mux Self-Hosted DLNA Configuration
 # This file is managed by media-mux-selfhosted-addon-hook.sh
@@ -140,14 +145,66 @@ log_ok "minidlna config"
 #------------------------------------------------------------------------------
 # Step 4: Create USB mount point
 #------------------------------------------------------------------------------
-log_step "[4/6] Creating USB mount point..."
+log_step "[4/7] Creating USB mount point..."
 mkdir -p "${USB_MOUNT_POINT}"
 log_ok "mount point"
 
 #------------------------------------------------------------------------------
-# Step 5: Create boot script
+# Step 5: Create chrony configurations
 #------------------------------------------------------------------------------
-log_step "[5/6] Creating selfhosted boot script..."
+log_step "[5/7] Creating chrony configurations..."
+
+# Master mode config (NTP server)
+cat > /etc/chrony/chrony-master.conf << EOF
+# Media-Mux Chrony Master Configuration (NTP Server)
+# This file is managed by media-mux-selfhosted-addon-hook.sh
+
+# Use public NTP servers as upstream (when internet is available)
+pool pool.ntp.org iburst
+
+# Allow NTP clients on the local network
+allow 192.168.8.0/24
+
+# Serve time even if not synchronized to an upstream source
+local stratum 10
+
+# Record the rate at which the system clock gains/loses time
+driftfile /var/lib/chrony/drift
+
+# Log files location
+logdir /var/log/chrony
+
+# Step clock if offset is larger than 1 second (faster initial sync)
+makestep 1 3
+EOF
+
+# Slave mode config (NTP client)
+cat > /etc/chrony/chrony-slave.conf << EOF
+# Media-Mux Chrony Slave Configuration (NTP Client)
+# This file is managed by media-mux-selfhosted-addon-hook.sh
+
+# Use the master Pi as NTP server
+server ${STATIC_IP} iburst prefer
+
+# Fallback to public NTP if master is unreachable
+pool pool.ntp.org iburst
+
+# Record the rate at which the system clock gains/loses time
+driftfile /var/lib/chrony/drift
+
+# Log files location
+logdir /var/log/chrony
+
+# Step clock if offset is larger than 1 second (faster initial sync)
+makestep 1 3
+EOF
+
+log_ok "chrony configs"
+
+#------------------------------------------------------------------------------
+# Step 6: Create boot script
+#------------------------------------------------------------------------------
+log_step "[6/7] Creating selfhosted boot script..."
 
 cat > "$INSTALL_DIR/media-mux-selfhosted-boot.sh" << 'BOOTSCRIPT'
 #!/bin/bash
@@ -273,10 +330,21 @@ configure_master_mode() {
         fi
     fi
 
+    # Start chrony as NTP server
+    log "Starting chrony (NTP server)..."
+    chronyd -f /etc/chrony/chrony-master.conf
+    sleep 2
+    if pgrep -f chronyd > /dev/null; then
+        log "chrony started successfully (PID: $(pgrep -f chronyd))"
+    else
+        log "ERROR: chrony failed to start"
+    fi
+
     log "Master mode configured successfully"
     log "  Static IP: $STATIC_IP"
     log "  DHCP range: 192.168.8.100-200"
     log "  DLNA: http://${STATIC_IP}:8200/"
+    log "  NTP: serving time to clients"
     log "  USB media: $USB_MOUNT_POINT"
 }
 
@@ -302,6 +370,17 @@ configure_slave_mode() {
     fi
 
     log "Waiting for network..."
+    sleep 5
+
+    # Start chrony as NTP client (sync from master)
+    log "Starting chrony (NTP client)..."
+    chronyd -f /etc/chrony/chrony-slave.conf
+    sleep 2
+    if pgrep -f chronyd > /dev/null; then
+        log "chrony started successfully (PID: $(pgrep -f chronyd))"
+    else
+        log "WARNING: chrony failed to start"
+    fi
 }
 
 #------------------------------------------------------------------------------
@@ -349,7 +428,7 @@ log_ok "boot script"
 #------------------------------------------------------------------------------
 # Step 6: Create systemd service
 #------------------------------------------------------------------------------
-log_step "[6/6] Creating systemd service..."
+log_step "[7/7] Creating systemd service..."
 cat > /etc/systemd/system/media-mux-selfhosted.service << EOF
 [Unit]
 Description=Media-Mux Self-Hosted Boot
@@ -393,8 +472,11 @@ echo "  - USB storage attached → Master mode"
 echo "    - Static IP: ${STATIC_IP}"
 echo "    - DHCP: ${DHCP_RANGE_START}-${DHCP_RANGE_END}"
 echo "    - DLNA: http://${STATIC_IP}:${DLNA_PORT}/"
+echo "    - NTP: serving time to clients"
 echo ""
-echo "  - No USB storage → Slave mode (DHCP client)"
+echo "  - No USB storage → Slave mode"
+echo "    - DHCP client"
+echo "    - NTP client (syncs from master)"
 echo ""
 echo "USB mount point: ${USB_MOUNT_POINT}"
 echo "Log file: /var/log/media-mux-selfhosted.log"

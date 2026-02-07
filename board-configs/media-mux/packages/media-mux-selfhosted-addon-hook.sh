@@ -119,6 +119,9 @@ uuid=dlnaserver
 # Database location
 db_dir=/var/lib/minidlna
 
+# Log directory
+log_dir=/var/log
+
 # Automatic discovery of new files
 inotify=yes
 
@@ -245,28 +248,26 @@ configure_master_mode() {
         log "ERROR: dnsmasq failed to start"
     fi
 
-    # Ensure minidlna database directory exists with correct permissions
-    log "Preparing minidlna database directory..."
+    # Ensure minidlna directories exist with correct permissions
+    log "Preparing minidlna directories..."
     mkdir -p /var/lib/minidlna
-    chown minidlna:minidlna /var/lib/minidlna 2>/dev/null || true
+    mkdir -p /run/minidlna
+    chown -R minidlna:minidlna /var/lib/minidlna 2>/dev/null || true
+    chown -R minidlna:minidlna /run/minidlna 2>/dev/null || true
 
-    # Start minidlna with our config (without -R to avoid startup issues)
-    # The -r flag does a soft rescan, -R does a full rebuild which can fail at boot
+    # Start minidlna with our config
     log "Starting minidlna..."
     minidlnad -f /etc/minidlna-selfhosted.conf
     sleep 3
-    if pgrep -x minidlnad > /dev/null; then
-        log "minidlna started successfully"
-        # Trigger rescan after daemon is running
-        log "Triggering media rescan..."
-        kill -HUP $(pgrep -x minidlnad) 2>/dev/null || true
+    if pgrep -f minidlnad > /dev/null; then
+        log "minidlna started successfully (PID: $(pgrep -f minidlnad))"
     else
         log "minidlna first attempt failed, retrying..."
         sleep 2
         minidlnad -f /etc/minidlna-selfhosted.conf
         sleep 2
-        if pgrep -x minidlnad > /dev/null; then
-            log "minidlna started successfully on retry"
+        if pgrep -f minidlnad > /dev/null; then
+            log "minidlna started successfully on retry (PID: $(pgrep -f minidlnad))"
         else
             log "ERROR: minidlna failed to start"
         fi

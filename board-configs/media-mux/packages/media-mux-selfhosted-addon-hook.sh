@@ -12,6 +12,7 @@ set -e
 
 INSTALL_DIR="${HOOK_INSTALL_DEST:-/home/pi/media-mux}"
 LOG_FILE="/var/log/media-mux-selfhosted-setup.log"
+REPO_RAW_URL="https://raw.githubusercontent.com/hackboxguy/media-mux/master"
 
 # Configuration
 STATIC_IP="192.168.8.1"
@@ -49,7 +50,7 @@ log_fail() {
 #------------------------------------------------------------------------------
 # Step 1: Disable dnsmasq, minidlna, and chrony auto-start
 #------------------------------------------------------------------------------
-log_step "[1/7] Disabling dnsmasq/minidlna/chrony auto-start..."
+log_step "[1/11] Disabling dnsmasq/minidlna/chrony auto-start..."
 systemctl stop dnsmasq 2>/dev/null || true
 systemctl stop minidlna 2>/dev/null || true
 systemctl stop chrony 2>/dev/null || true
@@ -61,7 +62,7 @@ log_ok "services disabled"
 #------------------------------------------------------------------------------
 # Step 2: Create dnsmasq configuration
 #------------------------------------------------------------------------------
-log_step "[2/7] Creating dnsmasq configuration..."
+log_step "[2/11] Creating dnsmasq configuration..."
 cat > /etc/dnsmasq.d/media-mux-selfhosted.conf << EOF
 # Media-Mux Self-Hosted DHCP/DNS Configuration
 # This file is managed by media-mux-selfhosted-addon-hook.sh
@@ -98,7 +99,7 @@ log_ok "dnsmasq config"
 #------------------------------------------------------------------------------
 # Step 3: Create minidlna configuration
 #------------------------------------------------------------------------------
-log_step "[3/7] Creating minidlna configuration..."
+log_step "[3/11] Creating minidlna configuration..."
 cat > /etc/minidlna-selfhosted.conf << EOF
 # Media-Mux Self-Hosted DLNA Configuration
 # This file is managed by media-mux-selfhosted-addon-hook.sh
@@ -145,14 +146,14 @@ log_ok "minidlna config"
 #------------------------------------------------------------------------------
 # Step 4: Create USB mount point
 #------------------------------------------------------------------------------
-log_step "[4/7] Creating USB mount point..."
+log_step "[4/11] Creating USB mount point..."
 mkdir -p "${USB_MOUNT_POINT}"
 log_ok "mount point"
 
 #------------------------------------------------------------------------------
 # Step 5: Create chrony configurations
 #------------------------------------------------------------------------------
-log_step "[5/7] Creating chrony configurations..."
+log_step "[5/11] Creating chrony configurations..."
 
 # Master mode config (NTP server)
 cat > /etc/chrony/chrony-master.conf << EOF
@@ -204,7 +205,7 @@ log_ok "chrony configs"
 #------------------------------------------------------------------------------
 # Step 6: Create boot script
 #------------------------------------------------------------------------------
-log_step "[6/7] Creating selfhosted boot script..."
+log_step "[6/11] Creating selfhosted boot script..."
 
 cat > "$INSTALL_DIR/media-mux-selfhosted-boot.sh" << 'BOOTSCRIPT'
 #!/bin/bash
@@ -428,7 +429,7 @@ log_ok "boot script"
 #------------------------------------------------------------------------------
 # Step 6: Create systemd service
 #------------------------------------------------------------------------------
-log_step "[7/7] Creating systemd service..."
+log_step "[7/11] Creating systemd service..."
 cat > /etc/systemd/system/media-mux-selfhosted.service << EOF
 [Unit]
 Description=Media-Mux Self-Hosted Boot
@@ -451,6 +452,217 @@ EOF
 systemctl daemon-reload
 systemctl enable media-mux-selfhosted.service
 log_ok "systemd service"
+
+#------------------------------------------------------------------------------
+# Step 8: Download Kodi add-on from GitHub
+#------------------------------------------------------------------------------
+log_step "[8/11] Downloading Kodi add-on from GitHub..."
+
+ADDON_SRC_DIR="${INSTALL_DIR}/kodi-addon/service.mediamux.sync"
+mkdir -p "${ADDON_SRC_DIR}/resources/keymaps"
+
+# List of files to download (Python code - no compilation needed)
+ADDON_FILES=(
+    "addon.xml"
+    "default.py"
+    "service.py"
+    "context.py"
+    "stop.py"
+    "VideoOSD.xml"
+    "start-sync-playback.png"
+    "stop-sync-playback.png"
+    "resources/keymaps/mediamux.xml"
+)
+
+DOWNLOAD_OK=true
+for file in "${ADDON_FILES[@]}"; do
+    target="${ADDON_SRC_DIR}/${file}"
+    mkdir -p "$(dirname "$target")"
+    if ! curl -fsSL -o "$target" "${REPO_RAW_URL}/kodi-addon/service.mediamux.sync/${file}"; then
+        echo "[WARN] Failed to download: ${file}"
+        DOWNLOAD_OK=false
+    fi
+done
+
+if [ "$DOWNLOAD_OK" = true ]; then
+    chown -R 1000:1000 "${INSTALL_DIR}/kodi-addon"
+    log_ok "kodi addon download"
+else
+    echo "[PARTIAL] Some files failed to download"
+fi
+
+# Download sync and stop scripts (ensure latest versions from GitHub)
+log_step "        Downloading sync script..."
+if curl -fsSL -o "${INSTALL_DIR}/media-mux-sync-kodi-players.sh" "${REPO_RAW_URL}/media-mux-sync-kodi-players.sh"; then
+    chmod +x "${INSTALL_DIR}/media-mux-sync-kodi-players.sh"
+    chown 1000:1000 "${INSTALL_DIR}/media-mux-sync-kodi-players.sh"
+    log_ok "sync script"
+else
+    echo "[WARN] Failed to download sync script"
+fi
+
+log_step "        Downloading stop script..."
+if curl -fsSL -o "${INSTALL_DIR}/media-mux-stop-kodi-players.sh" "${REPO_RAW_URL}/media-mux-stop-kodi-players.sh"; then
+    chmod +x "${INSTALL_DIR}/media-mux-stop-kodi-players.sh"
+    chown 1000:1000 "${INSTALL_DIR}/media-mux-stop-kodi-players.sh"
+    log_ok "stop script"
+else
+    echo "[WARN] Failed to download stop script"
+fi
+
+#------------------------------------------------------------------------------
+# Step 9: Install Kodi Media-Mux Sync add-on
+#------------------------------------------------------------------------------
+log_step "[9/11] Installing Kodi Media-Mux Sync add-on..."
+
+KODI_USER_HOME="/home/pi"
+KODI_ADDONS_DIR="${KODI_USER_HOME}/.kodi/addons"
+KODI_USERDATA_DIR="${KODI_USER_HOME}/.kodi/userdata"
+ADDON_SRC_DIR="${INSTALL_DIR}/kodi-addon/service.mediamux.sync"
+
+# Create Kodi directories if they don't exist
+mkdir -p "${KODI_ADDONS_DIR}"
+mkdir -p "${KODI_USERDATA_DIR}/keymaps"
+
+# Copy the add-on
+if [ -d "${ADDON_SRC_DIR}" ]; then
+    rm -rf "${KODI_ADDONS_DIR}/service.mediamux.sync"
+    cp -r "${ADDON_SRC_DIR}" "${KODI_ADDONS_DIR}/"
+    # Remove VideoOSD.xml and icons from add-on dir (they go elsewhere)
+    rm -f "${KODI_ADDONS_DIR}/service.mediamux.sync/VideoOSD.xml"
+    rm -f "${KODI_ADDONS_DIR}/service.mediamux.sync/start-sync-playback.png"
+    rm -f "${KODI_ADDONS_DIR}/service.mediamux.sync/stop-sync-playback.png"
+    chown -R 1000:1000 "${KODI_ADDONS_DIR}/service.mediamux.sync"
+    log_ok "kodi addon"
+else
+    echo "[SKIP] Add-on source not found at ${ADDON_SRC_DIR}"
+fi
+
+#------------------------------------------------------------------------------
+# Step 10: Patch Kodi Estuary skin with Sync button
+#------------------------------------------------------------------------------
+log_step "[10/11] Patching Kodi skin with Sync button..."
+
+SYSTEM_SKIN_DIR="/usr/share/kodi/addons/skin.estuary"
+USER_SKIN_DIR="${KODI_ADDONS_DIR}/skin.estuary"
+
+# Copy Estuary skin to user directory if not already there
+if [ -d "${SYSTEM_SKIN_DIR}" ] && [ ! -d "${USER_SKIN_DIR}" ]; then
+    cp -r "${SYSTEM_SKIN_DIR}" "${USER_SKIN_DIR}"
+fi
+
+if [ -d "${USER_SKIN_DIR}" ]; then
+    # Copy custom icons (sync and stop)
+    mkdir -p "${USER_SKIN_DIR}/media/osd/fullscreen/buttons"
+    if [ -f "${ADDON_SRC_DIR}/start-sync-playback.png" ]; then
+        cp "${ADDON_SRC_DIR}/start-sync-playback.png" "${USER_SKIN_DIR}/media/osd/fullscreen/buttons/"
+    fi
+    if [ -f "${ADDON_SRC_DIR}/stop-sync-playback.png" ]; then
+        cp "${ADDON_SRC_DIR}/stop-sync-playback.png" "${USER_SKIN_DIR}/media/osd/fullscreen/buttons/"
+    fi
+
+    # Copy patched VideoOSD.xml
+    if [ -f "${ADDON_SRC_DIR}/VideoOSD.xml" ]; then
+        cp "${ADDON_SRC_DIR}/VideoOSD.xml" "${USER_SKIN_DIR}/xml/VideoOSD.xml"
+    fi
+
+    # Copy keymap
+    if [ -f "${ADDON_SRC_DIR}/resources/keymaps/mediamux.xml" ]; then
+        cp "${ADDON_SRC_DIR}/resources/keymaps/mediamux.xml" "${KODI_USERDATA_DIR}/keymaps/"
+    fi
+
+    chown -R 1000:1000 "${USER_SKIN_DIR}"
+    chown -R 1000:1000 "${KODI_USERDATA_DIR}/keymaps"
+    log_ok "skin patch"
+else
+    echo "[SKIP] Kodi skin not found at ${USER_SKIN_DIR}"
+fi
+
+#------------------------------------------------------------------------------
+# Step 11: Configure Kodi addons (auto-enable our addon, disable version check)
+#------------------------------------------------------------------------------
+log_step "[11/11] Configuring Kodi addons database..."
+
+KODI_DB_DIR="${KODI_USER_HOME}/.kodi/userdata/Database"
+
+# Find existing Addons database - only modify if Kodi has run before
+# Kodi 20 uses Addons33.db, Kodi 21 uses Addons34.db
+ADDONS_DB=$(find "${KODI_DB_DIR}" -name "Addons*.db" 2>/dev/null | head -1)
+
+if [ -n "${ADDONS_DB}" ]; then
+    # Database exists (Kodi has run before) - safe to modify
+    sqlite3 "${ADDONS_DB}" <<'SQLEOF'
+-- Enable our Media-Mux sync addon (no startup prompt)
+INSERT OR REPLACE INTO installed (addonID, enabled, installDate, origin)
+VALUES ('service.mediamux.sync', 1, datetime('now'), 'user');
+
+-- Disable version check addon (no "new version available" popup)
+INSERT OR REPLACE INTO installed (addonID, enabled, installDate, origin)
+VALUES ('service.xbmc.versioncheck', 0, datetime('now'), 'system');
+SQLEOF
+    chown 1000:1000 "${ADDONS_DB}"
+    log_ok "kodi db config"
+else
+    # Database doesn't exist yet - Kodi hasn't run
+    # Create a first-boot script to configure addons after Kodi initializes
+    # NOTE: Don't create KODI_DB_DIR here - let Kodi create it on first run
+    cat > "${INSTALL_DIR}/configure-kodi-addons.sh" << 'KODI_SCRIPT'
+#!/bin/bash
+# Configure Kodi addons database after first Kodi run
+# This script runs once, restarts Kodi, and then disables itself
+
+KODI_DB_DIR="/home/pi/.kodi/userdata/Database"
+ADDONS_DB=$(find "${KODI_DB_DIR}" -name "Addons*.db" 2>/dev/null | head -1)
+
+if [ -n "${ADDONS_DB}" ]; then
+    logger -t "media-mux" "Found Kodi database: ${ADDONS_DB}"
+
+    # Stop Kodi before modifying database
+    systemctl stop kodi 2>/dev/null || true
+    sleep 2
+
+    # Modify the database
+    sqlite3 "${ADDONS_DB}" <<'SQLEOF'
+INSERT OR REPLACE INTO installed (addonID, enabled, installDate, origin)
+VALUES ('service.mediamux.sync', 1, datetime('now'), 'user');
+INSERT OR REPLACE INTO installed (addonID, enabled, installDate, origin)
+VALUES ('service.xbmc.versioncheck', 0, datetime('now'), 'system');
+SQLEOF
+    chown pi:pi "${ADDONS_DB}"
+
+    logger -t "media-mux" "Kodi addons configured successfully, restarting Kodi..."
+
+    # Restart Kodi with addons pre-configured
+    systemctl start kodi
+
+    # Disable this service after success
+    systemctl disable media-mux-kodi-config.service
+    logger -t "media-mux" "First-boot Kodi configuration complete"
+fi
+KODI_SCRIPT
+    chmod +x "${INSTALL_DIR}/configure-kodi-addons.sh"
+    chown 1000:1000 "${INSTALL_DIR}/configure-kodi-addons.sh"
+
+    # Create systemd service to run after Kodi starts
+    cat > /etc/systemd/system/media-mux-kodi-config.service << EOF
+[Unit]
+Description=Configure Kodi addons for Media-Mux
+After=kodi.service
+Wants=kodi.service
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/sleep 30
+ExecStart=${INSTALL_DIR}/configure-kodi-addons.sh
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable media-mux-kodi-config.service
+    echo "[DEFERRED] Will configure after first Kodi run"
+fi
 
 #------------------------------------------------------------------------------
 # Set ownership
@@ -480,4 +692,9 @@ echo "    - NTP client (syncs from master)"
 echo ""
 echo "USB mount point: ${USB_MOUNT_POINT}"
 echo "Log file: /var/log/media-mux-selfhosted.log"
+echo ""
+echo "Kodi Sync Add-on:"
+echo "  - OSD button: Tap screen during playback → 'Sync' button"
+echo "  - Keyboard shortcut: Press 'S' during video"
+echo "  - Programs menu: Programs → Add-ons → Media-Mux Sync"
 echo "======================================"

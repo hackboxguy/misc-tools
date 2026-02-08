@@ -27,3 +27,4 @@ net-tools
 dnsmasq
 minidlna
 chrony
+sqlite3

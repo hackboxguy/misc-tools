@@ -510,6 +510,17 @@ else
     echo "[WARN] Failed to download stop script"
 fi
 
+# Download Kodi Addons database template (pre-configured addon settings)
+log_step "        Downloading Addons33.db template..."
+KODI_TEMPLATE_DIR="${INSTALL_DIR}/kodi-addon/templates/Database"
+mkdir -p "${KODI_TEMPLATE_DIR}"
+if curl -fsSL -o "${KODI_TEMPLATE_DIR}/Addons33.db" "${REPO_RAW_URL}/kodi-addon/templates/Database/Addons33.db"; then
+    chown 1000:1000 "${KODI_TEMPLATE_DIR}/Addons33.db"
+    log_ok "Addons33.db template"
+else
+    echo "[WARN] Failed to download Addons33.db template"
+fi
+
 #------------------------------------------------------------------------------
 # Step 9: Install Kodi Media-Mux Sync add-on
 #------------------------------------------------------------------------------
@@ -579,89 +590,26 @@ else
 fi
 
 #------------------------------------------------------------------------------
-# Step 11: Configure Kodi addons (auto-enable our addon, disable version check)
+# Step 11: Install pre-configured Kodi addons database
 #------------------------------------------------------------------------------
-log_step "[11/11] Configuring Kodi addons database..."
+log_step "[11/11] Installing Kodi addons database template..."
 
 KODI_DB_DIR="${KODI_USER_HOME}/.kodi/userdata/Database"
+KODI_TEMPLATE_DIR="${INSTALL_DIR}/kodi-addon/templates/Database"
 
-# Find existing Addons database - only modify if Kodi has run before
-# Kodi 20 uses Addons33.db, Kodi 21 uses Addons34.db
-ADDONS_DB=$(find "${KODI_DB_DIR}" -name "Addons*.db" 2>/dev/null | head -1)
+# Create Kodi Database directory
+mkdir -p "${KODI_DB_DIR}"
 
-if [ -n "${ADDONS_DB}" ]; then
-    # Database exists (Kodi has run before) - safe to modify
-    sqlite3 "${ADDONS_DB}" <<'SQLEOF'
--- Enable our Media-Mux sync addon (no startup prompt)
-INSERT OR REPLACE INTO installed (addonID, enabled, installDate, origin)
-VALUES ('service.mediamux.sync', 1, datetime('now'), 'user');
-
--- Disable version check addon (no "new version available" popup)
-INSERT OR REPLACE INTO installed (addonID, enabled, installDate, origin)
-VALUES ('service.xbmc.versioncheck', 0, datetime('now'), 'system');
-SQLEOF
-    chown 1000:1000 "${ADDONS_DB}"
-    log_ok "kodi db config"
+# Copy pre-configured Addons33.db template
+# This template has:
+#   - service.mediamux.sync enabled (no startup prompt)
+#   - service.xbmc.versioncheck disabled (no version popup)
+if [ -f "${KODI_TEMPLATE_DIR}/Addons33.db" ]; then
+    cp "${KODI_TEMPLATE_DIR}/Addons33.db" "${KODI_DB_DIR}/"
+    chown -R 1000:1000 "${KODI_DB_DIR}"
+    log_ok "Addons33.db installed"
 else
-    # Database doesn't exist yet - Kodi hasn't run
-    # Create a first-boot script to configure addons after Kodi initializes
-    # NOTE: Don't create KODI_DB_DIR here - let Kodi create it on first run
-    cat > "${INSTALL_DIR}/configure-kodi-addons.sh" << 'KODI_SCRIPT'
-#!/bin/bash
-# Configure Kodi addons database after first Kodi run
-# This script runs once, restarts Kodi, and then disables itself
-
-KODI_DB_DIR="/home/pi/.kodi/userdata/Database"
-ADDONS_DB=$(find "${KODI_DB_DIR}" -name "Addons*.db" 2>/dev/null | head -1)
-
-if [ -n "${ADDONS_DB}" ]; then
-    logger -t "media-mux" "Found Kodi database: ${ADDONS_DB}"
-
-    # Stop Kodi before modifying database
-    systemctl stop kodi 2>/dev/null || true
-    sleep 2
-
-    # Modify the database
-    sqlite3 "${ADDONS_DB}" <<'SQLEOF'
-INSERT OR REPLACE INTO installed (addonID, enabled, installDate, origin)
-VALUES ('service.mediamux.sync', 1, datetime('now'), 'user');
-INSERT OR REPLACE INTO installed (addonID, enabled, installDate, origin)
-VALUES ('service.xbmc.versioncheck', 0, datetime('now'), 'system');
-SQLEOF
-    chown pi:pi "${ADDONS_DB}"
-
-    logger -t "media-mux" "Kodi addons configured successfully, restarting Kodi..."
-
-    # Restart Kodi with addons pre-configured
-    systemctl start kodi
-
-    # Disable this service after success
-    systemctl disable media-mux-kodi-config.service
-    logger -t "media-mux" "First-boot Kodi configuration complete"
-fi
-KODI_SCRIPT
-    chmod +x "${INSTALL_DIR}/configure-kodi-addons.sh"
-    chown 1000:1000 "${INSTALL_DIR}/configure-kodi-addons.sh"
-
-    # Create systemd service to run after Kodi starts
-    cat > /etc/systemd/system/media-mux-kodi-config.service << EOF
-[Unit]
-Description=Configure Kodi addons for Media-Mux
-After=kodi.service
-Wants=kodi.service
-
-[Service]
-Type=oneshot
-ExecStartPre=/bin/sleep 30
-ExecStart=${INSTALL_DIR}/configure-kodi-addons.sh
-User=root
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    systemctl daemon-reload
-    systemctl enable media-mux-kodi-config.service
-    echo "[DEFERRED] Will configure after first Kodi run"
+    echo "[WARN] Addons33.db template not found at ${KODI_TEMPLATE_DIR}"
 fi
 
 #------------------------------------------------------------------------------

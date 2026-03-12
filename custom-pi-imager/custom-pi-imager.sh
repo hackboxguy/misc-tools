@@ -347,9 +347,21 @@ extract_image() {
 
 run_sdm() {
     log "Running SDM..."
-    
+
+    # Check host disk space - SDM uses host filesystem for nspawn/qemu temp files
+    local host_usage
+    host_usage=$(df --output=pcent / | tail -1 | tr -d ' %')
+    if [ "$host_usage" -ge 95 ]; then
+        local host_avail
+        host_avail=$(df -h --output=avail / | tail -1 | tr -d ' ')
+        error "Host root filesystem is ${host_usage}% full (${host_avail} free)"
+        error "SDM requires sufficient free space on the host for systemd-nspawn/qemu operations"
+        error "Free up disk space on your root filesystem before running this script"
+        exit 1
+    fi
+
     local sdm_cmd="sdm --batch"
-    
+
     if [ "$EXTEND_SIZE_MB" -gt 0 ]; then
         sdm_cmd="$sdm_cmd --extend --xmb ${EXTEND_SIZE_MB}"
         info "Extending image by ${EXTEND_SIZE_MB}MB"
@@ -357,17 +369,31 @@ run_sdm() {
         info "Skipping image extension (using existing space)"
         sdm_cmd="$sdm_cmd --redo-customize"
     fi
-    
+
     sdm_cmd="$sdm_cmd --customize"
-    
+
     if [ -n "$PI_PASSWORD" ]; then
         sdm_cmd="$sdm_cmd --plugin user:\"adduser=pi|password=${PI_PASSWORD}\""
     fi
-    
+
     sdm_cmd="$sdm_cmd --plugin disables:piwiz --expand-root --nowait-timesync \
         \"${WORK_DIR}/${IMAGE_NAME}\""
-    
-    eval $sdm_cmd
+
+    if ! eval $sdm_cmd; then
+        # Check if failure was due to host disk space
+        local post_usage
+        post_usage=$(df --output=pcent / | tail -1 | tr -d ' %')
+        if [ "$post_usage" -ge 95 ]; then
+            local post_avail
+            post_avail=$(df -h --output=avail / | tail -1 | tr -d ' ')
+            error "SDM failed - host root filesystem is ${post_usage}% full (${post_avail} free)"
+            error "SDM needs free space on the host for systemd-nspawn/qemu temporary files"
+            error "Free up disk space on your root filesystem and try again"
+        else
+            error "SDM customization failed. Check the output above for details"
+        fi
+        exit 1
+    fi
     log "SDM complete"
 }
 

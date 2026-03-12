@@ -76,6 +76,13 @@ if [[ ! -f "$RPI_IMAGE" ]]; then
     exit 1
 fi
 
+if [[ "$RPI_IMAGE" == *.xz ]]; then
+    log_error "Compressed image (.img.xz) cannot be used directly with losetup."
+    log_error "Please decompress it first: xz -dk \"$RPI_IMAGE\""
+    log_error "Then pass the decompressed .img file instead."
+    exit 1
+fi
+
 if [[ ! -d "$KERNEL_SRC" ]]; then
     log_error "Kernel source not found: $KERNEL_SRC"
     exit 1

@@ -329,12 +329,13 @@ extract_image() {
     info "Source: $(du -h ${IMAGE_SOURCE} | cut -f1)"
 
     # Check host root filesystem - SDM/nspawn needs space on / regardless of output dir
-    local host_usage
-    host_usage=$(df --output=pcent / | tail -1 | tr -d ' %')
-    if [ "$host_usage" -ge 95 ]; then
+    local host_avail_mb
+    host_avail_mb=$(df -BM --output=avail / | tail -1 | tr -d ' M')
+    if [ "$host_avail_mb" -lt 2048 ]; then
         local host_avail
         host_avail=$(df -h --output=avail / | tail -1 | tr -d ' ')
-        error "Host root filesystem is ${host_usage}% full (${host_avail} free)"
+        error "Host root filesystem has only ${host_avail} free (minimum 2GB required)"
+        error "SDM needs free space on the host for systemd-nspawn/qemu temporary files"
         error "Free up disk space on your root filesystem before running this script"
         exit 1
     fi
@@ -361,13 +362,13 @@ run_sdm() {
     log "Running SDM..."
 
     # Check host disk space - SDM uses host filesystem for nspawn/qemu temp files
-    local host_usage
-    host_usage=$(df --output=pcent / | tail -1 | tr -d ' %')
-    if [ "$host_usage" -ge 95 ]; then
+    local host_avail_mb
+    host_avail_mb=$(df -BM --output=avail / | tail -1 | tr -d ' M')
+    if [ "$host_avail_mb" -lt 2048 ]; then
         local host_avail
         host_avail=$(df -h --output=avail / | tail -1 | tr -d ' ')
-        error "Host root filesystem is ${host_usage}% full (${host_avail} free)"
-        error "SDM requires sufficient free space on the host for systemd-nspawn/qemu operations"
+        error "Host root filesystem has only ${host_avail} free (minimum 2GB required)"
+        error "SDM needs free space on the host for systemd-nspawn/qemu temporary files"
         error "Free up disk space on your root filesystem before running this script"
         exit 1
     fi
@@ -393,12 +394,12 @@ run_sdm() {
 
     if ! eval $sdm_cmd; then
         # Check if failure was due to host disk space
-        local post_usage
-        post_usage=$(df --output=pcent / | tail -1 | tr -d ' %')
-        if [ "$post_usage" -ge 95 ]; then
+        local post_avail_mb
+        post_avail_mb=$(df -BM --output=avail / | tail -1 | tr -d ' M')
+        if [ "$post_avail_mb" -lt 2048 ]; then
             local post_avail
             post_avail=$(df -h --output=avail / | tail -1 | tr -d ' ')
-            error "SDM failed - host root filesystem is ${post_usage}% full (${post_avail} free)"
+            error "SDM failed - host root filesystem has only ${post_avail} free"
             error "SDM needs free space on the host for systemd-nspawn/qemu temporary files"
             error "Free up disk space on your root filesystem and try again"
         else

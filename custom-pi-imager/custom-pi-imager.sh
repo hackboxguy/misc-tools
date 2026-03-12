@@ -327,10 +327,22 @@ extract_image() {
     log "Extracting..."
     [ ! -f "${IMAGE_SOURCE}" ] && error "Not found: ${IMAGE_SOURCE}"
     info "Source: $(du -h ${IMAGE_SOURCE} | cut -f1)"
-    
+
+    # Check host root filesystem - SDM/nspawn needs space on / regardless of output dir
+    local host_usage
+    host_usage=$(df --output=pcent / | tail -1 | tr -d ' %')
+    if [ "$host_usage" -ge 95 ]; then
+        local host_avail
+        host_avail=$(df -h --output=avail / | tail -1 | tr -d ' ')
+        error "Host root filesystem is ${host_usage}% full (${host_avail} free)"
+        error "Free up disk space on your root filesystem before running this script"
+        exit 1
+    fi
+
+    # Check output directory space
     local avail=$(df -BM "${WORK_DIR}" | tail -1 | awk '{print $4}' | sed 's/M//')
     [ ${avail} -lt 5000 ] && warn "Low space: ${avail}MB" && read -p "Continue? (y/N) " -n 1 -r && echo && [[ ! $REPLY =~ ^[Yy]$ ]] && error "Aborted"
-    
+
     # Check if image is compressed or already extracted
     if [[ "${IMAGE_SOURCE}" == *.xz ]]; then
         info "Compressed image detected, extracting..."

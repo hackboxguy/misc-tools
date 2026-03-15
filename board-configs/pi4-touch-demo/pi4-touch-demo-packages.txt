@@ -1,0 +1,26 @@
+#micropanel hook - cannot be generic as it has some special cmake flags
+packages/micropanel-hook.sh
+
+#xc3sprog hook - this is the generic one
+../../custom-pi-imager/packages/generic-package-hook.sh|https://github.com/hackboxguy/xc3sprog.git|master|/home/pi/micropanel/fpga|libusb-dev,libftdi-dev,libgpiod-dev
+
+#openFPGALoader hook - this is the generic one
+../../custom-pi-imager/packages/generic-package-hook.sh|https://github.com/trabucayre/openFPGALoader.git|v1.0.0|/home/pi/micropanel/fpga|libusb-dev,libftdi-dev,libgpiod-dev,libftdi1-dev,libhidapi-dev,zlib1g-dev
+
+#qt-apps/measure-display.sh
+../../custom-pi-imager/packages/generic-package-hook.sh|https://github.com/hackboxguy/br-wrapper.git|983-dynamic-config|/home/pi/micropanel|qtquickcontrols2-5-dev,qtdeclarative5-dev|systemctl mask getty@tty1.service;systemctl enable /home/pi/micropanel/lib/systemd/system/qt-demo-launcher.service
+
+#fpga binaries as a Local source package
+#../../custom-pi-imager/packages/generic-package-hook.sh|file:///home/adav/git-repos/misc-tools/fpga-bins|local|/home/pi/micropanel
+../../custom-pi-imager/packages/generic-package-hook.sh|file:///home/adav/repobins/fpga-bins|local|/home/pi/micropanel
+
+#mcu binaries as a Local source package
+#../../custom-pi-imager/packages/generic-package-hook.sh|file:///home/adav/git-repos/tmp/sp6bins|local|/home/pi/micropanel
+../../custom-pi-imager/packages/generic-package-hook.sh|file:///home/adav/repobins/sp6bins|local|/home/pi/micropanel
+
+#als-dimmer hook - cannot be generic as it has some special cmake flags
+packages/als-dimmer-hook.sh
+
+#disptool/automated-test-scripts
+#../../custom-pi-imager/packages/generic-package-hook.sh|file:///home/adav/git-repos/tmp/archsp6|local|/home/pi/micropanel
+../../custom-pi-imager/packages/generic-package-hook.sh|file:///home/adav/repobins/archsp6|local|/home/pi/micropanel

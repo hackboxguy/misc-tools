@@ -1,0 +1,49 @@
+# pi4-touch-demo: Full image build steps
+#
+# Prerequisites:
+#   - Base RaspiOS image: 2025-10-01-raspios-bookworm-arm64-lite.img.xz
+#   - br-wrapper repo cloned: git clone -b 983-dynamic-config https://github.com/hackboxguy/br-wrapper.git
+#   - Local binary repos at /home/adav/repobins/{fpga-bins,sp6bins,archsp6}
+#
+# Directory layout assumed:
+#   ~/pi4-img-builder/
+#   ├── misc-tools/         (this repo)
+#   └── br-wrapper/         (cloned separately)
+
+BOARD_CFG=../../board-configs/pi4-touch-demo
+
+# Stage 1: Base OS image (install apt packages)
+cd ~/pi4-img-builder/misc-tools/custom-pi-imager
+sudo ./custom-pi-imager.sh \
+    --mode=base \
+    --baseimage=/home/adav/pi4-image-customizer/2025-10-01-raspios-bookworm-arm64-lite.img.xz \
+    --output=/tmp/base \
+    --password=brb0x \
+    --extend-size-mb=1800 \
+    --runtime-package=$BOARD_CFG/pi4-touch-demo-runtime-deps.txt \
+    --builddep-package=$BOARD_CFG/pi4-touch-demo-build-deps.txt \
+    --version="01.02"
+
+sudo chown -R $USER:users /tmp/base
+mv /tmp/base/2025-10-01-raspios-bookworm-arm64-lite.img \
+   /home/adav/pi4-image-customizer/2025-10-01-raspios-bookworm-arm64-lite-base-micropanel-01-02.img
+
+# Stage 2: Kernel drivers (hh983-serializer, himax-touch)
+cd ~/pi4-img-builder
+sudo ./misc-tools/custom-pi-kernel-builder/scripts/00-build-all.sh \
+    --branch rpi-6.12.y \
+    --config ~/pi4-img-builder/misc-tools/custom-pi-kernel-builder/configs/config-6.12.47+rpt-rpi-v8 \
+    --drivers ~/pi4-img-builder/br-wrapper/package \
+    --image /home/adav/pi4-image-customizer/2025-10-01-raspios-bookworm-arm64-lite-base-micropanel-01-02.img \
+    --build-dir ~/pi4-img-builder/output \
+    --backup
+
+# Stage 3: Custom libs/services/apps (micropanel, qt-demo-launcher, etc.)
+cd misc-tools/custom-pi-imager
+sudo ./custom-pi-imager.sh \
+    --mode=incremental \
+    --baseimage=/home/adav/pi4-image-customizer/2025-10-01-raspios-bookworm-arm64-lite-base-micropanel-01-02.img \
+    --output=/tmp/custom \
+    --builddep-package=$BOARD_CFG/pi4-touch-demo-build-deps.txt \
+    --setup-hook-list=$BOARD_CFG/pi4-touch-demo-packages.txt \
+    --version="01.02"

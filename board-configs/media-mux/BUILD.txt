@@ -1,0 +1,94 @@
+# media-mux: Image build steps
+#
+# Prerequisites:
+#   - RaspiOS Lite image (bookworm arm64)
+#   - misc-tools repo cloned
+#
+# Three build variants:
+#   A) From source + external DLNA    (media-mux-packages.txt)
+#   B) Pre-compiled + external DLNA   (media-mux-packages-extern-dlna.txt)
+#   C) Pre-compiled + self-hosted DLNA (media-mux-packages-selfhosted-dlna.txt)
+#
+# Variants B and C use pre-compiled binaries (no build tools needed on target).
+# Variant C includes USB-based master/slave detection with built-in DHCP/DLNA/NTP.
+
+# ==============================================================================
+# Variant A: Build from source + external DLNA
+# ==============================================================================
+
+BOARD_CFG=./board-configs/media-mux
+
+# Stage 1: Base OS image
+cd ~/misc-tools
+sudo ./custom-pi-imager/custom-pi-imager.sh \
+    --mode=base \
+    --baseimage=$HOME/2024-11-19-raspios-bookworm-arm64-lite.img.xz \
+    --output=/tmp/media-mux-base \
+    --password=brb0x \
+    --extend-size-mb=1000 \
+    --runtime-package=$BOARD_CFG/media-mux-runtime-deps.txt \
+    --builddep-package=$BOARD_CFG/media-mux-build-deps.txt \
+    --version="01.00"
+
+# Stage 2: Install apps and services
+sudo ./custom-pi-imager/custom-pi-imager.sh \
+    --mode=incremental \
+    --baseimage=/tmp/media-mux-base/2024-11-19-raspios-bookworm-arm64-lite.img \
+    --output=/tmp/media-mux-final \
+    --builddep-package=$BOARD_CFG/media-mux-build-deps.txt \
+    --setup-hook-list=$BOARD_CFG/media-mux-packages.txt \
+    --version="01.00"
+
+# ==============================================================================
+# Variant B: Pre-compiled binaries + external DLNA (no build tools)
+# ==============================================================================
+
+BOARD_CFG=./board-configs/media-mux
+
+# Stage 1: Base OS image (minimal runtime, no build deps)
+cd ~/misc-tools
+sudo ./custom-pi-imager/custom-pi-imager.sh \
+    --mode=base \
+    --baseimage=$HOME/2024-11-19-raspios-bookworm-arm64-lite.img.xz \
+    --output=/tmp/media-mux-base \
+    --password=brb0x \
+    --extend-size-mb=1000 \
+    --runtime-package=$BOARD_CFG/media-mux-runtime-deps-minimal.txt \
+    --builddep-package=none \
+    --version="01.00"
+
+# Stage 2: Install pre-compiled binaries
+sudo ./custom-pi-imager/custom-pi-imager.sh \
+    --mode=incremental \
+    --baseimage=/tmp/media-mux-base/2024-11-19-raspios-bookworm-arm64-lite.img \
+    --output=/tmp/media-mux-final \
+    --builddep-package=none \
+    --setup-hook-list=$BOARD_CFG/media-mux-packages-extern-dlna.txt \
+    --version="01.00"
+
+# ==============================================================================
+# Variant C: Pre-compiled binaries + self-hosted DLNA/DHCP/NTP
+# ==============================================================================
+
+BOARD_CFG=./board-configs/media-mux
+
+# Stage 1: Base OS image (minimal runtime with DLNA/DHCP/NTP packages)
+cd ~/misc-tools
+sudo ./custom-pi-imager/custom-pi-imager.sh \
+    --mode=base \
+    --baseimage=$HOME/2024-11-19-raspios-bookworm-arm64-lite.img.xz \
+    --output=/tmp/media-mux-base \
+    --password=brb0x \
+    --extend-size-mb=1000 \
+    --runtime-package=$BOARD_CFG/media-mux-runtime-deps-minimal.txt \
+    --builddep-package=none \
+    --version="01.00"
+
+# Stage 2: Install pre-compiled binaries + self-hosted services
+sudo ./custom-pi-imager/custom-pi-imager.sh \
+    --mode=incremental \
+    --baseimage=/tmp/media-mux-base/2024-11-19-raspios-bookworm-arm64-lite.img \
+    --output=/tmp/media-mux-final \
+    --builddep-package=none \
+    --setup-hook-list=$BOARD_CFG/media-mux-packages-selfhosted-dlna.txt \
+    --version="01.00"

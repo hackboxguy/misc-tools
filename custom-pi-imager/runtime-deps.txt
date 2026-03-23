@@ -33,6 +33,7 @@ libddcutil-dev
 argyll
 jq
 bc
+dnsmasq
 qml-module-qtquick-layouts
 qml-module-qtquick-window2
 qml-module-qtquick-controls2

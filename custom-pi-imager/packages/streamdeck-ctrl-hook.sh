@@ -65,10 +65,9 @@ if [ -d "${CONFIG_DIR}/scripts" ]; then
     chmod +x "${CONFIG_DIR}/scripts/"*.sh 2>/dev/null || true
 fi
 
-# Install udev rule
+# Install udev rule (pi user is already in plugdev on Pi OS Lite)
 echo "[5/6] Installing udev rule..."
 cp "${INSTALL_DIR}/99-streamdeck.rules" /etc/udev/rules.d/
-usermod -aG plugdev "$INSTALL_USER"
 
 # Install tmpfiles.d and systemd service
 echo "[6/6] Installing systemd service..."

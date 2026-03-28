@@ -21,6 +21,9 @@ packages/generic-package-hook.sh|file:///home/adav/repobins/sp6bins|local|/home/
 #als-dimmer hook - cannot be generic as it has some special cmake flags
 packages/als-dimmer-hook.sh
 
+#streamdeck-ctrl hook - git clone + setup (no compilation needed)
+packages/streamdeck-ctrl-hook.sh
+
 #disptool/automated-test-scripts
 #packages/generic-package-hook.sh|file:///home/adav/git-repos/tmp/archsp6|local|/home/pi/micropanel
 packages/generic-package-hook.sh|file:///home/adav/repobins/archsp6|local|/home/pi/micropanel

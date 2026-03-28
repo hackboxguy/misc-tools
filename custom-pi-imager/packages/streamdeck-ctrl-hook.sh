@@ -7,15 +7,26 @@ echo "======================================"
 echo ""
 
 # Environment variables available:
-# - MOUNT_POINT: Root filesystem mount point
-# - PI_PASSWORD: User password (empty if unchanged)
-# - IMAGE_WORK_DIR: Working directory path
+# - MOUNT_POINT, PI_PASSWORD, IMAGE_WORK_DIR (always)
+# - HOOK_GIT_REPO: git URL (parameterized mode)
+# - HOOK_GIT_TAG: screen name, e.g. "display-control" (parameterized mode)
+# - HOOK_INSTALL_DEST: install path (parameterized mode)
+# - HOOK_DEP_LIST: runtime deps (parameterized mode)
+#
+# Usage in micropanel-packages.txt:
+#   packages/streamdeck-ctrl-hook.sh|https://github.com/hackboxguy/streamdeck-ctrl.git|display-control|/home/pi/streamdeck-ctrl|socat
+#                                                                                      ^^^^^^^^^^^^^^^ screen name
 
-INSTALL_DIR="/home/pi/streamdeck-ctrl"
-CONFIG_FILE="${INSTALL_DIR}/screens/display-control/display-control.json"
+INSTALL_DIR="${HOOK_INSTALL_DEST:-/home/pi/streamdeck-ctrl}"
+SCREEN_NAME="${HOOK_GIT_TAG:-display-control}"
+GIT_REPO="${HOOK_GIT_REPO:-https://github.com/hackboxguy/streamdeck-ctrl.git}"
+CONFIG_FILE="${INSTALL_DIR}/screens/${SCREEN_NAME}/${SCREEN_NAME}.json"
 INSTALL_USER="pi"
 
 echo "Running inside chroot environment"
+echo "  Repo:   ${GIT_REPO}"
+echo "  Screen: ${SCREEN_NAME}"
+echo "  Dest:   ${INSTALL_DIR}"
 echo ""
 
 # Install runtime dependencies
@@ -27,10 +38,18 @@ apt-get install -y -qq \
     python3-elgato-streamdeck
 
 # Clone streamdeck-ctrl repository
-echo "[2/6] Cloning streamdeck-ctrl from GitHub..."
+echo "[2/6] Cloning streamdeck-ctrl..."
 cd /tmp
-git clone https://github.com/hackboxguy/streamdeck-ctrl.git
+git clone "${GIT_REPO}" streamdeck-ctrl
 cp -r streamdeck-ctrl "${INSTALL_DIR}"
+
+# Verify screen config exists
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "ERROR: Screen config not found: ${CONFIG_FILE}"
+    echo "  Available screens:"
+    ls -1 "${INSTALL_DIR}/screens/" 2>/dev/null || echo "  (none)"
+    exit 1
+fi
 
 # Resolve {INSTALL_DIR} in the config file
 echo "[3/6] Resolving {INSTALL_DIR} in config..."
@@ -74,6 +93,7 @@ echo "======================================"
 echo "  streamdeck-ctrl Setup Complete"
 echo "======================================"
 echo "Installation path: ${INSTALL_DIR}"
+echo "Screen: ${SCREEN_NAME}"
 echo "Config: ${CONFIG_FILE}"
 echo "Service: udev-triggered (starts when Stream Deck is present)"
 echo "======================================"

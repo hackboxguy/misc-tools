@@ -38,7 +38,7 @@ log_ok() {
 # Step 0: Install hook dependencies from HOOK_DEP_LIST
 #------------------------------------------------------------------------------
 if [ -n "$HOOK_DEP_LIST" ]; then
-    log_step "[0/6] Installing dependencies (${HOOK_DEP_LIST})..."
+    log_step "[0/7] Installing dependencies (${HOOK_DEP_LIST})..."
     DEPS_SPACE_SEP=$(echo "$HOOK_DEP_LIST" | tr ',' ' ')
     apt-get install -y $DEPS_SPACE_SEP > /dev/null 2>&1
     log_ok
@@ -47,7 +47,7 @@ fi
 #------------------------------------------------------------------------------
 # Step 1: Get source
 #------------------------------------------------------------------------------
-log_step "[1/6] Getting source..."
+log_step "[1/7] Getting source..."
 if [ -n "$HOOK_LOCAL_SOURCE" ] && [ -d "$HOOK_LOCAL_SOURCE" ]; then
     SRC_DIR="$HOOK_LOCAL_SOURCE"
 elif [ -n "$HOOK_GIT_REPO" ]; then
@@ -67,7 +67,7 @@ log_ok
 #------------------------------------------------------------------------------
 # Step 2: Install addon to ~/.kodi/addons/
 #------------------------------------------------------------------------------
-log_step "[2/6] Installing video loop toggle addon..."
+log_step "[2/7] Installing video loop toggle addon..."
 
 # Create all required Kodi directories (including temp/ for logs)
 mkdir -p "${KODI_ADDONS_DIR}"
@@ -83,7 +83,7 @@ log_ok
 #------------------------------------------------------------------------------
 # Step 3: Copy Estuary skin to user directory and patch it
 #------------------------------------------------------------------------------
-log_step "[3/6] Patching Kodi Estuary skin..."
+log_step "[3/7] Patching Kodi Estuary skin..."
 
 if [ -d "${SYSTEM_SKIN_DIR}" ] && [ ! -d "${USER_SKIN_DIR}" ]; then
     cp -r "${SYSTEM_SKIN_DIR}" "${USER_SKIN_DIR}"
@@ -109,7 +109,7 @@ fi
 #------------------------------------------------------------------------------
 # Step 4: Install keymap
 #------------------------------------------------------------------------------
-log_step "[4/6] Installing keymap (L key)..."
+log_step "[4/7] Installing keymap (L key)..."
 
 mkdir -p "${KODI_USERDATA_DIR}/keymaps"
 cp "${SRC_DIR}/addons/script.videoloop.toggle/resources/keymaps/videoloop.xml" \
@@ -118,9 +118,25 @@ chown -R 1000:1000 "${KODI_USERDATA_DIR}/keymaps"
 log_ok
 
 #------------------------------------------------------------------------------
-# Step 5: Install pre-built Kodi addons database
+# Step 5: Enable Kodi web server (JSON-RPC over HTTP)
 #------------------------------------------------------------------------------
-log_step "[5/6] Installing Kodi addons database..."
+log_step "[5/7] Enabling Kodi web server for API access..."
+
+mkdir -p "${KODI_USERDATA_DIR}"
+# Install pre-configured guisettings.xml (captured from a working Kodi
+# installation with HTTP web server enabled on port 8080, no auth)
+if [ -f "${SRC_DIR}/addons/script.videoloop.toggle/guisettings.xml" ]; then
+    cp "${SRC_DIR}/addons/script.videoloop.toggle/guisettings.xml" "${KODI_USERDATA_DIR}/"
+    chown 1000:1000 "${KODI_USERDATA_DIR}/guisettings.xml"
+    log_ok
+else
+    echo "[SKIP] guisettings.xml not found in repo"
+fi
+
+#------------------------------------------------------------------------------
+# Step 6: Install pre-built Kodi addons database
+#------------------------------------------------------------------------------
+log_step "[6/7] Installing Kodi addons database..."
 
 # Use a pre-built Addons33.db captured from a working Kodi installation
 # with script.videoloop.toggle already enabled. This avoids schema issues
@@ -140,7 +156,7 @@ fi
 #------------------------------------------------------------------------------
 # Step 6: Copy source to install destination (for reference)
 #------------------------------------------------------------------------------
-log_step "[6/6] Copying source to ${INSTALL_DIR}..."
+log_step "[7/7] Copying source to ${INSTALL_DIR}..."
 mkdir -p "${INSTALL_DIR}"
 cp -r "${SRC_DIR}/addons" "${INSTALL_DIR}/"
 cp -r "${SRC_DIR}/skin-patches" "${INSTALL_DIR}/"

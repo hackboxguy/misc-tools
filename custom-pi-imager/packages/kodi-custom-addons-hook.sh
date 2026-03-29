@@ -35,6 +35,16 @@ log_ok() {
 }
 
 #------------------------------------------------------------------------------
+# Step 0: Install hook dependencies from HOOK_DEP_LIST
+#------------------------------------------------------------------------------
+if [ -n "$HOOK_DEP_LIST" ]; then
+    log_step "[0/6] Installing dependencies (${HOOK_DEP_LIST})..."
+    DEPS_SPACE_SEP=$(echo "$HOOK_DEP_LIST" | tr ',' ' ')
+    apt-get install -y $DEPS_SPACE_SEP > /dev/null 2>&1
+    log_ok
+fi
+
+#------------------------------------------------------------------------------
 # Step 1: Get source
 #------------------------------------------------------------------------------
 log_step "[1/6] Getting source..."

@@ -69,7 +69,9 @@ log_ok
 #------------------------------------------------------------------------------
 log_step "[2/6] Installing video loop toggle addon..."
 
+# Create all required Kodi directories (including temp/ for logs)
 mkdir -p "${KODI_ADDONS_DIR}"
+mkdir -p "${KODI_USER_HOME}/.kodi/temp"
 rm -rf "${KODI_ADDONS_DIR}/script.videoloop.toggle"
 cp -r "${SRC_DIR}/addons/script.videoloop.toggle" "${KODI_ADDONS_DIR}/"
 
@@ -116,53 +118,66 @@ chown -R 1000:1000 "${KODI_USERDATA_DIR}/keymaps"
 log_ok
 
 #------------------------------------------------------------------------------
-# Step 5: Enable addon in Kodi database
+# Step 5: Create first-boot addon enabler
 #------------------------------------------------------------------------------
-log_step "[5/6] Enabling addon in Kodi database..."
+log_step "[5/6] Creating first-boot addon enabler..."
 
-KODI_DB_DIR="${KODI_USERDATA_DIR}/Database"
-mkdir -p "${KODI_DB_DIR}"
+# Instead of creating a fake Addons33.db (which Kodi rejects due to schema
+# mismatch), we let Kodi create its own DB on first boot and use a helper
+# script that enables our addon via JSON-RPC after Kodi is running.
+ENABLER_SCRIPT="${INSTALL_DIR}/enable-addons-once.sh"
+cat > "${ENABLER_SCRIPT}" << 'ENABLER'
+#!/bin/bash
+# First-boot addon enabler - waits for Kodi JSON-RPC then enables addons.
+# Runs once, then disables itself.
 
-# If Addons33.db exists, update it; otherwise create a minimal one
-ADDONS_DB="${KODI_DB_DIR}/Addons33.db"
+KODI_URL="http://127.0.0.1:8080/jsonrpc"
+MARKER="/home/pi/kodi-custom-addons/.addons-enabled"
 
-if command -v sqlite3 >/dev/null 2>&1; then
-    if [ ! -f "${ADDONS_DB}" ]; then
-        # Create minimal addons database
-        sqlite3 "${ADDONS_DB}" << 'SQL'
-CREATE TABLE IF NOT EXISTS installed (
-    id INTEGER PRIMARY KEY,
-    addonID TEXT UNIQUE,
-    enabled INTEGER DEFAULT 1,
-    installDate TEXT DEFAULT (datetime('now'))
-);
-CREATE TABLE IF NOT EXISTS disabled (
-    id INTEGER PRIMARY KEY,
-    addonID TEXT UNIQUE
-);
-SQL
+# Skip if already done
+[ -f "$MARKER" ] && exit 0
+
+# Wait for Kodi JSON-RPC to become available (up to 120 seconds)
+for i in $(seq 1 60); do
+    if curl -sf "$KODI_URL" -H "Content-Type: application/json" \
+         -d '{"jsonrpc":"2.0","method":"JSONRPC.Ping","id":1}' >/dev/null 2>&1; then
+        break
     fi
+    sleep 2
+done
 
-    # Enable our addon (insert or update)
-    sqlite3 "${ADDONS_DB}" << 'SQL'
-INSERT OR REPLACE INTO installed (addonID, enabled)
-VALUES ('script.videoloop.toggle', 1);
-DELETE FROM disabled WHERE addonID = 'script.videoloop.toggle';
-SQL
+# Enable the video loop toggle addon
+RESULT=$(curl -sf "$KODI_URL" -H "Content-Type: application/json" \
+    -d '{"jsonrpc":"2.0","method":"Addons.SetAddonEnabled","params":{"addonid":"script.videoloop.toggle","enabled":true},"id":1}' 2>&1)
 
-    # Disable version check notifications
-    sqlite3 "${ADDONS_DB}" << 'SQL'
-INSERT OR REPLACE INTO installed (addonID, enabled)
-VALUES ('service.xbmc.versioncheck', 0);
-INSERT OR REPLACE INTO disabled (addonID)
-VALUES ('service.xbmc.versioncheck');
-SQL
-
-    chown 1000:1000 "${ADDONS_DB}"
-    log_ok
-else
-    echo "[SKIP] sqlite3 not available - addon will prompt on first run"
+if echo "$RESULT" | grep -q '"OK"'; then
+    touch "$MARKER"
+    logger "kodi-custom-addons: video loop toggle addon enabled"
 fi
+ENABLER
+chmod +x "${ENABLER_SCRIPT}"
+
+# Create systemd service to run enabler on boot
+cat > /etc/systemd/system/kodi-addon-enabler.service << EOF
+[Unit]
+Description=Enable Kodi custom addons on first boot
+After=network.target
+Wants=network.target
+
+[Service]
+Type=oneshot
+User=pi
+ExecStart=${INSTALL_DIR}/enable-addons-once.sh
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable kodi-addon-enabler.service
+
+chown 1000:1000 "${ENABLER_SCRIPT}"
+log_ok
 
 #------------------------------------------------------------------------------
 # Step 6: Copy source to install destination (for reference)

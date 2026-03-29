@@ -27,3 +27,7 @@ packages/streamdeck-ctrl-hook.sh|https://github.com/hackboxguy/streamdeck-ctrl.g
 #disptool/automated-test-scripts
 #packages/generic-package-hook.sh|file:///home/adav/git-repos/tmp/archsp6|local|/home/pi/micropanel
 packages/generic-package-hook.sh|file:///home/adav/repobins/archsp6|local|/home/pi/micropanel
+
+
+#kodi custom add-on(video loop button)
+packages/kodi-custom-addons-hook.sh|https://github.com/hackboxguy/kodi-custom-addons.git|main|/home/pi/kodi-custom-addons|sqlite3

@@ -37,3 +37,4 @@ dnsmasq
 qml-module-qtquick-layouts
 qml-module-qtquick-window2
 qml-module-qtquick-controls2
+sqlite3

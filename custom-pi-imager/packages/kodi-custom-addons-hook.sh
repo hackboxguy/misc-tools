@@ -118,67 +118,24 @@ chown -R 1000:1000 "${KODI_USERDATA_DIR}/keymaps"
 log_ok
 
 #------------------------------------------------------------------------------
-# Step 5: Create first-boot addon enabler
+# Step 5: Install pre-built Kodi addons database
 #------------------------------------------------------------------------------
-log_step "[5/6] Creating first-boot addon enabler..."
+log_step "[5/6] Installing Kodi addons database..."
 
-# Instead of creating a fake Addons33.db (which Kodi rejects due to schema
-# mismatch), we let Kodi create its own DB on first boot and use a helper
-# script that enables our addon via JSON-RPC after Kodi is running.
-mkdir -p "${INSTALL_DIR}"
-ENABLER_SCRIPT="${INSTALL_DIR}/enable-addons-once.sh"
-cat > "${ENABLER_SCRIPT}" << 'ENABLER'
-#!/bin/bash
-# First-boot addon enabler - waits for Kodi JSON-RPC then enables addons.
-# Runs once, then disables itself.
+# Use a pre-built Addons33.db captured from a working Kodi installation
+# with script.videoloop.toggle already enabled. This avoids schema issues
+# from creating the DB from scratch and removes the need for a first-boot
+# enabler service (which requires Kodi's HTTP JSON-RPC to be enabled).
+KODI_DB_DIR="${KODI_USERDATA_DIR}/Database"
+mkdir -p "${KODI_DB_DIR}"
 
-KODI_URL="http://127.0.0.1:8080/jsonrpc"
-MARKER="/home/pi/kodi-custom-addons/.addons-enabled"
-
-# Skip if already done
-[ -f "$MARKER" ] && exit 0
-
-# Wait for Kodi JSON-RPC to become available (up to 120 seconds)
-for i in $(seq 1 60); do
-    if curl -sf "$KODI_URL" -H "Content-Type: application/json" \
-         -d '{"jsonrpc":"2.0","method":"JSONRPC.Ping","id":1}' >/dev/null 2>&1; then
-        break
-    fi
-    sleep 2
-done
-
-# Enable the video loop toggle addon
-RESULT=$(curl -sf "$KODI_URL" -H "Content-Type: application/json" \
-    -d '{"jsonrpc":"2.0","method":"Addons.SetAddonEnabled","params":{"addonid":"script.videoloop.toggle","enabled":true},"id":1}' 2>&1)
-
-if echo "$RESULT" | grep -q '"OK"'; then
-    touch "$MARKER"
-    logger "kodi-custom-addons: video loop toggle addon enabled"
+if [ -f "${SRC_DIR}/db/Addons33.db" ]; then
+    cp "${SRC_DIR}/db/Addons33.db" "${KODI_DB_DIR}/"
+    chown 1000:1000 "${KODI_DB_DIR}/Addons33.db"
+    log_ok
+else
+    echo "[SKIP] Addons33.db template not found in repo"
 fi
-ENABLER
-chmod +x "${ENABLER_SCRIPT}"
-
-# Create systemd service to run enabler on boot
-cat > /etc/systemd/system/kodi-addon-enabler.service << EOF
-[Unit]
-Description=Enable Kodi custom addons on first boot
-After=network.target
-Wants=network.target
-
-[Service]
-Type=oneshot
-User=pi
-ExecStart=${INSTALL_DIR}/enable-addons-once.sh
-RemainAfterExit=no
-
-[Install]
-WantedBy=multi-user.target
-EOF
-systemctl daemon-reload
-systemctl enable kodi-addon-enabler.service
-
-chown 1000:1000 "${ENABLER_SCRIPT}"
-log_ok
 
 #------------------------------------------------------------------------------
 # Step 6: Copy source to install destination (for reference)
@@ -190,6 +147,9 @@ cp -r "${SRC_DIR}/skin-patches" "${INSTALL_DIR}/"
 cp -r "${SRC_DIR}/packages" "${INSTALL_DIR}/"
 chown -R 1000:1000 "${INSTALL_DIR}"
 log_ok
+
+# Ensure entire .kodi tree is owned by pi (hook runs as root in chroot)
+chown -R 1000:1000 "${KODI_USER_HOME}/.kodi"
 
 #------------------------------------------------------------------------------
 # Cleanup

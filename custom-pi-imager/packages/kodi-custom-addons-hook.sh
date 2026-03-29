@@ -125,6 +125,7 @@ log_step "[5/6] Creating first-boot addon enabler..."
 # Instead of creating a fake Addons33.db (which Kodi rejects due to schema
 # mismatch), we let Kodi create its own DB on first boot and use a helper
 # script that enables our addon via JSON-RPC after Kodi is running.
+mkdir -p "${INSTALL_DIR}"
 ENABLER_SCRIPT="${INSTALL_DIR}/enable-addons-once.sh"
 cat > "${ENABLER_SCRIPT}" << 'ENABLER'
 #!/bin/bash

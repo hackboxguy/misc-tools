@@ -12,6 +12,7 @@ set -e
 # - HOOK_DEP_LIST: Comma separated package list (e.g: libftdi1-dev,libhidapi-dev,zlib1g-dev)
 # - HOOK_LOCAL_SOURCE: Path to local source in chroot (set only for file:// sources)
 # - HOOK_POST_INSTALL_CMDS: Optional semicolon-separated shell commands to run after install
+# - HOOK_CMAKE_ARGS: Optional extra cmake flags (e.g: -DFOO=bar -DBAZ=qux)
 
 
 echo "======================================"
@@ -58,11 +59,12 @@ else
     git checkout $HOOK_GIT_TAG
 fi
 
-# Create build directory and configure micropanel
+# Create build directory and configure
 echo "[3/5] Configuring CMake..."
 mkdir -p build && cd build
 cmake -DCMAKE_INSTALL_PREFIX=$HOOK_INSTALL_DEST \
       -DCMAKE_BUILD_TYPE=Release \
+      $HOOK_CMAKE_ARGS \
       .. > /dev/null
 
 # Build $UTIL_NAME

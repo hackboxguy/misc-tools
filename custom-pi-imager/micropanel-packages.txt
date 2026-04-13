@@ -24,9 +24,9 @@ packages/als-dimmer-hook.sh
 #streamdeck-ctrl hook - screen name passed via HOOK_GIT_TAG field
 packages/streamdeck-ctrl-hook.sh|https://github.com/hackboxguy/streamdeck-ctrl.git|display-control|/home/pi/streamdeck-ctrl|socat
 
-#disptool/automated-test-scripts
+#disptool/automated-test-scripts (post-install: copy udev rule for i1 Display Pro)
 #packages/generic-package-hook.sh|file:///home/adav/git-repos/tmp/archsp6|local|/home/pi/micropanel
-packages/generic-package-hook.sh|file:///home/adav/repobins/archsp6|local|/home/pi/micropanel
+packages/generic-package-hook.sh|file:///home/adav/repobins/archsp6|local|/home/pi/micropanel||cp /home/pi/micropanel/share/disptool/display-test-framework/config/udev/99-i1display.rules /etc/udev/rules.d/
 
 
 #kodi custom add-on(video loop button)

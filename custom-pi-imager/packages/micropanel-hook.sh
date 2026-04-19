@@ -43,6 +43,7 @@ cmake -DCMAKE_INSTALL_PREFIX=/home/pi/micropanel \
       -DINSTALL_HELPER_SCRIPTS=ON \
       -DINSTALL_ADDITIONAL_CONFIGS=ON \
       -DINSTALL_SYSTEMD_SERVICE=ON \
+      -DINSTALL_DIP_SWITCH_SERVICE=ON \
       -DSYSTEMD_UNITFILE_ARGS="-a -i gpio -s /dev/i2c-3" \
       .. > /dev/null
 
@@ -73,6 +74,7 @@ cp /home/pi/micropanel/etc/micropanel/config.json /home/pi/micropanel/etc/microp
 /home/pi/micropanel/usr/bin/update-config-path.sh --path=/home/pi/micropanel --output=/home/pi/micropanel/etc/micropanel/config.json --input=/home/pi/micropanel/etc/micropanel/config-temp.json
 systemctl enable /home/pi/micropanel/lib/systemd/system/micropanel.service
 cp /home/pi/micropanel/usr/share/micropanel/configs/config.txt /boot/firmware/
+systemctl enable /home/pi/micropanel/lib/systemd/system/dip-switch-resolution.service
 # Enable high-speed UART
 sed -i 's/^console=serial0,115200 //' /boot/firmware/cmdline.txt
 # Enable i2c module

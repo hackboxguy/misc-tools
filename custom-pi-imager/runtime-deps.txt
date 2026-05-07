@@ -1,4 +1,6 @@
 # Runtime dependencies (keep in final image)
+python3-matplotlib
+screen
 avahi-daemon
 avahi-utils
 fbi

@@ -40,11 +40,12 @@ cmake -DCMAKE_INSTALL_PREFIX=/home/pi/als-dimmer \
 echo "[4/5] Building als-dimmer (this may take a few minutes)..."
 make -j$(nproc) > /dev/null 2>&1
 
-# Install als-dimmer
+# Install als-dimmer and 2nd instance(keep 2nd instance linked but dont start)
 echo "[5/5] Installing als-dimmer to /home/pi/als-dimmer..."
 make install > /dev/null
 
 systemctl enable /home/pi/als-dimmer/lib/systemd/system/als-dimmer.service
+systemctl link /home/pi/als-dimmer/lib/systemd/system/als-dimmer-pwm.service
 ################################################
 
 # Cleanup build artifacts and source

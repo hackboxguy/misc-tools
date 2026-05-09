@@ -46,6 +46,10 @@ make install > /dev/null
 
 systemctl enable /home/pi/als-dimmer/lib/systemd/system/als-dimmer.service
 systemctl link /home/pi/als-dimmer/lib/systemd/system/als-dimmer-pwm.service
+
+#restores last set dual-display mode
+systemctl link /home/pi/micropanel/lib/systemd/system/disp-settings-dual-display-restore.service
+systemctl enable disp-settings-dual-display-restore.service
 ################################################
 
 # Cleanup build artifacts and source

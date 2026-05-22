@@ -39,6 +39,11 @@ echo ""
 echo "[1/4] Installing runtime dependencies..."
 apt-get update -qq
 apt-get install -y python3 ${RUNTIME_DEPS_SPACE_SEP}
+# Force the manual-install bit. The imager runs `apt-get autoremove -y` at the end
+# (purge_build_dependencies), which reaps any package still marked auto-installed.
+# `apt-get install` does NOT flip auto->manual for packages already present in the
+# base, so without this matplotlib/numpy can get swept out after the hook finishes.
+apt-mark manual python3 ${RUNTIME_DEPS_SPACE_SEP}
 
 # [2/4] Clone source
 echo "[2/4] Cloning disp-report-card..."

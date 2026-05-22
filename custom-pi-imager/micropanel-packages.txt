@@ -29,6 +29,8 @@ packages/streamdeck-ctrl-hook.sh|https://github.com/hackboxguy/streamdeck-ctrl.g
 packages/generic-package-hook.sh|file:///home/adav/repobins/archsp6|local|/home/pi/micropanel||cp /home/pi/micropanel/share/disptool/display-test-framework/config/udev/99-i1display.rules /etc/udev/rules.d/
 
 #disp-report-card - CLI tool that turns a disptool result folder into an A4 report-card PNG (no service)
+#deps field (python3-matplotlib,python3-numpy) is informational only - the hook does NOT apt-install;
+#those come from runtime-deps.txt and are reinstalled after the build-dep purge by the imager.
 packages/disp-report-card-hook.sh|https://github.com/hackboxguy/disp-report-card.git|main|/home/pi/micropanel|python3-matplotlib,python3-numpy
 
 

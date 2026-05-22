@@ -252,7 +252,11 @@ validate_files() {
         # Validate post-build script
         [ -n "$POST_BUILD_SCRIPT" ] && [ ! -f "$POST_BUILD_SCRIPT" ] && error "Post-build script not found: $POST_BUILD_SCRIPT"
 
-        # Silent ignore for runtime-package (user might keep it in script)
+        # Runtime package list is used in incremental mode too: it is reinstalled after
+        # the build-dep purge (reinstall_runtime_packages) to restore runtime packages
+        # caught in the purge cascade. Validate it if provided.
+        [ -n "$RUNTIME_PACKAGE" ] && [ ! -f "$RUNTIME_PACKAGE" ] && error "Runtime package file not found: $RUNTIME_PACKAGE"
+
         # Warn about extend-size-mb
         [ "$EXTEND_SIZE_MB" -gt 0 ] && warn "Cannot extend image size in incremental mode (ignoring)"
     fi
@@ -811,6 +815,40 @@ CHROOT_EOF
     log "Build dependencies purged successfully"
 }
 
+reinstall_runtime_packages() {
+    # Only run in incremental mode (this is where build deps are purged)
+    [ "$MODE" != "incremental" ] && return 0
+
+    if [ -z "$RUNTIME_PACKAGE" ]; then
+        warn "No --runtime-package given for the incremental build."
+        warn "Runtime packages caught in the build-dep purge cascade (e.g. python3-matplotlib"
+        warn "via python3-fonttools) will NOT be restored. Pass --runtime-package=./runtime-deps.txt."
+        return 0
+    fi
+
+    local pkgs=$(grep -v '^#' "${RUNTIME_PACKAGE}" | grep -v '^[[:space:]]*$' | tr '\n' ' ')
+    [ -z "$pkgs" ] && info "Runtime package list empty, nothing to re-assert" && return 0
+
+    log "Re-asserting runtime packages after build-dep purge..."
+    info "Runtime packages: ${pkgs}"
+
+    # `apt-get purge <build-deps>` can cascade-remove runtime packages that share a
+    # dependency subtree with the build deps. Example seen in the wild: purging the
+    # python3-dev / zlib1g-dev chain drags out python3-fonttools, which python3-matplotlib
+    # hard-depends on, so matplotlib is purged too. Reinstalling the declared runtime set
+    # restores them. This only pulls runtime deps (no -dev/build packages), so the purged
+    # build tools stay gone.
+    chroot "${MOUNT_POINT}" /bin/bash <<CHROOT_EOF
+set -e
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y ${pkgs}
+apt-mark manual ${pkgs} >/dev/null 2>&1 || true
+apt-get clean
+CHROOT_EOF
+
+    log "Runtime packages re-asserted successfully"
+}
+
 remove_qemu() {
     log "Removing QEMU..."
     rm -f "${MOUNT_POINT}/usr/bin/qemu-aarch64-static"
@@ -974,6 +1012,7 @@ main() {
     run_setup_hooks            # Incremental mode only
     run_post_build_script      # Incremental mode only
     purge_build_dependencies   # Incremental mode only
+    reinstall_runtime_packages # Incremental: restore runtime pkgs caught in the purge cascade
     write_version_file         # Write version after purge in incremental mode
     verify_image
     remove_qemu

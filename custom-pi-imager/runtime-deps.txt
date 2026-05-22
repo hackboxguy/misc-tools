@@ -1,7 +1,10 @@
 # Runtime dependencies (keep in final image)
-# NOTE: python3-matplotlib + python3-numpy are owned by packages/disp-report-card-hook.sh
-# (installed and `apt-mark manual`'d there, so the end-of-build autoremove can't reap them).
-# Add them back here only if another base-level component starts needing matplotlib.
+# NOTE: the imager RE-INSTALLS this whole list AFTER purging build deps (see
+# reinstall_runtime_packages in custom-pi-imager.sh), because `apt-get purge <build-deps>`
+# cascade-removes some runtime pkgs (e.g. python3-matplotlib via python3-fonttools).
+# => you MUST also pass --runtime-package=./runtime-deps.txt to the INCREMENTAL build.
+python3-matplotlib
+python3-numpy
 screen
 avahi-daemon
 avahi-utils

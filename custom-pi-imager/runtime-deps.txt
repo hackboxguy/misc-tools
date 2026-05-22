@@ -1,5 +1,7 @@
 # Runtime dependencies (keep in final image)
-python3-matplotlib
+# NOTE: python3-matplotlib + python3-numpy are owned by packages/disp-report-card-hook.sh
+# (installed and `apt-mark manual`'d there, so the end-of-build autoremove can't reap them).
+# Add them back here only if another base-level component starts needing matplotlib.
 screen
 avahi-daemon
 avahi-utils

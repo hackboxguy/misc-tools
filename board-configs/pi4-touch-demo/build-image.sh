@@ -14,7 +14,7 @@
 #   --skip-kernel          Skip stage 2 (reuse existing kernel)
 #   --skip-apps            Skip stage 3 (skip app installation)
 #   --kernel-branch <br>   Kernel branch (default: rpi-6.12.y)
-#   --br-wrapper-branch <br> br-wrapper branch (default: 983-dynamic-config)
+#   --br-wrapper-branch <br> br-wrapper branch (default: main)
 #   --help                 Show this help
 #
 # Example:
@@ -34,7 +34,7 @@ PASSWORD="brb0x"
 VERSION="01.02"
 EXTEND_SIZE_MB=1800
 KERNEL_BRANCH="rpi-6.12.y"
-BR_WRAPPER_BRANCH="983-dynamic-config"
+BR_WRAPPER_BRANCH="main"
 RASPIOS_URL="https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-2025-10-13/2025-10-01-raspios-bookworm-arm64-lite.img.xz"
 BASE_IMAGE=""
 SKIP_BASE=false

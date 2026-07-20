@@ -27,6 +27,11 @@
 #   --version=VER       Image version string (default: DEFAULT_VERSION)
 #   --password=PASS     'pi' user password (default: DEFAULT_PASSWORD)
 #   --workspace=DIR     Workspace directory (default: ~/pi-image-workspace)
+#   --sources-dir=DIR   Where dependent repos are cloned/updated
+#                       (default: <workspace>/sources); also the default
+#                       location for ${REPOBINS} hook sources
+#   --output-dir=DIR    Where the final image is placed
+#                       (default: <workspace>/out/<board>[-variant])
 #   --baseimage=FILE    Use this local vanilla image (.img.xz/.img), no download
 #   --image-url=URL     Download this vanilla image instead of board default
 #   --start-from=FILE   Existing prepared base (or base+kernel) image; skips
@@ -66,6 +71,7 @@ stage_banner() { echo ""; echo "================================================
 # ------------------------------------------------------------------------------
 BOARD="" VARIANT="" VERSION="" PASSWORD="" WORKSPACE=""
 ARG_BASEIMAGE="" ARG_IMAGE_URL="" ARG_START_FROM="" ARG_REPOBINS="" ARG_FLASH=""
+ARG_SOURCES_DIR="" ARG_OUTPUT_DIR=""
 SKIP_BASE=0 SKIP_KERNEL=0 SKIP_APPS=0
 FORCE_BASE=0 FORCE_KERNEL=0 FORCE_APPS=0
 DRY_RUN=0 OFFLINE=0 KEEP_BUILD_DEPS=0 DEBUG=0 LIST_BOARDS=0
@@ -79,6 +85,8 @@ for arg in "$@"; do
         --version=*)    VERSION="${arg#*=}" ;;
         --password=*)   PASSWORD="${arg#*=}" ;;
         --workspace=*)  WORKSPACE="${arg#*=}" ;;
+        --sources-dir=*) ARG_SOURCES_DIR="${arg#*=}" ;;
+        --output-dir=*)  ARG_OUTPUT_DIR="${arg#*=}" ;;
         --baseimage=*)  ARG_BASEIMAGE="${arg#*=}" ;;
         --image-url=*)  ARG_IMAGE_URL="${arg#*=}" ;;
         --start-from=*) ARG_START_FROM="${arg#*=}" ;;
@@ -171,11 +179,13 @@ WORKSPACE="${WORKSPACE:-$REAL_HOME/pi-image-workspace}"
 
 BUILD_ID="$BOARD${VARIANT:+-$VARIANT}"
 DL_DIR="$WORKSPACE/downloads"
-SRC_DIR="$WORKSPACE/sources"
+SRC_DIR="${ARG_SOURCES_DIR:-$WORKSPACE/sources}"
+[[ "$SRC_DIR" != /* ]] && SRC_DIR="$(pwd)/$SRC_DIR"
 KBUILD_DIR="$WORKSPACE/kernel-build"
 BASE_DIR="$WORKSPACE/base/$BUILD_ID"
 KERNEL_DIR="$WORKSPACE/kernel/$BUILD_ID"
-OUT_DIR="$WORKSPACE/out/$BUILD_ID"
+OUT_DIR="${ARG_OUTPUT_DIR:-$WORKSPACE/out/$BUILD_ID}"
+[[ "$OUT_DIR" != /* ]] && OUT_DIR="$(pwd)/$OUT_DIR"
 TMP_DIR="$WORKSPACE/tmp"
 
 export REPOBINS="${ARG_REPOBINS:-$SRC_DIR}"

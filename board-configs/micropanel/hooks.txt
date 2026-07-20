@@ -1,0 +1,40 @@
+# micropanel: hook list for custom-pi-imager incremental mode
+#
+# Format: HOOK_SCRIPT[|GIT_REPO|GIT_TAG|INSTALL_DEST|DEP_LIST|POST_CMDS|CMAKE_ARGS]
+# ${VAR} references are expanded from the environment when the list is loaded;
+# ${REPOBINS} points at the directory holding local binary repos (sp6bins,
+# archsp6, ...) and is exported by build-image.sh (workspace sources dir).
+
+#micropanel hook - cannot be generic as it has some special cmake flags
+packages/micropanel-hook.sh
+
+#xc3sprog hook - this is the generic one
+../../custom-pi-imager/packages/generic-package-hook.sh|https://github.com/hackboxguy/xc3sprog.git|master|/home/pi/micropanel/fpga|libusb-dev,libftdi-dev,libgpiod-dev
+
+#openFPGALoader hook - this is the generic one
+../../custom-pi-imager/packages/generic-package-hook.sh|https://github.com/trabucayre/openFPGALoader.git|v1.0.0|/home/pi/micropanel/fpga|libusb-dev,libftdi-dev,libgpiod-dev,libftdi1-dev,libhidapi-dev,zlib1g-dev
+
+#qt-apps/measure-display.sh
+../../custom-pi-imager/packages/generic-package-hook.sh|https://github.com/hackboxguy/br-wrapper.git|main|/home/pi/micropanel|qtquickcontrols2-5-dev,qtdeclarative5-dev|systemctl mask getty@tty1.service;systemctl enable /home/pi/micropanel/lib/systemd/system/qt-demo-launcher.service|-DLAUNCHER_CONFIG=qt-demo-launcher-pios.json
+
+#mcu binaries + fpga bitstreams as a local source package.
+#SP6BINS_MICROPANEL_COMPAT=ON additionally installs fpga/bitbin + fpga/bin
+#(the layout previously provided by the retired fpga-bins package).
+../../custom-pi-imager/packages/generic-package-hook.sh|file://${REPOBINS}/sp6bins|local|/home/pi/micropanel|||-DSP6BINS_MICROPANEL_COMPAT=ON
+
+#als-dimmer hook - cannot be generic as it has some special cmake flags
+packages/als-dimmer-hook.sh
+
+#streamdeck-ctrl hook - screen name passed via HOOK_GIT_TAG field
+packages/streamdeck-ctrl-hook.sh|https://github.com/hackboxguy/streamdeck-ctrl.git|display-control|/home/pi/streamdeck-ctrl|socat
+
+#disptool/automated-test-scripts (post-install: copy udev rule for i1 Display Pro)
+../../custom-pi-imager/packages/generic-package-hook.sh|file://${REPOBINS}/archsp6|local|/home/pi/micropanel||cp /home/pi/micropanel/share/disptool/display-test-framework/config/udev/99-i1display.rules /etc/udev/rules.d/
+
+#disp-report-card - CLI tool that turns a disptool result folder into an A4 report-card PNG (no service)
+#deps field (python3-matplotlib,python3-numpy) is informational only - the hook does NOT apt-install;
+#those come from runtime-deps.txt and are reinstalled after the build-dep purge by the imager.
+packages/disp-report-card-hook.sh|https://github.com/hackboxguy/disp-report-card.git|main|/home/pi/micropanel|python3-matplotlib,python3-numpy
+
+#kodi custom add-on(video loop button)
+packages/kodi-custom-addons-hook.sh|https://github.com/hackboxguy/kodi-custom-addons.git|main|/home/pi/kodi-custom-addons|sqlite3

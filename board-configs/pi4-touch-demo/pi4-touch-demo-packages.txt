@@ -1,3 +1,9 @@
+# pi4-touch-demo: hook list for custom-pi-imager incremental mode
+#
+# ${VAR} references are expanded from the environment when the list is loaded;
+# ${REPOBINS} points at the directory holding local binary repos (sp6bins,
+# archsp6, ...) and is exported by build-image.sh (workspace sources dir).
+
 #micropanel hook - cannot be generic as it has some special cmake flags
 packages/micropanel-hook.sh
 
@@ -10,17 +16,13 @@ packages/micropanel-hook.sh
 #qt-apps/measure-display.sh
 ../../custom-pi-imager/packages/generic-package-hook.sh|https://github.com/hackboxguy/br-wrapper.git|main|/home/pi/micropanel|qtquickcontrols2-5-dev,qtdeclarative5-dev|systemctl mask getty@tty1.service;systemctl enable /home/pi/micropanel/lib/systemd/system/qt-demo-launcher.service
 
-#fpga binaries as a Local source package
-#../../custom-pi-imager/packages/generic-package-hook.sh|file:///home/adav/git-repos/misc-tools/fpga-bins|local|/home/pi/micropanel
-../../custom-pi-imager/packages/generic-package-hook.sh|file:///home/adav/repobins/fpga-bins|local|/home/pi/micropanel
-
-#mcu binaries as a Local source package
-#../../custom-pi-imager/packages/generic-package-hook.sh|file:///home/adav/git-repos/tmp/sp6bins|local|/home/pi/micropanel
-../../custom-pi-imager/packages/generic-package-hook.sh|file:///home/adav/repobins/sp6bins|local|/home/pi/micropanel
+#mcu binaries + fpga bitstreams as a local source package.
+#SP6BINS_MICROPANEL_COMPAT=ON additionally installs fpga/bitbin + fpga/bin
+#(the layout previously provided by the retired fpga-bins package).
+../../custom-pi-imager/packages/generic-package-hook.sh|file://${REPOBINS}/sp6bins|local|/home/pi/micropanel|||-DSP6BINS_MICROPANEL_COMPAT=ON
 
 #als-dimmer hook - cannot be generic as it has some special cmake flags
 packages/als-dimmer-hook.sh
 
 #disptool/automated-test-scripts
-#../../custom-pi-imager/packages/generic-package-hook.sh|file:///home/adav/git-repos/tmp/archsp6|local|/home/pi/micropanel
-../../custom-pi-imager/packages/generic-package-hook.sh|file:///home/adav/repobins/archsp6|local|/home/pi/micropanel
+../../custom-pi-imager/packages/generic-package-hook.sh|file://${REPOBINS}/archsp6|local|/home/pi/micropanel

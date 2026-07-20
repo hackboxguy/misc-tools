@@ -100,6 +100,10 @@ Examples:
     --builddep-package=none
 
 Hook List File Format (hook-packages.txt):
+  Lines may reference environment variables with \${VAR} syntax (e.g.
+  file://\${REPOBINS}/sp6bins); they are expanded when the list is loaded
+  and an unset variable is a fatal error. Only the braced form is expanded.
+
   # Simple hook (no parameters)
   packages/micropanel-hook.sh
 
@@ -530,6 +534,20 @@ CHROOT_EOF
     log "Packages installed successfully"
 }
 
+# Expand ${VAR} environment references in a hook-list line (e.g. ${REPOBINS}).
+# Only the braced form is expanded so target-side text like $1 stays untouched;
+# an unset variable is an error so a missing environment surfaces at parse time
+# rather than mid-build inside the chroot.
+expand_hook_line_vars() {
+    local line="$1" varname
+    while [[ "$line" =~ \$\{([A-Za-z_][A-Za-z0-9_]*)\} ]]; do
+        varname="${BASH_REMATCH[1]}"
+        [ -z "${!varname+x}" ] && error "Undefined variable \${$varname} in hook list line: $1"
+        line="${line//\$\{${varname}\}/${!varname}}"
+    done
+    printf '%s\n' "$line"
+}
+
 load_hooks_from_file() {
     [ -z "$SETUP_HOOKS_FILE" ] && return 0
 
@@ -542,6 +560,11 @@ load_hooks_from_file() {
         # Skip comments and empty lines
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
         [[ -z "${line// }" ]] && continue
+
+        # Expand ${VAR} environment references (portable hook lists).
+        # expand_hook_line_vars runs in a subshell, so propagate its failure
+        # explicitly instead of relying on set -e semantics inside the loop.
+        line=$(expand_hook_line_vars "$line") || exit 1
 
         # Parse line: HOOK_SCRIPT[|GIT_REPO|GIT_TAG|INSTALL_DEST|DEP_LIST|POST_INSTALL_CMDS|CMAKE_ARGS]
         # Use pipe (|) as separator to avoid conflicts with URLs (https://)

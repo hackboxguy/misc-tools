@@ -1,5 +1,18 @@
 # media-mux: Image build steps
 #
+# Recommended (single command, cached stages):
+#
+#   cd misc-tools
+#   sudo ./build-image.sh --board=media-mux                            # variant A
+#   sudo ./build-image.sh --board=media-mux --variant=extern-dlna      # variant B
+#   sudo ./build-image.sh --board=media-mux --variant=selfhosted-dlna  # variant C
+#
+# Settings live in board.conf next to this file.
+#
+# ==============================================================================
+# Manual steps (what build-image.sh automates), for reference/debugging:
+# ==============================================================================
+#
 # Prerequisites:
 #   - RaspiOS Lite image (bookworm arm64)
 #   - misc-tools repo cloned

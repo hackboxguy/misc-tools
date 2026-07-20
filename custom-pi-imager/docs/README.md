@@ -1,3 +1,5 @@
+> **NOTE (2026-07):** parts of this document predate the unified build flow and mention removed options (e.g. `--package-list`, `--micropanel-source`, `--configure-script`). The authoritative references are `custom-pi-imager.sh --help` and the top-level `misc-tools/README.md` / `build-image.sh --help`.
+
 # Custom Pi Imager Documentation
 
 This directory contains documentation for the Custom Pi Imager tool - a flexible system for creating customized Raspberry Pi images.

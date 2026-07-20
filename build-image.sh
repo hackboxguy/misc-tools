@@ -393,20 +393,22 @@ preflight() {
         done
     fi
 
-    # sp6bins specifics: the compat cmake option must exist in the checkout
+    # sp6bins specific: the compat cmake option must exist in the checkout
     # (cmake silently ignores unknown -D options, which would produce an image
-    # with missing /home/pi/micropanel/fpga files), and the reference video is
-    # not tracked in git.
+    # with missing /home/pi/micropanel/fpga files).
     for d in "${HOOK_LOCAL_DIRS[@]}"; do
         [[ "$d" == */sp6bins ]] || continue
         [ -d "$d" ] || continue
         if grep -q "SP6BINS_MICROPANEL_COMPAT" "$HOOK_LIST" && ! grep -q "SP6BINS_MICROPANEL_COMPAT" "$d/CMakeLists.txt" 2>/dev/null; then
             pf_fail "sp6bins checkout at $d lacks the SP6BINS_MICROPANEL_COMPAT cmake option (update/merge the sp6bins branch that provides it, or use --repobins with an updated checkout)"
         fi
-        if [ ! -f "$d/media/videos/ref-video.mp4" ]; then
-            pf_warn "sp6bins: media/videos/ref-video.mp4 not present - reference video will not be installed"
-        fi
     done
+
+    # git-lfs repos (e.g. media-files) need the lfs filters, otherwise a clone
+    # silently yields tiny pointer files instead of the real assets.
+    if grep -q "media-files" "$HOOK_LIST" 2>/dev/null; then
+        command -v git-lfs >/dev/null 2>&1 && pf_ok "git-lfs" || pf_fail "git-lfs not found (pacman -S git-lfs; then run: git lfs install)"
+    fi
 
     # Disk space (workspace parent + host root for sdm/nspawn)
     local avail_root avail_ws ws_probe="$WORKSPACE"

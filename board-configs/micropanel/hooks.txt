@@ -22,6 +22,9 @@ packages/micropanel-hook.sh
 #(the layout previously provided by the retired fpga-bins package).
 ../../custom-pi-imager/packages/generic-package-hook.sh|file://${REPOBINS}/sp6bins|local|/home/pi/micropanel|||-DSP6BINS_MICROPANEL_COMPAT=ON
 
+#measurement reference video (git-lfs repo), installs to share/sp6bins/config/
+../../custom-pi-imager/packages/generic-package-hook.sh|file://${REPOBINS}/media-files|local|/home/pi/micropanel
+
 #als-dimmer hook - cannot be generic as it has some special cmake flags
 packages/als-dimmer-hook.sh
 

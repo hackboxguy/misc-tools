@@ -427,11 +427,17 @@ fetch_sources() {
     [ -z "${SOURCES// /}" ] && return 0
     stage_banner "Stage 0: Sources"
     mkdir -p "$SRC_DIR"; own_by_user "$SRC_DIR"
-    local name url branch dest
+    local name url branch dest drivers_root="${DRIVERS_DIR%%/*}"
     while IFS='|' read -r name url branch; do
         [ -z "${name// }" ] && continue
         [[ "$name" =~ ^[[:space:]]*# ]] && continue
         dest="$SRC_DIR/$name"
+        # A source already provided via --repobins needs no workspace clone,
+        # except the drivers repo, which the kernel stage reads from sources/.
+        if [ "$REPOBINS" != "$SRC_DIR" ] && [ -d "$REPOBINS/$name" ] && [ "$name" != "$drivers_root" ]; then
+            info "Source '$name' provided by --repobins ($REPOBINS/$name), skipping clone"
+            continue
+        fi
         if [ ! -d "$dest" ]; then
             [ $OFFLINE -eq 1 ] && die "Source '$name' missing and --offline set: $dest"
             log "Cloning $name (${branch:-default})..."

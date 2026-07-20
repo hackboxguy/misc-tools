@@ -26,6 +26,9 @@
 #   --variant=NAME      Board variant (per-variant overrides in board.conf)
 #   --version=VER       Image version string (default: DEFAULT_VERSION)
 #   --password=PASS     'pi' user password (default: DEFAULT_PASSWORD)
+#   --extend-size-mb=N  Image extension applied by sdm in the base stage
+#                       (default: EXTEND_SIZE_MB from board.conf; changing
+#                       it rebuilds base and everything after it)
 #   --workspace=DIR     Workspace directory (default: ~/pi-image-workspace)
 #   --sources-dir=DIR   Where dependent repos are cloned/updated
 #                       (default: <workspace>/sources); also the default
@@ -71,7 +74,7 @@ stage_banner() { echo ""; echo "================================================
 # ------------------------------------------------------------------------------
 BOARD="" VARIANT="" VERSION="" PASSWORD="" WORKSPACE=""
 ARG_BASEIMAGE="" ARG_IMAGE_URL="" ARG_START_FROM="" ARG_REPOBINS="" ARG_FLASH=""
-ARG_SOURCES_DIR="" ARG_OUTPUT_DIR=""
+ARG_SOURCES_DIR="" ARG_OUTPUT_DIR="" ARG_EXTEND_SIZE=""
 SKIP_BASE=0 SKIP_KERNEL=0 SKIP_APPS=0
 FORCE_BASE=0 FORCE_KERNEL=0 FORCE_APPS=0
 DRY_RUN=0 OFFLINE=0 KEEP_BUILD_DEPS=0 DEBUG=0 LIST_BOARDS=0
@@ -87,6 +90,7 @@ for arg in "$@"; do
         --workspace=*)  WORKSPACE="${arg#*=}" ;;
         --sources-dir=*) ARG_SOURCES_DIR="${arg#*=}" ;;
         --output-dir=*)  ARG_OUTPUT_DIR="${arg#*=}" ;;
+        --extend-size-mb=*) ARG_EXTEND_SIZE="${arg#*=}" ;;
         --baseimage=*)  ARG_BASEIMAGE="${arg#*=}" ;;
         --image-url=*)  ARG_IMAGE_URL="${arg#*=}" ;;
         --start-from=*) ARG_START_FROM="${arg#*=}" ;;
@@ -150,6 +154,7 @@ RUNTIME_DEPS="$(resolve_cfg RUNTIME_DEPS)"
 BUILD_DEPS="$(resolve_cfg BUILD_DEPS)"
 HOOK_LIST="$(resolve_cfg HOOK_LIST)"
 EXTEND_SIZE_MB="$(resolve_cfg EXTEND_SIZE_MB)"
+[ -n "$ARG_EXTEND_SIZE" ] && EXTEND_SIZE_MB="$ARG_EXTEND_SIZE"
 IMAGE_URL_CFG="$(resolve_cfg IMAGE_URL)"
 
 [ -n "$ARG_IMAGE_URL" ] && IMAGE_URL_CFG="$ARG_IMAGE_URL"

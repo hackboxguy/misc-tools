@@ -107,13 +107,46 @@ or manually: `sudo dd if=<image> of=/dev/sdX bs=8M status=progress conv=fsync`
 Each stage records a hash of its real inputs (dependency lists, hook lists
 and scripts, kernel config, source repo revisions, remote hook revisions);
 re-running the same command only rebuilds stages whose inputs changed.
-Typical day-to-day flow: push changes to an app repo, re-run the build with
-a bumped `--version` - base and kernel report `up-to-date (stamp match)`,
-only the apps stage re-runs.
 
 Everything lives in a workspace (default `~/pi-image-workspace`; avoid
-tmpfs-backed `/tmp` - images are ~5GB): `downloads/` (vanilla image cache),
-`sources/`, `kernel-build/`, `base/`, `kernel/`, `out/` (final images).
+tmpfs-backed `/tmp` - images are ~5GB). Each stage's output is a separate
+preserved artifact, so later stages rebuild without repeating earlier ones:
+
+```
+workspace/
+├── downloads/                  vanilla img.xz cache (downloaded only if the
+│                               base stage will actually run)
+├── sources/                    auto-cloned dependent repos (${REPOBINS})
+├── kernel-build/               kernel source + build tree (host-side cache)
+├── base/profile-<name>/        vanilla + extension + profile apt pkgs + profile hooks
+├── base/<board>/               same, for boards without a profile
+├── kernel/<board>/             base + that board's kernel/drivers (stage 2
+│                               works on a copy; the base stays pristine)
+└── out/<board>/                final flashable images
+```
+
+### Rebuild behavior / userspace-only iteration
+
+Typical day-to-day flow - update an app repo, then:
+
+```bash
+sudo ./build-image.sh --board=micropanel --version=<next> --skip-kernel
+```
+
+Base and kernel report `up-to-date`/`SKIPPED`; the apps stage starts from
+the cached `kernel/<board>/` image and rebuilds only userspace (~30 min).
+
+Why pass `--skip-kernel` explicitly when stamps would skip it anyway: the
+kernel stamp includes the driver sources' git revision, and the sources
+stage pulls br-wrapper on every run - so any new br-wrapper commit (even a
+userspace-only one; the qt apps live in the same repo) would otherwise
+trigger a ~45 min kernel rebuild. `--skip-kernel` = "reuse the cached
+kernel image no matter what". Leave it off when you actually change
+drivers, kernel branch/config - or after a base rebuild (profile deps,
+extend size, vsomeip bump), which correctly cascades into kernel + apps.
+
+Bumping `--version` alone never rebuilds base or kernel (deliberately
+excluded from their stamps); it re-runs only the apps stage.
 
 ### Base profiles (shared base images)
 

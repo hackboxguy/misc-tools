@@ -29,6 +29,11 @@
 #   --extend-size-mb=N  Image extension applied by sdm in the base stage
 #                       (default: EXTEND_SIZE_MB from board.conf; changing
 #                       it rebuilds base and everything after it)
+#   --base-profile=NAME Override the board's BASE_PROFILE (base-configs/NAME);
+#                       'none' disables the profile. A profile may pin its own
+#                       IMAGE_URL so the matching vanilla image is used
+#                       automatically. Precedence: CLI --image-url > profile
+#                       IMAGE_URL > board IMAGE_URL.
 #   --workspace=DIR     Workspace directory (default: ~/pi-image-workspace)
 #   --sources-dir=DIR   Where dependent repos are cloned/updated
 #                       (default: <workspace>/sources); also the default
@@ -81,7 +86,7 @@ stage_banner() { echo ""; echo "================================================
 # ------------------------------------------------------------------------------
 BOARD="" VARIANT="" VERSION="" PASSWORD="" WORKSPACE=""
 ARG_BASEIMAGE="" ARG_IMAGE_URL="" ARG_START_FROM="" ARG_REPOBINS="" ARG_FLASH=""
-ARG_SOURCES_DIR="" ARG_OUTPUT_DIR="" ARG_EXTEND_SIZE=""
+ARG_SOURCES_DIR="" ARG_OUTPUT_DIR="" ARG_EXTEND_SIZE="" ARG_BASE_PROFILE=""
 SKIP_BASE=0 SKIP_KERNEL=0 SKIP_APPS=0
 FORCE_BASE=0 FORCE_KERNEL=0 FORCE_APPS=0
 DRY_RUN=0 OFFLINE=0 KEEP_BUILD_DEPS=0 DEBUG=0 LIST_BOARDS=0
@@ -98,6 +103,7 @@ for arg in "$@"; do
         --sources-dir=*) ARG_SOURCES_DIR="${arg#*=}" ;;
         --output-dir=*)  ARG_OUTPUT_DIR="${arg#*=}" ;;
         --extend-size-mb=*) ARG_EXTEND_SIZE="${arg#*=}" ;;
+        --base-profile=*)   ARG_BASE_PROFILE="${arg#*=}" ;;
         --baseimage=*)  ARG_BASEIMAGE="${arg#*=}" ;;
         --image-url=*)  ARG_IMAGE_URL="${arg#*=}" ;;
         --start-from=*) ARG_START_FROM="${arg#*=}" ;;
@@ -168,13 +174,17 @@ IMAGE_URL_CFG="$(resolve_cfg IMAGE_URL)"
 # packages + optional profile hooks for heavy compiled deps). The profile owns
 # the base-stage parameters (deps, extend size, password); the board keeps its
 # own runtime deps (re-asserted in the apps stage) and hook list.
+if [ -n "$ARG_BASE_PROFILE" ]; then
+    if [ "$ARG_BASE_PROFILE" = "none" ]; then BASE_PROFILE=""; else BASE_PROFILE="$ARG_BASE_PROFILE"; fi
+fi
 PROFILE_DIR="" BASE_HOOK_LIST=""
 BASE_RUNTIME_DEPS="" BASE_BUILD_DEPS=""
 if [ -n "$BASE_PROFILE" ]; then
     PROFILE_DIR="$SCRIPT_DIR/base-configs/$BASE_PROFILE"
     [ -f "$PROFILE_DIR/profile.conf" ] || die "No profile config: $PROFILE_DIR/profile.conf"
     # shellcheck disable=SC1090
-    source "$PROFILE_DIR/profile.conf"   # EXTEND_SIZE_MB, DEFAULT_PASSWORD (profile-owned)
+    source "$PROFILE_DIR/profile.conf"   # EXTEND_SIZE_MB, DEFAULT_PASSWORD, optionally IMAGE_URL (profile-owned)
+    IMAGE_URL_CFG="$(resolve_cfg IMAGE_URL)"   # re-resolve: profile may pin its own vanilla image
     [ -f "$PROFILE_DIR/runtime-deps.txt" ] && BASE_RUNTIME_DEPS="$PROFILE_DIR/runtime-deps.txt" || BASE_RUNTIME_DEPS="none"
     [ -f "$PROFILE_DIR/build-deps.txt" ] && BASE_BUILD_DEPS="$PROFILE_DIR/build-deps.txt" || BASE_BUILD_DEPS="none"
     [ -f "$PROFILE_DIR/hooks.txt" ] && BASE_HOOK_LIST="$PROFILE_DIR/hooks.txt"

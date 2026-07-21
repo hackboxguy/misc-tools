@@ -106,11 +106,16 @@ phases under QEMU are normal, not hangs.
   cmake-installable package → `share/sp6bins/config/`. Requires `git lfs
   install` on the host (preflight checks). GitHub free LFS bandwidth is
   1GB/month; fallback plan if exceeded: release asset + download step.
-- `qt-cluster-demo` (PRIVATE): its hook runs the repo's own
-  `build-and-deploy.sh --mode=demo --dms=enable --skip-tests --skip-deploy`
+- `qt-cluster-demo` (PRIVATE → must be a file:// local source, cloned
+  host-side via SOURCES; an in-chroot git clone of a private repo prompts
+  for credentials and hangs unattended builds - learned the hard way). Its
+  hook copies the source to /home/pi/qt-cluster-demo, runs the repo's own
+  `build-and-deploy.sh --mode=demo --dms=enable --skip-tests --skip-deploy`,
   then writes the service env itself (STATIC copy of what that script's
   deploy step generates for demo+dms - keep the hook in sync if upstream
   argument scheme changes) and `systemctl enable`s the unit.
+  RULE: private repos are always SOURCES + file://${REPOBINS}/...; only
+  public repos may be in-chroot git-source hooks.
 
 Network policy pattern (qt-cluster-demo, reusable for other boards):
 DHCP-with-static-fallback is done declaratively with NetworkManager's

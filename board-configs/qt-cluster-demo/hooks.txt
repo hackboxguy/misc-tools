@@ -1,8 +1,9 @@
 # qt-cluster-demo: hook list for custom-pi-imager incremental mode
 #
-# The parameterized fields keep the repo revision visible to the apps-stage
-# stamp (a push to the repo re-triggers the stage automatically).
-packages/qt-cluster-demo-hook.sh|https://github.com/hackboxguy/qt-cluster-demo.git|main|/home/pi/qt-cluster-demo
+# Local source (host-side clone, private repo): the sources-stage checkout
+# revision is part of the apps-stage stamp, so a push to the repo still
+# re-triggers the stage automatically.
+packages/qt-cluster-demo-hook.sh|file://${REPOBINS}/qt-cluster-demo|local|/home/pi/qt-cluster-demo
 
 #eth0: DHCP with static fallback 192.168.10.3/24 (NetworkManager two-profile)
 packages/network-fallback-hook.sh

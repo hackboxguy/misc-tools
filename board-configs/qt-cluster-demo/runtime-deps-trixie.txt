@@ -1,0 +1,21 @@
+# qt-cluster-demo runtime dependencies - TRIXIE variant (used automatically
+# when building with --base-profile=qt-trixie; see RUNTIME_DEPS_qt_trixie in
+# board.conf). Identical to runtime-deps.txt except the boost runtime pins:
+# trixie ships boost 1.83 (bookworm: 1.74).
+libqt5core5a
+libqt5gui5
+libqt5qml5
+libqt5quick5
+libqt5network5
+qml-module-qtquick2
+qml-module-qtquick-window2
+fonts-dejavu
+
+# vsomeip (in /home/pi/.codex-deps) links against these
+libboost-system1.83.0
+libboost-thread1.83.0
+libboost-log1.83.0
+libboost-filesystem1.83.0
+
+# --mode=canN support
+can-utils

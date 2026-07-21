@@ -203,6 +203,19 @@ if [ -n "$BASE_PROFILE" ]; then
     [ -f "$PROFILE_DIR/runtime-deps.txt" ] && BASE_RUNTIME_DEPS="$PROFILE_DIR/runtime-deps.txt" || BASE_RUNTIME_DEPS="none"
     [ -f "$PROFILE_DIR/build-deps.txt" ] && BASE_BUILD_DEPS="$PROFILE_DIR/build-deps.txt" || BASE_BUILD_DEPS="none"
     [ -f "$PROFILE_DIR/hooks.txt" ] && BASE_HOOK_LIST="$PROFILE_DIR/hooks.txt"
+
+    # Board files may carry per-profile overrides: VAR_<profile> with dashes
+    # as underscores (e.g. RUNTIME_DEPS_qt_trixie=runtime-deps-trixie.txt) -
+    # needed when board-level package pins are OS-release-specific (boost
+    # runtime lib names differ between bookworm and trixie).
+    for _v in RUNTIME_DEPS BUILD_DEPS HOOK_LIST; do
+        _pkey="${_v}_${BASE_PROFILE//-/_}"
+        if [ -n "${!_pkey+x}" ]; then
+            declare "$_v=${!_pkey}"
+            info "Using board ${_v,,} override for profile $BASE_PROFILE: ${!_pkey}"
+        fi
+    done
+    unset _v _pkey
 fi
 
 [ -n "$ARG_EXTEND_SIZE" ] && EXTEND_SIZE_MB="$ARG_EXTEND_SIZE"

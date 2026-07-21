@@ -18,6 +18,8 @@
 #
 # Usage:
 #   sudo ./build-image.sh --board=NAME [OPTIONS]
+#   sudo ./build-image.sh --base-profile=NAME   (no --board: build only the
+#                                                shared base-profile image)
 #   ./build-image.sh --list-boards
 #   ./build-image.sh --board=NAME --dry-run     (no root needed)
 #
@@ -141,10 +143,16 @@ list_boards() {
 }
 [ $LIST_BOARDS -eq 1 ] && list_boards
 
-[ -z "$BOARD" ] && die "Missing --board=NAME (use --list-boards to see options)"
-BOARD_DIR="$BOARD_CONFIGS_DIR/$BOARD"
-BOARD_CONF="$BOARD_DIR/board.conf"
-[ -f "$BOARD_CONF" ] || die "No board config: $BOARD_CONF"
+# Profile-only mode: --base-profile without --board builds just the shared
+# base image (no kernel/apps stage) - useful to pre-build the slow base.
+PROFILE_ONLY=0
+if [ -z "$BOARD" ] && [ -n "$ARG_BASE_PROFILE" ] && [ "$ARG_BASE_PROFILE" != "none" ]; then
+    PROFILE_ONLY=1
+    BOARD="profile-only"
+    SKIP_KERNEL=1 SKIP_APPS=1
+fi
+
+[ -z "$BOARD" ] && die "Missing --board=NAME (use --list-boards; or --base-profile=NAME alone to build just a base image)"
 
 # Defaults a board.conf may override
 BOARD_DESCRIPTION="" IMAGE_URL="" IMAGE_SHA256="" EXTEND_SIZE_MB=0
@@ -152,8 +160,15 @@ DEFAULT_PASSWORD="" DEFAULT_VERSION="01.00"
 RUNTIME_DEPS="none" BUILD_DEPS="none" HOOK_LIST=""
 KERNEL=0 KERNEL_BRANCH="" KERNEL_CONFIG="" DRIVERS_DIR="" SOURCES=""
 BASE_PROFILE=""
-# shellcheck disable=SC1090
-source "$BOARD_CONF"
+if [ $PROFILE_ONLY -eq 0 ]; then
+    BOARD_DIR="$BOARD_CONFIGS_DIR/$BOARD"
+    BOARD_CONF="$BOARD_DIR/board.conf"
+    [ -f "$BOARD_CONF" ] || die "No board config: $BOARD_CONF"
+    # shellcheck disable=SC1090
+    source "$BOARD_CONF"
+else
+    BOARD_DIR="$BOARD_CONFIGS_DIR"   # unused; kept non-empty for path resolution
+fi
 
 # Per-variant override: VAR_<variant> (dashes become underscores) wins over VAR.
 resolve_cfg() {

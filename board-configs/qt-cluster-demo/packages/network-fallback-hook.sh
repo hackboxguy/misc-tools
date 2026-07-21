@@ -7,18 +7,20 @@ set -e
 # native two-profile autoconnect-priority mechanism (RaspiOS bookworm/trixie
 # use NM by default - no scripts, no dhcpcd):
 #
-#   1. eth0-dhcp (priority 10): DHCP, 15s timeout, single attempt
+#   1. eth0-dhcp (priority 10): DHCP, 5s timeout, single attempt
 #   2. eth0-static-fallback (priority 0): 192.168.10.3/24, no gateway/DNS
 #      (bench-network use; a bogus default route would blackhole traffic)
 #
-# Timing: carrier + ~15s DHCP timeout -> static active a second later.
+# Timing: carrier + ~5s DHCP timeout -> static active a second later
+# (fast pairing with a direct-cabled static peer, e.g. Jetson Xavier at
+# 192.168.10.2; real DHCP servers answer well within 5s).
 # No carrier = no profile activates (NM waits for the cable).
 # NM does NOT switch back automatically if a DHCP server appears
 # mid-session - replug the cable or reboot to renegotiate (accepted).
 
 NM_DIR=/etc/NetworkManager/system-connections
 FALLBACK_IP="192.168.10.3/24"
-DHCP_TIMEOUT=15
+DHCP_TIMEOUT=5
 
 echo "======================================"
 echo "  eth0 DHCP + static-fallback (NM)"

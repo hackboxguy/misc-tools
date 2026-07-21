@@ -116,9 +116,13 @@ Network policy pattern (qt-cluster-demo, reusable for other boards):
 DHCP-with-static-fallback is done declaratively with NetworkManager's
 two-profile autoconnect-priority mechanism (bookworm/trixie default to NM) -
 see `board-configs/qt-cluster-demo/packages/network-fallback-hook.sh`.
-High-priority DHCP profile (dhcp-timeout=15, autoconnect-retries=1) +
-low-priority static profile (192.168.10.3/24, no gateway/DNS). ~15-20s to
-fallback after carrier; no auto-switch back if DHCP appears mid-session.
+High-priority DHCP profile (dhcp-timeout=5, autoconnect-retries=1) +
+low-priority static profile (192.168.10.3/24, no gateway/DNS). ~5-7s to
+fallback after carrier (fast pairing with a direct-cabled static Jetson at
+192.168.10.2); no auto-switch back if DHCP appears mid-session. A DHCP
+*server* on the Pi was considered and rejected: the static peer never
+requests a lease (no speedup) and it would act as a rogue DHCP server on
+shared LANs.
 NM requires connection files root-owned mode 600; fixed UUIDs keep builds
 deterministic. Never solve this with dhcpcd or polling scripts.
 

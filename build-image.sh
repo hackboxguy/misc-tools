@@ -433,6 +433,16 @@ stamp_matches() { # $1=stamp-file $2=hash -> 0 if unchanged
     [ -f "$1" ] && [ "$(cat "$1")" = "$2" ]
 }
 
+# Will the base stage actually run? The vanilla image is only consumed by the
+# base stage, so its download is skipped whenever this returns false.
+base_will_run() {
+    [ -n "$ARG_START_FROM" ] && return 1
+    [ $SKIP_BASE -eq 1 ] && return 1
+    [ $FORCE_BASE -eq 1 ] && return 0
+    stamp_matches "$BASE_DIR/.stamp" "$(base_hash)" && [ -f "$BASE_IMG" ] && return 1
+    return 0
+}
+
 # ------------------------------------------------------------------------------
 # Preflight
 # ------------------------------------------------------------------------------
@@ -502,6 +512,8 @@ preflight() {
         [ -f "$VANILLA_XZ" ] && pf_ok "vanilla image (local): $VANILLA_XZ" || pf_fail "vanilla image not found: $VANILLA_XZ"
     elif [ -f "$VANILLA_XZ" ]; then
         pf_ok "vanilla image cached: $VANILLA_XZ"
+    elif ! base_will_run; then
+        pf_ok "vanilla image not needed (base stage cached/skipped)"
     elif [ $OFFLINE -eq 1 ]; then
         pf_fail "vanilla image not cached and --offline set: $VANILLA_XZ"
     else
@@ -631,6 +643,10 @@ fetch_sources() {
 download_vanilla() {
     [ -n "$ARG_START_FROM" ] && return 0
     [ -n "$ARG_BASEIMAGE" ] && return 0
+    if ! base_will_run && [ ! -f "$VANILLA_XZ" ]; then
+        info "Base stage is cached/skipped - vanilla image download not needed"
+        return 0
+    fi
     mkdir -p "$DL_DIR"; own_by_user "$DL_DIR"
     if [ ! -f "$VANILLA_XZ" ]; then
         [ $OFFLINE -eq 1 ] && die "Vanilla image not cached and --offline set"

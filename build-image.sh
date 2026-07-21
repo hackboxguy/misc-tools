@@ -381,7 +381,7 @@ kernel_stamp_inputs() {
 git_remote_rev() {
     local url="$1" ref="${2:-HEAD}" out=""
     if [ $OFFLINE -eq 0 ]; then
-        out=$(git ls-remote "$url" "$ref" "refs/heads/$ref" "refs/tags/$ref" 2>/dev/null | head -1 | cut -f1)
+        out=$(git_probe ls-remote "$url" "$ref" "refs/heads/$ref" "refs/tags/$ref" 2>/dev/null | head -1 | cut -f1)
     fi
     [ -n "$out" ] && printf '%s\n' "$out" || printf '%s\n' "$ref"
 }
@@ -461,7 +461,7 @@ preflight() {
             if [ $DRY_RUN -eq 1 ] && [ $OFFLINE -eq 0 ]; then
                 for bentry in "${HOOK_GIT_REPOS[@]}"; do
                     burl="${bentry%%|*}"
-                    git ls-remote --exit-code "$burl" HEAD >/dev/null 2>&1 && pf_ok "git reachable: $burl" || pf_fail "git unreachable: $burl"
+                    git_probe ls-remote --exit-code "$burl" HEAD >/dev/null 2>&1 && pf_ok "git reachable: $burl" || pf_fail "git unreachable: $burl (private repo? set up gh auth or GIT_USERNAME/GIT_TOKEN)"
                 done
             fi
         fi
@@ -507,7 +507,7 @@ preflight() {
     if [ $DRY_RUN -eq 1 ] && [ $OFFLINE -eq 0 ]; then
         for entry in "${HOOK_GIT_REPOS[@]}"; do
             url="${entry%%|*}"
-            git ls-remote --exit-code "$url" HEAD >/dev/null 2>&1 && pf_ok "git reachable: $url" || pf_fail "git unreachable: $url"
+            git_probe ls-remote --exit-code "$url" HEAD >/dev/null 2>&1 && pf_ok "git reachable: $url" || pf_fail "git unreachable: $url (private repo? set up gh auth or GIT_USERNAME/GIT_TOKEN)"
         done
     fi
 
@@ -550,17 +550,23 @@ preflight() {
 #   sudo GIT_USERNAME=you GIT_TOKEN=ghp_xxx ./build-image.sh --board=...
 GIT_CRED_FILE="" GIT_CRED_ARGS=()
 setup_git_credentials() {
+    [ -n "$GIT_CRED_FILE" ] && return 0   # already set up
     [ -n "${GIT_USERNAME:-}" ] && [ -n "${GIT_TOKEN:-}" ] || return 0
-    GIT_CRED_FILE="$TMP_DIR/.git-credentials.$$"
-    ( umask 077; printf 'https://%s:%s@github.com\n' "$GIT_USERNAME" "$GIT_TOKEN" > "$GIT_CRED_FILE" )
-    own_by_user "$GIT_CRED_FILE"
+    GIT_CRED_FILE="$(mktemp -t build-image-gitcred.XXXXXX)"
+    printf 'https://%s:%s@github.com\n' "$GIT_USERNAME" "$GIT_TOKEN" > "$GIT_CRED_FILE"
+    chmod 600 "$GIT_CRED_FILE"; own_by_user "$GIT_CRED_FILE"
     GIT_CRED_ARGS=(-c "credential.helper=store --file=$GIT_CRED_FILE")
     trap 'rm -f "$GIT_CRED_FILE"' EXIT
-    info "Using one-shot git credentials for user '$GIT_USERNAME' (sources stage only)"
+    info "Using one-shot git credentials for user '$GIT_USERNAME'"
 }
-cleanup_git_credentials() {
-    [ -n "$GIT_CRED_FILE" ] && rm -f "$GIT_CRED_FILE"
-    GIT_CRED_ARGS=()
+
+# All remote git probes (reachability checks, remote-revision stamping) and
+# source clones run as the INVOKING user - that's whose credential helper
+# (gh auth setup-git) is configured, even when the build runs under sudo.
+# GIT_TERMINAL_PROMPT=0 makes a missing credential a clean failure instead of
+# an interactive hang.
+git_probe() {
+    as_user env GIT_TERMINAL_PROMPT=0 git "${GIT_CRED_ARGS[@]}" "$@"
 }
 
 fetch_sources() {
@@ -592,7 +598,6 @@ fetch_sources() {
             as_user git "${GIT_CRED_ARGS[@]}" -C "$dest" pull --ff-only --quiet 2>/dev/null || true
         fi
     done <<< "$SOURCES"
-    cleanup_git_credentials
 }
 
 # ------------------------------------------------------------------------------
@@ -791,6 +796,7 @@ main() {
     log "misc-tools unified image builder"
     info "board=$BOARD${VARIANT:+ variant=$VARIANT} version=$VERSION workspace=$WORKSPACE"
 
+    setup_git_credentials   # one-shot GIT_USERNAME/GIT_TOKEN, if provided
     preflight
     if [ $DRY_RUN -eq 1 ]; then
         show_plan

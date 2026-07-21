@@ -22,9 +22,17 @@ repo revisions) actually changed:
 | Stage   | What it does                                                | Engine |
 |---------|-------------------------------------------------------------|--------|
 | sources | clone/update dependent repos into `<workspace>/sources`     | git    |
-| base    | vanilla `img.xz` → extended image + apt runtime/build deps  | `custom-pi-imager` (sdm) |
+| base    | vanilla `img.xz` → extended image + apt runtime/build deps (+ optional profile hooks) | `custom-pi-imager` (sdm) |
 | kernel  | cross-compile kernel + out-of-tree drivers into the image   | `custom-pi-kernel-builder` |
 | apps    | build/install apps via hooks in QEMU chroot, purge build deps | `custom-pi-imager` |
+
+Boards with similar package needs can share one cached base image via a
+**base profile** (`BASE_PROFILE=<name>` in board.conf → `base-configs/<name>/`):
+the profile owns the base-stage apt lists, extend size, password and optional
+profile hooks that bake heavy, rarely-changing components (e.g. a compiled
+vsomeip) into the shared base. micropanel, pi4-touch-demo and qt-cluster-demo
+share the `qt-common` profile — the ~15 min base build (plus profile hook
+compile time) is paid once for all of them.
 
 Everything lives in a workspace (default `~/pi-image-workspace`):
 `downloads/` (vanilla image cache), `sources/`, `kernel-build/`,
@@ -54,6 +62,8 @@ Useful options (see `--help` for all):
   `board.conf` (declarative config: image URL, sizes, deps, hook list,
   kernel settings, source repos), hook list(s), dependency lists and
   board-specific hook scripts in `packages/`.
+- `base-configs/<name>/` – shared base profiles (`profile.conf`,
+  `runtime-deps.txt`, `build-deps.txt`, optional `hooks.txt`).
 
 ## Adding a new board
 

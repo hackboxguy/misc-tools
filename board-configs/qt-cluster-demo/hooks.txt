@@ -1,0 +1,5 @@
+# qt-cluster-demo: hook list for custom-pi-imager incremental mode
+#
+# The parameterized fields keep the repo revision visible to the apps-stage
+# stamp (a push to the repo re-triggers the stage automatically).
+packages/qt-cluster-demo-hook.sh|https://github.com/hackboxguy/qt-cluster-demo.git|main|/home/pi/qt-cluster-demo

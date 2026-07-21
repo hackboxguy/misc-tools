@@ -1,0 +1,54 @@
+# qt-common profile: runtime packages baked into the shared base image
+# (union of micropanel, pi4-touch-demo and qt-cluster-demo runtime needs).
+# NOTE: boards still list their own runtime deps in board-configs/<name>/ -
+# that list is re-asserted in the apps stage after the build-dep purge.
+
+# Qt runtime + QML modules
+libqt5core5a
+libqt5gui5
+libqt5widgets5
+libqt5network5
+libqt5qml5
+libqt5quick5
+qml-module-qtquick2
+qml-module-qtquick-window2
+qml-module-qtquick-layouts
+qml-module-qtquick-controls
+qml-module-qtquick-controls2
+qml-module-qtqml-models2
+qml-module-qt-labs-folderlistmodel
+qtbase5-examples
+fonts-dejavu
+
+# Boost runtime (vsomeip + qt-cluster-demo DMS link against these; listing
+# them keeps apt autoremove from stripping them after the -dev purge)
+libboost-system1.74.0
+libboost-thread1.74.0
+libboost-log1.74.0
+libboost-filesystem1.74.0
+
+# CAN tooling (qt-cluster-demo --mode=canN)
+can-utils
+
+# System / measurement tools (micropanel family)
+python3-matplotlib
+python3-numpy
+screen
+avahi-daemon
+avahi-utils
+fbi
+fxload
+i2c-tools
+iperf3
+jq
+bc
+libcurl4-openssl-dev
+libftdi1
+libhidapi-libusb0
+libi2c-dev
+libudev-dev
+nlohmann-json3-dev
+kodi
+ddcutil
+libddcutil-dev
+argyll

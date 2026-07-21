@@ -53,7 +53,7 @@ Optional Arguments (Base Mode):
   --extend-size-mb=SIZE     Image extension size in MB (default: 0)
   --runtime-package=FILE    Runtime dependencies
 
-Optional Arguments (Incremental Mode):
+Optional Arguments (Both Modes; in base mode hooks run after package install):
   --setup-hook=FILE         Setup hook script (multiple allowed, runs in chroot)
                             Receives: MOUNT_POINT, PI_PASSWORD, IMAGE_WORK_DIR
   --setup-hook-list=FILE    File containing list of setup hooks (one per line)
@@ -236,8 +236,14 @@ validate_files() {
         [ -n "$RUNTIME_PACKAGE" ] && [ ! -f "$RUNTIME_PACKAGE" ] && error "Runtime package file not found: $RUNTIME_PACKAGE"
         [ -n "$BUILDDEP_PACKAGE" ] && [ ! -f "$BUILDDEP_PACKAGE" ] && error "Build dependency file not found: $BUILDDEP_PACKAGE"
 
-        # Warn about ignored arguments
-        [ ${#SETUP_HOOKS[@]} -gt 0 ] && warn "Ignoring --setup-hook in base mode"
+        # Setup hooks are allowed in base mode too (run after package
+        # installation); useful for baking heavy, rarely-changing components
+        # (e.g. compiled libraries) into a reusable base image.
+        [ -n "$SETUP_HOOKS_FILE" ] && [ ! -f "$SETUP_HOOKS_FILE" ] && error "Setup hook list file not found: $SETUP_HOOKS_FILE"
+        for hook in "${SETUP_HOOKS[@]}"; do
+            [ ! -f "$hook" ] && error "Setup hook not found: $hook"
+        done
+
         [ -n "$POST_BUILD_SCRIPT" ] && warn "Ignoring --post-build-script in base mode"
     fi
 
@@ -669,8 +675,9 @@ copy_local_sources() {
 }
 
 run_setup_hooks() {
-    # Only run in incremental mode
-    [ "$MODE" != "incremental" ] && info "Skipping setup hooks (base mode)" && return 0
+    # Runs in both modes when hooks are provided: incremental is the normal
+    # app-installation path; in base mode hooks run after package install to
+    # bake heavy, rarely-changing components into the base image.
 
     # Load hooks from file if specified
     load_hooks_from_file

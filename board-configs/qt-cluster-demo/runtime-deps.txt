@@ -1,0 +1,19 @@
+# qt-cluster-demo runtime dependencies (re-asserted in the apps stage after
+# the build-dep purge, protecting them from the apt autoremove cascade).
+libqt5core5a
+libqt5gui5
+libqt5qml5
+libqt5quick5
+libqt5network5
+qml-module-qtquick2
+qml-module-qtquick-window2
+fonts-dejavu
+
+# vsomeip (in /home/pi/.codex-deps) links against these
+libboost-system1.74.0
+libboost-thread1.74.0
+libboost-log1.74.0
+libboost-filesystem1.74.0
+
+# --mode=canN support
+can-utils

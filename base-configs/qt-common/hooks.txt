@@ -1,0 +1,8 @@
+# qt-common profile hooks: heavy, rarely-changing components compiled into
+# the shared base image (run once per base rebuild, cached afterwards).
+#
+# vsomeip 3.5.11 (COVESA) for the qt-cluster-demo DMS/SOME-IP stack.
+# Prefix matches what qt-cluster-demo's build script and systemd unit expect
+# (VSOMEIP_PREFIX default + hardcoded LD_LIBRARY_PATH in the unit).
+# Cmake flags mirror qt-cluster-demo/scripts/build-vsomeip-local.sh.
+../../custom-pi-imager/packages/generic-package-hook.sh|https://github.com/COVESA/vsomeip.git|3.5.11|/home/pi/.codex-deps/prefix/vsomeip-3.5.11|||-DDISABLE_DLT=ON -DENABLE_COMPAT=ON

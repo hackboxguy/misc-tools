@@ -138,6 +138,7 @@ BOARD_DESCRIPTION="" IMAGE_URL="" IMAGE_SHA256="" EXTEND_SIZE_MB=0
 DEFAULT_PASSWORD="" DEFAULT_VERSION="01.00"
 RUNTIME_DEPS="none" BUILD_DEPS="none" HOOK_LIST=""
 KERNEL=0 KERNEL_BRANCH="" KERNEL_CONFIG="" DRIVERS_DIR="" SOURCES=""
+BASE_PROFILE=""
 # shellcheck disable=SC1090
 source "$BOARD_CONF"
 
@@ -154,9 +155,25 @@ RUNTIME_DEPS="$(resolve_cfg RUNTIME_DEPS)"
 BUILD_DEPS="$(resolve_cfg BUILD_DEPS)"
 HOOK_LIST="$(resolve_cfg HOOK_LIST)"
 EXTEND_SIZE_MB="$(resolve_cfg EXTEND_SIZE_MB)"
-[ -n "$ARG_EXTEND_SIZE" ] && EXTEND_SIZE_MB="$ARG_EXTEND_SIZE"
 IMAGE_URL_CFG="$(resolve_cfg IMAGE_URL)"
 
+# Base profile: several boards can share one base image (vanilla + common apt
+# packages + optional profile hooks for heavy compiled deps). The profile owns
+# the base-stage parameters (deps, extend size, password); the board keeps its
+# own runtime deps (re-asserted in the apps stage) and hook list.
+PROFILE_DIR="" BASE_HOOK_LIST=""
+BASE_RUNTIME_DEPS="" BASE_BUILD_DEPS=""
+if [ -n "$BASE_PROFILE" ]; then
+    PROFILE_DIR="$SCRIPT_DIR/base-configs/$BASE_PROFILE"
+    [ -f "$PROFILE_DIR/profile.conf" ] || die "No profile config: $PROFILE_DIR/profile.conf"
+    # shellcheck disable=SC1090
+    source "$PROFILE_DIR/profile.conf"   # EXTEND_SIZE_MB, DEFAULT_PASSWORD (profile-owned)
+    [ -f "$PROFILE_DIR/runtime-deps.txt" ] && BASE_RUNTIME_DEPS="$PROFILE_DIR/runtime-deps.txt" || BASE_RUNTIME_DEPS="none"
+    [ -f "$PROFILE_DIR/build-deps.txt" ] && BASE_BUILD_DEPS="$PROFILE_DIR/build-deps.txt" || BASE_BUILD_DEPS="none"
+    [ -f "$PROFILE_DIR/hooks.txt" ] && BASE_HOOK_LIST="$PROFILE_DIR/hooks.txt"
+fi
+
+[ -n "$ARG_EXTEND_SIZE" ] && EXTEND_SIZE_MB="$ARG_EXTEND_SIZE"
 [ -n "$ARG_IMAGE_URL" ] && IMAGE_URL_CFG="$ARG_IMAGE_URL"
 VERSION="${VERSION:-$DEFAULT_VERSION}"
 PASSWORD="${PASSWORD:-$DEFAULT_PASSWORD}"
@@ -173,6 +190,19 @@ BUILD_DEPS="$(resolve_board_file "$BUILD_DEPS")"
 HOOK_LIST="$(resolve_board_file "$HOOK_LIST")"
 [ -n "$KERNEL_CONFIG" ] && [[ "$KERNEL_CONFIG" != /* ]] && KERNEL_CONFIG="$SCRIPT_DIR/$KERNEL_CONFIG"
 
+# Which deps drive the base stage and the apps-stage build-dep purge:
+# with a profile, the profile's lists (a superset of the board's) so the purge
+# removes everything the shared base installed; without, the board's own.
+if [ -n "$BASE_PROFILE" ]; then
+    BASE_STAGE_RUNTIME="$BASE_RUNTIME_DEPS"
+    BASE_STAGE_BUILDDEPS="$BASE_BUILD_DEPS"
+    APPS_BUILD_DEPS="$BASE_BUILD_DEPS"
+else
+    BASE_STAGE_RUNTIME="$RUNTIME_DEPS"
+    BASE_STAGE_BUILDDEPS="$BUILD_DEPS"
+    APPS_BUILD_DEPS="$BUILD_DEPS"
+fi
+
 # ------------------------------------------------------------------------------
 # User / workspace resolution
 # ------------------------------------------------------------------------------
@@ -187,7 +217,12 @@ DL_DIR="$WORKSPACE/downloads"
 SRC_DIR="${ARG_SOURCES_DIR:-$WORKSPACE/sources}"
 [[ "$SRC_DIR" != /* ]] && SRC_DIR="$(pwd)/$SRC_DIR"
 KBUILD_DIR="$WORKSPACE/kernel-build"
-BASE_DIR="$WORKSPACE/base/$BUILD_ID"
+# Profile bases are shared across boards; per-board bases stay separate.
+if [ -n "$BASE_PROFILE" ]; then
+    BASE_DIR="$WORKSPACE/base/profile-$BASE_PROFILE"
+else
+    BASE_DIR="$WORKSPACE/base/$BUILD_ID"
+fi
 KERNEL_DIR="$WORKSPACE/kernel/$BUILD_ID"
 OUT_DIR="${ARG_OUTPUT_DIR:-$WORKSPACE/out/$BUILD_ID}"
 [[ "$OUT_DIR" != /* ]] && OUT_DIR="$(pwd)/$OUT_DIR"
@@ -219,7 +254,7 @@ else
 fi
 VANILLA_STEM="${VANILLA_NAME%.img}"
 
-BASE_IMG="$BASE_DIR/$VANILLA_STEM-$BUILD_ID-base.img"
+BASE_IMG="$BASE_DIR/$VANILLA_STEM-${BASE_PROFILE:-$BUILD_ID}-base.img"
 KERNEL_IMG="$KERNEL_DIR/$VANILLA_STEM-$BUILD_ID-base-kernel.img"
 if [ -n "$ARG_START_FROM" ]; then
     # start-from image names usually carry the board already
@@ -241,13 +276,17 @@ expand_line_vars() {
     printf '%s\n' "$line"
 }
 
+# Parses a hook list file into the HOOK_* arrays. Defaults to the board's
+# apps-stage list ($HOOK_LIST); pass a file argument for other lists (profile
+# base hooks).
 HOOK_SCRIPTS=() HOOK_LOCAL_DIRS=() HOOK_GIT_REPOS=()
 parse_hook_list() {
+    local list="${1:-$HOOK_LIST}"
     HOOK_SCRIPTS=() HOOK_LOCAL_DIRS=() HOOK_GIT_REPOS=()
-    [ -z "$HOOK_LIST" ] || [ "$HOOK_LIST" = "none" ] && return 0
-    [ -f "$HOOK_LIST" ] || die "Hook list not found: $HOOK_LIST"
+    [ -z "$list" ] || [ "$list" = "none" ] && return 0
+    [ -f "$list" ] || die "Hook list not found: $list"
     local line hook_script git_repo git_tag rest hooks_dir
-    hooks_dir="$(dirname "$HOOK_LIST")"
+    hooks_dir="$(dirname "$list")"
     while IFS= read -r line; do
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
         [[ -z "${line// }" ]] && continue
@@ -262,7 +301,7 @@ parse_hook_list() {
                 HOOK_GIT_REPOS+=("$git_repo${git_tag:+|$git_tag}")
             fi
         fi
-    done < "$HOOK_LIST"
+    done < "$list"
 }
 
 # Is DIR one that the sources stage will create? (matches a SOURCES entry name)
@@ -305,9 +344,20 @@ kernel_hash() { kernel_stamp_inputs | hash_lines; }
 apps_hash()   { apps_stamp_inputs   | hash_lines; }
 
 base_stamp_inputs() {
-    local in=("base-v1" "$VANILLA_NAME" "extend:$EXTEND_SIZE_MB" "pw:$PASSWORD")
-    [ "$RUNTIME_DEPS" != "none" ] && in+=("file:$RUNTIME_DEPS")
-    [ "$BUILD_DEPS" != "none" ] && in+=("file:$BUILD_DEPS")
+    local in=("base-v2" "profile:$BASE_PROFILE" "$VANILLA_NAME" "extend:$EXTEND_SIZE_MB" "pw:$PASSWORD")
+    [ "$BASE_STAGE_RUNTIME" != "none" ] && [ -n "$BASE_STAGE_RUNTIME" ] && in+=("file:$BASE_STAGE_RUNTIME")
+    [ "$BASE_STAGE_BUILDDEPS" != "none" ] && [ -n "$BASE_STAGE_BUILDDEPS" ] && in+=("file:$BASE_STAGE_BUILDDEPS")
+    if [ -n "$BASE_HOOK_LIST" ]; then
+        parse_hook_list "$BASE_HOOK_LIST"
+        in+=("file:$BASE_HOOK_LIST")
+        local h d entry url ref
+        for h in "${HOOK_SCRIPTS[@]}"; do in+=("file:$h"); done
+        for d in "${HOOK_LOCAL_DIRS[@]}"; do in+=("dir:$d"); done
+        for entry in "${HOOK_GIT_REPOS[@]}"; do
+            url="${entry%%|*}"; ref="${entry#*|}"; [ "$ref" = "$entry" ] && ref="HEAD"
+            in+=("git:$url@$(git_remote_rev "$url" "$ref")")
+        done
+    fi
     printf '%s\n' "${in[@]}"
 }
 
@@ -330,6 +380,7 @@ git_remote_rev() {
 }
 
 apps_stamp_inputs() {
+    parse_hook_list "$HOOK_LIST"
     local in=("apps-v1" "version:$VERSION" "input:$APPS_INPUT_STAMP")
     [ "$HOOK_LIST" != "none" ] && [ -n "$HOOK_LIST" ] && in+=("file:$HOOK_LIST")
     local h d entry url ref
@@ -379,7 +430,35 @@ preflight() {
 
     # Board files
     [ "$RUNTIME_DEPS" = "none" ] || { [ -f "$RUNTIME_DEPS" ] && pf_ok "runtime deps: $RUNTIME_DEPS" || pf_fail "runtime deps missing: $RUNTIME_DEPS"; }
-    [ "$BUILD_DEPS" = "none" ] || { [ -f "$BUILD_DEPS" ] && pf_ok "build deps: $BUILD_DEPS" || pf_fail "build deps missing: $BUILD_DEPS"; }
+    if [ -z "$BASE_PROFILE" ]; then
+        [ "$BUILD_DEPS" = "none" ] || { [ -f "$BUILD_DEPS" ] && pf_ok "build deps: $BUILD_DEPS" || pf_fail "build deps missing: $BUILD_DEPS"; }
+    fi
+
+    # Base profile files and hooks
+    if [ -n "$BASE_PROFILE" ]; then
+        pf_ok "base profile: $BASE_PROFILE ($PROFILE_DIR)"
+        [ "$BASE_STAGE_RUNTIME" = "none" ] || { [ -f "$BASE_STAGE_RUNTIME" ] && pf_ok "profile runtime deps" || pf_fail "profile runtime deps missing: $BASE_STAGE_RUNTIME"; }
+        [ "$BASE_STAGE_BUILDDEPS" = "none" ] || { [ -f "$BASE_STAGE_BUILDDEPS" ] && pf_ok "profile build deps" || pf_fail "profile build deps missing: $BASE_STAGE_BUILDDEPS"; }
+        if [ -n "$BASE_HOOK_LIST" ]; then
+            parse_hook_list "$BASE_HOOK_LIST"
+            local bh bd bentry burl bhd
+            for bh in "${HOOK_SCRIPTS[@]}"; do
+                bhd="$(realpath -m "$bh")"
+                [ -f "$bh" ] && pf_ok "profile hook: ${bhd#"$SCRIPT_DIR"/}" || pf_fail "profile hook missing: $bh"
+            done
+            for bd in "${HOOK_LOCAL_DIRS[@]}"; do
+                if [ -d "$bd" ]; then pf_ok "profile local source: $bd"
+                elif [ $OFFLINE -eq 0 ] && dir_is_declared_source "$bd"; then pf_warn "profile local source will be cloned: $bd"
+                else pf_fail "profile local source missing: $bd"; fi
+            done
+            if [ $DRY_RUN -eq 1 ] && [ $OFFLINE -eq 0 ]; then
+                for bentry in "${HOOK_GIT_REPOS[@]}"; do
+                    burl="${bentry%%|*}"
+                    git ls-remote --exit-code "$burl" HEAD >/dev/null 2>&1 && pf_ok "git reachable: $burl" || pf_fail "git unreachable: $burl"
+                done
+            fi
+        fi
+    fi
     if [ "$KERNEL" = "1" ]; then
         [ -n "$KERNEL_CONFIG" ] && [ "$KERNEL_CONFIG" != "defconfig" ] && { [ -f "$KERNEL_CONFIG" ] && pf_ok "kernel config: $(basename "$KERNEL_CONFIG")" || pf_fail "kernel config missing: $KERNEL_CONFIG"; }
     fi
@@ -518,7 +597,7 @@ run_stage_base() {
     if [ $FORCE_BASE -eq 0 ] && stamp_matches "$BASE_DIR/.stamp" "$hash" && [ -f "$BASE_IMG" ]; then
         log "Stage base: up-to-date (stamp match) -> $BASE_IMG"; return 0
     fi
-    stage_banner "Stage 1: Base OS image"
+    stage_banner "Stage 1: Base OS image${BASE_PROFILE:+ (profile: $BASE_PROFILE)}"
     local work="$TMP_DIR/base"; rm -rf "$work"; mkdir -p "$work"
     "$IMAGER" \
         --mode=base \
@@ -526,8 +605,9 @@ run_stage_base() {
         --output="$work" \
         ${PASSWORD:+--password="$PASSWORD"} \
         --extend-size-mb="$EXTEND_SIZE_MB" \
-        ${RUNTIME_DEPS:+$([ "$RUNTIME_DEPS" != "none" ] && echo "--runtime-package=$RUNTIME_DEPS")} \
-        --builddep-package="$([ "$BUILD_DEPS" != "none" ] && echo "$BUILD_DEPS" || echo none)" \
+        ${BASE_STAGE_RUNTIME:+$([ "$BASE_STAGE_RUNTIME" != "none" ] && echo "--runtime-package=$BASE_STAGE_RUNTIME")} \
+        --builddep-package="$([ "$BASE_STAGE_BUILDDEPS" != "none" ] && [ -n "$BASE_STAGE_BUILDDEPS" ] && echo "$BASE_STAGE_BUILDDEPS" || echo none)" \
+        $([ -n "$BASE_HOOK_LIST" ] && echo "--setup-hook-list=$BASE_HOOK_LIST") \
         --version="$VERSION"
     mkdir -p "$BASE_DIR"
     mv "$work/$VANILLA_NAME" "$BASE_IMG"
@@ -606,7 +686,7 @@ run_stage_apps() {
         --mode=incremental \
         --baseimage="$APPS_INPUT" \
         --output="$work" \
-        --builddep-package="$([ "$BUILD_DEPS" != "none" ] && echo "$BUILD_DEPS" || echo none)" \
+        --builddep-package="$([ "$APPS_BUILD_DEPS" != "none" ] && [ -n "$APPS_BUILD_DEPS" ] && echo "$APPS_BUILD_DEPS" || echo none)" \
         ${RUNTIME_DEPS:+$([ "$RUNTIME_DEPS" != "none" ] && echo "--runtime-package=$RUNTIME_DEPS")} \
         $([ "$HOOK_LIST" != "none" ] && [ -n "$HOOK_LIST" ] && echo "--setup-hook-list=$HOOK_LIST") \
         --version="$VERSION" \

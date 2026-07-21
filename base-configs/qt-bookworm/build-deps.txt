@@ -1,4 +1,4 @@
-# qt-common profile: build dependencies installed in the shared base image
+# qt-bookworm profile: build dependencies installed in the shared base image
 # and purged at the end of every apps stage.
 cmake
 g++

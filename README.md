@@ -122,7 +122,7 @@ Boards with similar package needs share one cached base image via a
 the profile owns the base-stage apt lists, extend size, password and
 optional profile hooks that bake heavy, rarely-changing components (e.g. a
 compiled vsomeip) into the shared base. micropanel, pi4-touch-demo and
-qt-cluster-demo share the `qt-common` profile (bookworm); `qt-trixie` is
+qt-cluster-demo share the `qt-bookworm` profile (bookworm); `qt-trixie` is
 the RaspiOS-trixie variant. The base build cost is paid once for all
 boards of a profile. Base parameters must stay profile-owned - passing a
 different `--extend-size-mb`/`--password` per board would make the shared
@@ -160,7 +160,7 @@ stamp ping-pong.
 
 1. `mkdir board-configs/myboard && cp board-configs/media-mux/board.conf board-configs/myboard/`
 2. Adjust `board.conf` (set `KERNEL=0` unless you need custom drivers;
-   set `BASE_PROFILE=qt-common` to reuse the shared Qt base).
+   set `BASE_PROFILE=qt-bookworm` to reuse the shared Qt base).
 3. Write `runtime-deps.txt` and a hook list; reuse
    `custom-pi-imager/packages/generic-package-hook.sh` for cmake-based
    git or local (`file://${REPOBINS}/...`) packages.

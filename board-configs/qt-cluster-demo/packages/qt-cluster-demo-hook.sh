@@ -10,7 +10,7 @@ set -e
 #
 # Environment (from the hook list): HOOK_GIT_REPO, HOOK_GIT_TAG,
 # HOOK_INSTALL_DEST. vsomeip is expected in the base image already
-# (qt-common profile hook) at the prefix below.
+# (qt-bookworm profile hook) at the prefix below.
 
 REPO="${HOOK_GIT_REPO:-https://github.com/hackboxguy/qt-cluster-demo.git}"
 REF="${HOOK_GIT_TAG:-main}"

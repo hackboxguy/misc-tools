@@ -1,4 +1,4 @@
-# qt-common profile: runtime packages baked into the shared base image
+# qt-bookworm profile: runtime packages baked into the shared base image
 # (union of micropanel, pi4-touch-demo and qt-cluster-demo runtime needs; trixie boost 1.83).
 # NOTE: boards still list their own runtime deps in board-configs/<name>/ -
 # that list is re-asserted in the apps stage after the build-dep purge.

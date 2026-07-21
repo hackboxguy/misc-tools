@@ -53,6 +53,13 @@
 #   --debug             Pass --debug to imager (keep mounted on error)
 #   --list-boards       List available board configs and exit
 #   --help
+#
+# Environment:
+#   GIT_USERNAME + GIT_TOKEN   One-shot GitHub credentials (PAT) for private
+#                              source repos on machines without a stored git
+#                              credential helper; used only for the sources
+#                              stage via a 0600 temp credential file.
+#                              sudo GIT_USERNAME=you GIT_TOKEN=ghp_xxx ./build-image.sh ...
 # ==============================================================================
 
 set -euo pipefail
@@ -536,10 +543,31 @@ preflight() {
 # ------------------------------------------------------------------------------
 # Stage: sources
 # ------------------------------------------------------------------------------
+# One-shot GitHub credentials for private source repos on machines without a
+# stored credential helper: GIT_USERNAME + GIT_TOKEN (a PAT, not the account
+# password) are written to a 0600 credential-store file used only for the
+# sources stage, and removed afterwards. Example:
+#   sudo GIT_USERNAME=you GIT_TOKEN=ghp_xxx ./build-image.sh --board=...
+GIT_CRED_FILE="" GIT_CRED_ARGS=()
+setup_git_credentials() {
+    [ -n "${GIT_USERNAME:-}" ] && [ -n "${GIT_TOKEN:-}" ] || return 0
+    GIT_CRED_FILE="$TMP_DIR/.git-credentials.$$"
+    ( umask 077; printf 'https://%s:%s@github.com\n' "$GIT_USERNAME" "$GIT_TOKEN" > "$GIT_CRED_FILE" )
+    own_by_user "$GIT_CRED_FILE"
+    GIT_CRED_ARGS=(-c "credential.helper=store --file=$GIT_CRED_FILE")
+    trap 'rm -f "$GIT_CRED_FILE"' EXIT
+    info "Using one-shot git credentials for user '$GIT_USERNAME' (sources stage only)"
+}
+cleanup_git_credentials() {
+    [ -n "$GIT_CRED_FILE" ] && rm -f "$GIT_CRED_FILE"
+    GIT_CRED_ARGS=()
+}
+
 fetch_sources() {
     [ -z "${SOURCES// /}" ] && return 0
     stage_banner "Stage 0: Sources"
     mkdir -p "$SRC_DIR"; own_by_user "$SRC_DIR"
+    setup_git_credentials
     local name url branch dest drivers_root="${DRIVERS_DIR%%/*}"
     while IFS='|' read -r name url branch; do
         [ -z "${name// }" ] && continue
@@ -554,16 +582,17 @@ fetch_sources() {
         if [ ! -d "$dest" ]; then
             [ $OFFLINE -eq 1 ] && die "Source '$name' missing and --offline set: $dest"
             log "Cloning $name (${branch:-default})..."
-            as_user git clone ${branch:+-b "$branch"} "$url" "$dest"
+            as_user git "${GIT_CRED_ARGS[@]}" clone ${branch:+-b "$branch"} "$url" "$dest"
         elif [ $OFFLINE -eq 0 ]; then
             log "Updating $name..."
-            as_user git -C "$dest" fetch --quiet 2>/dev/null || warn "fetch failed for $name (continuing with local copy)"
+            as_user git "${GIT_CRED_ARGS[@]}" -C "$dest" fetch --quiet 2>/dev/null || warn "fetch failed for $name (continuing with local copy)"
             if [ -n "$branch" ]; then
                 as_user git -C "$dest" checkout --quiet "$branch" 2>/dev/null || warn "cannot checkout $branch in $name"
             fi
-            as_user git -C "$dest" pull --ff-only --quiet 2>/dev/null || true
+            as_user git "${GIT_CRED_ARGS[@]}" -C "$dest" pull --ff-only --quiet 2>/dev/null || true
         fi
     done <<< "$SOURCES"
+    cleanup_git_credentials
 }
 
 # ------------------------------------------------------------------------------

@@ -112,6 +112,16 @@ phases under QEMU are normal, not hangs.
   deploy step generates for demo+dms - keep the hook in sync if upstream
   argument scheme changes) and `systemctl enable`s the unit.
 
+Network policy pattern (qt-cluster-demo, reusable for other boards):
+DHCP-with-static-fallback is done declaratively with NetworkManager's
+two-profile autoconnect-priority mechanism (bookworm/trixie default to NM) -
+see `board-configs/qt-cluster-demo/packages/network-fallback-hook.sh`.
+High-priority DHCP profile (dhcp-timeout=15, autoconnect-retries=1) +
+low-priority static profile (192.168.10.3/24, no gateway/DNS). ~15-20s to
+fallback after carrier; no auto-switch back if DHCP appears mid-session.
+NM requires connection files root-owned mode 600; fixed UUIDs keep builds
+deterministic. Never solve this with dhcpcd or polling scripts.
+
 Private repos: sources clone as the invoking user → `gh auth setup-git`
 credentials apply even under sudo. One-shot alternative:
 `sudo GIT_USERNAME=x GIT_TOKEN=<PAT> ./build-image.sh ...` (0600 temp

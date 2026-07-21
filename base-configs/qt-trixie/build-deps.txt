@@ -1,0 +1,28 @@
+# qt-trixie profile: build dependencies installed in the shared base image
+# and purged at the end of every apps stage.
+cmake
+g++
+make
+git
+pkg-config
+build-essential
+libusb-dev
+libftdi-dev
+libgpiod-dev
+libftdi1-dev
+libhidapi-dev
+zlib1g-dev
+libudev-dev
+
+# Qt development
+qtbase5-dev
+qtbase5-dev-tools
+qtdeclarative5-dev
+qtdeclarative5-dev-tools
+qtquickcontrols2-5-dev
+
+# Boost development (vsomeip profile hook + qt-cluster-demo DMS build)
+libboost-system-dev
+libboost-thread-dev
+libboost-log-dev
+libboost-filesystem-dev

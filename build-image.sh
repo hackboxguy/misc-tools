@@ -318,12 +318,29 @@ kernel_stamp_inputs() {
     printf '%s\n' "${in[@]}"
 }
 
+# Resolve the current commit of a remote ref (branch or tag); for pinned
+# commit ids or unreachable remotes, fall back to the literal ref so the
+# stamp stays stable instead of erroring.
+git_remote_rev() {
+    local url="$1" ref="${2:-HEAD}" out=""
+    if [ $OFFLINE -eq 0 ]; then
+        out=$(git ls-remote "$url" "$ref" "refs/heads/$ref" "refs/tags/$ref" 2>/dev/null | head -1 | cut -f1)
+    fi
+    [ -n "$out" ] && printf '%s\n' "$out" || printf '%s\n' "$ref"
+}
+
 apps_stamp_inputs() {
     local in=("apps-v1" "version:$VERSION" "input:$APPS_INPUT_STAMP")
     [ "$HOOK_LIST" != "none" ] && [ -n "$HOOK_LIST" ] && in+=("file:$HOOK_LIST")
-    local h d
+    local h d entry url ref
     for h in "${HOOK_SCRIPTS[@]}"; do in+=("file:$h"); done
     for d in "${HOOK_LOCAL_DIRS[@]}"; do in+=("dir:$d"); done
+    # Git-source hooks clone inside the chroot at build time; track their
+    # remote revision so a moved branch re-triggers the apps stage.
+    for entry in "${HOOK_GIT_REPOS[@]}"; do
+        url="${entry%%|*}"; ref="${entry#*|}"; [ "$ref" = "$entry" ] && ref="HEAD"
+        in+=("git:$url@$(git_remote_rev "$url" "$ref")")
+    done
     [ "$RUNTIME_DEPS" != "none" ] && in+=("file:$RUNTIME_DEPS")
     [ "$BUILD_DEPS" != "none" ] && in+=("file:$BUILD_DEPS")
     printf '%s\n' "${in[@]}"

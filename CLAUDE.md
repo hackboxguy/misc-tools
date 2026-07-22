@@ -155,5 +155,6 @@ credential store; env vars by design, never CLI flags).
   (per-variant `VAR_<variant>` overrides in board.conf).
 - `--dry-run` needs no root and runs full preflight incl. git reachability -
   always suggest it first.
-- Repo branches: development on `unified-build-structure` (misc-tools);
-  sp6bins' equivalent branch is merged to its main.
+- Repo branches: everything is merged to `main` in all repos (misc-tools,
+  sp6bins) as of 2026-07-22; the historical development branch was
+  `unified-build-structure`.

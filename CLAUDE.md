@@ -48,7 +48,7 @@ apps hooks comes from APPS_EXTEND_SIZE_MB in board.conf (applied by sdm
 `--extend` to the apps-stage working copy only, so shared base/kernel
 caches stay compact; grows the final image by the same amount - mind SD
 card sizes). Symptom of getting this wrong: sdm aborts the apps stage
-with "IMG is 99% full" (micropanel needed 1500MB extra; qt-cluster-demo
+with "IMG is 99% full" (micropanel uses 1200MB extra - sized to keep the final image 8GB-card compatible; qt-cluster-demo
 fits without).
 
 Known trap this design fixed twice: anything an image build consumes must

@@ -267,8 +267,10 @@ validate_files() {
         # caught in the purge cascade. Validate it if provided.
         [ -n "$RUNTIME_PACKAGE" ] && [ ! -f "$RUNTIME_PACKAGE" ] && error "Runtime package file not found: $RUNTIME_PACKAGE"
 
-        # Warn about extend-size-mb
-        [ "$EXTEND_SIZE_MB" -gt 0 ] && warn "Cannot extend image size in incremental mode (ignoring)"
+        # Extension is allowed in incremental mode too: sdm extends the
+        # already-customized image before re-customization (per-board extra
+        # space for heavy hook sets on top of a shared base image).
+        [ "$EXTEND_SIZE_MB" -gt 0 ] && info "Image will be extended by ${EXTEND_SIZE_MB}MB before hooks run"
     fi
 
     log "File validation complete"
@@ -395,6 +397,11 @@ run_sdm() {
         info "Extending image by ${EXTEND_SIZE_MB}MB"
     else
         info "Skipping image extension (using existing space)"
+    fi
+
+    # An already-customized image (incremental mode, or base mode without
+    # extension) needs --redo-customize for sdm to customize it again.
+    if [ "$MODE" = "incremental" ] || [ "$EXTEND_SIZE_MB" -eq 0 ]; then
         sdm_cmd="$sdm_cmd --redo-customize"
     fi
 

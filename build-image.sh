@@ -159,7 +159,7 @@ BOARD_DESCRIPTION="" IMAGE_URL="" IMAGE_SHA256="" EXTEND_SIZE_MB=0
 DEFAULT_PASSWORD="" DEFAULT_VERSION="01.00"
 RUNTIME_DEPS="none" BUILD_DEPS="none" HOOK_LIST=""
 KERNEL=0 KERNEL_BRANCH="" KERNEL_CONFIG="" DRIVERS_DIR="" SOURCES=""
-BASE_PROFILE=""
+BASE_PROFILE="" APPS_EXTEND_SIZE_MB=0
 if [ $PROFILE_ONLY -eq 0 ]; then
     BOARD_DIR="$BOARD_CONFIGS_DIR/$BOARD"
     BOARD_CONF="$BOARD_DIR/board.conf"
@@ -183,6 +183,7 @@ RUNTIME_DEPS="$(resolve_cfg RUNTIME_DEPS)"
 BUILD_DEPS="$(resolve_cfg BUILD_DEPS)"
 HOOK_LIST="$(resolve_cfg HOOK_LIST)"
 EXTEND_SIZE_MB="$(resolve_cfg EXTEND_SIZE_MB)"
+APPS_EXTEND_SIZE_MB="$(resolve_cfg APPS_EXTEND_SIZE_MB)"
 IMAGE_URL_CFG="$(resolve_cfg IMAGE_URL)"
 
 # Base profile: several boards can share one base image (vanilla + common apt
@@ -426,7 +427,7 @@ git_remote_rev() {
 
 apps_stamp_inputs() {
     parse_hook_list "$HOOK_LIST"
-    local in=("apps-v1" "version:$VERSION" "input:$APPS_INPUT_STAMP")
+    local in=("apps-v1" "version:$VERSION" "input:$APPS_INPUT_STAMP" "apps-extend:$APPS_EXTEND_SIZE_MB")
     [ "$HOOK_LIST" != "none" ] && [ -n "$HOOK_LIST" ] && in+=("file:$HOOK_LIST")
     local h d entry url ref
     for h in "${HOOK_SCRIPTS[@]}"; do in+=("file:$h"); done
@@ -774,6 +775,7 @@ run_stage_apps() {
         --mode=incremental \
         --baseimage="$APPS_INPUT" \
         --output="$work" \
+        --extend-size-mb="$APPS_EXTEND_SIZE_MB" \
         --builddep-package="$([ "$APPS_BUILD_DEPS" != "none" ] && [ -n "$APPS_BUILD_DEPS" ] && echo "$APPS_BUILD_DEPS" || echo none)" \
         ${RUNTIME_DEPS:+$([ "$RUNTIME_DEPS" != "none" ] && echo "--runtime-package=$RUNTIME_DEPS")} \
         $([ "$HOOK_LIST" != "none" ] && [ -n "$HOOK_LIST" ] && echo "--setup-hook-list=$HOOK_LIST") \

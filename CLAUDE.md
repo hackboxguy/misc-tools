@@ -38,8 +38,18 @@ Each stage writes `.stamp` = sha256 over its inputs; unchanged → skipped.
 - apps stamp: input-image stamp + version + hook list + hook script
   contents + `file://` source dir revs + `git ls-remote` revision of every
   git-source hook (so pushing to e.g. qt-cluster-demo or br-wrapper
-  auto-triggers the apps stage). Probes run via `git_probe()` (as invoking
-  user, `GIT_TERMINAL_PROMPT=0`); `--offline` falls back to literal refs.
+  auto-triggers the apps stage) + APPS_EXTEND_SIZE_MB. Probes run via
+  `git_probe()` (as invoking user, `GIT_TERMINAL_PROMPT=0`); `--offline`
+  falls back to literal refs.
+
+Disk-space budgeting: the profile extend (EXTEND_SIZE_MB) must fit the
+base packages + profile hooks + kernel modules; per-board scratch for the
+apps hooks comes from APPS_EXTEND_SIZE_MB in board.conf (applied by sdm
+`--extend` to the apps-stage working copy only, so shared base/kernel
+caches stay compact; grows the final image by the same amount - mind SD
+card sizes). Symptom of getting this wrong: sdm aborts the apps stage
+with "IMG is 99% full" (micropanel needed 1500MB extra; qt-cluster-demo
+fits without).
 
 Known trap this design fixed twice: anything an image build consumes must
 be in the stamp, or pushed changes silently don't reach the image.

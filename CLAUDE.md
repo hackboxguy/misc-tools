@@ -51,8 +51,13 @@ card sizes). Symptom of getting this wrong: sdm aborts the apps stage
 with "IMG is 99% full" (micropanel uses 1200MB extra - sized to keep the final image 8GB-card compatible; qt-cluster-demo
 fits without).
 
-Known trap this design fixed twice: anything an image build consumes must
-be in the stamp, or pushed changes silently don't reach the image.
+Known trap this design fixed three times: anything an image build consumes
+must be in the stamp, or pushed changes silently don't reach the image.
+(Third instance: streamdeck-ctrl's hook uses the branch field for a screen
+name, so its pushes were invisible until git_remote_rev learned to fall
+back to remote HEAD for unresolvable non-SHA refs.) A build that finishes
+in 1-3 minutes did NOT rebuild anything - the smallest real rebuild (apps
+stage) takes ~30 min.
 
 Userspace-only iteration: `--skip-kernel` recommended even though stamps
 would usually skip kernel anyway - the sources stage pulls br-wrapper each

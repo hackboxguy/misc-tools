@@ -421,6 +421,13 @@ git_remote_rev() {
     local url="$1" ref="${2:-HEAD}" out=""
     if [ $OFFLINE -eq 0 ]; then
         out=$(git_probe ls-remote "$url" "$ref" "refs/heads/$ref" "refs/tags/$ref" 2>/dev/null | head -1 | cut -f1)
+        # Some hooks carry a non-ref in the tag field (streamdeck-ctrl's
+        # screen name) and clone the remote's default branch instead. For an
+        # unresolvable ref that isn't a pinned commit SHA, track the remote
+        # HEAD so pushes to such repos still invalidate the apps stamp.
+        if [ -z "$out" ] && ! [[ "$ref" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+            out=$(git_probe ls-remote "$url" HEAD 2>/dev/null | head -1 | cut -f1)
+        fi
     fi
     [ -n "$out" ] && printf '%s\n' "$out" || printf '%s\n' "$ref"
 }

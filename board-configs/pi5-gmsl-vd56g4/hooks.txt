@@ -1,0 +1,13 @@
+# pi5-gmsl-vd56g4 hook list (custom-pi-imager incremental / apps stage).
+#
+# Format: HOOK_SCRIPT[|GIT_REPO|GIT_TAG|INSTALL_DEST|DEP_LIST|POST_CMDS|CMAKE_ARGS]
+#
+# The gmsl-vd56g4 repo is PRIVATE, so it is sourced from the host-side clone
+# (SOURCES in board.conf, cloned with the invoking user's git credentials) via
+# file://${REPOBINS}/gmsl-vd56g4 - the imager copies it into the chroot and
+# exports HOOK_LOCAL_SOURCE. Never an in-chroot clone of a private repo.
+#
+# Field 4 (INSTALL_DEST) is unused by this hook; field 5 (DEP_LIST) is empty -
+# all deps are declared in runtime-deps.txt / build-deps.txt so they are
+# stamped and managed by the base/apps stages.
+packages/pi5-gmsl-vd56g4-hook.sh|file://${REPOBINS}/gmsl-vd56g4|local|/home/pi/gmsl-vd56g4|

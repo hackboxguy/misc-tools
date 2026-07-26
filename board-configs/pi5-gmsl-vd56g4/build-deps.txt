@@ -1,0 +1,4 @@
+# pi5-gmsl-vd56g4 build-only dependencies - purged after the apps stage.
+# device-tree-compiler (dtc) builds the .dtbo overlays from the repo .dts in
+# the hook; not needed at runtime once the .dtbo is in /boot/firmware/overlays.
+device-tree-compiler

@@ -1,0 +1,23 @@
+# pi5-gmsl-vd56g4 runtime dependencies - persist in the final image.
+
+# --- GStreamer: the live camera -> HDMI pipeline (v4l2src ! ... ! kmssink) ---
+gstreamer1.0-tools
+gstreamer1.0-plugins-base
+gstreamer1.0-plugins-good
+gstreamer1.0-plugins-bad
+
+# --- V4L2 / media-controller: media-ctl + v4l2-ctl (pipeline setup, capture) ---
+v4l-utils
+
+# --- i2c + GPIO tooling: i2cdetect (deser probe) + pinctrl (Channel-B mux) ---
+i2c-tools
+raspi-utils
+
+# --- DKMS: keep the driver rebuildable across kernel upgrades ---
+# dkms pulls the build toolchain; linux-headers-rpi-2712 = the Pi 5 kernel
+# headers so a post-upgrade `dkms autoinstall` finds a matching build tree.
+# (Cost ~a few hundred MB over pure-lite; the trade is a camera that survives
+# `apt full-upgrade`. Drop both for a leaner build-once image - the module is
+# already installed for the shipped kernel.)
+dkms
+linux-headers-rpi-2712

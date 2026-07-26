@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+# The chroot hook environment may not export /usr/sbin (where dkms, i2cdetect,
+# depmod live), which surfaces as "dkms: command not found" even when installed.
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
 # pi5-gmsl-vd56g4 setup hook - runs inside the ARM64 chroot (apps stage).
 #
 # Bakes the VD56G4 GMSL camera (AD-GMSL716MIPI-EVK / MAX96716A) into a vanilla
@@ -38,6 +42,17 @@ ls "$SRC"/firmware/harman_vb56g4a_*.bin >/dev/null 2>&1 || { echo "ERROR: firmwa
 # 1. DKMS install the driver (DESER=max96716a for the AD-GMSL716 EVK)
 #------------------------------------------------------------------------------
 echo "[1/6] DKMS install vb56g4a driver ..."
+# Hooks run BEFORE the apps-stage runtime-dep (re)install, and the vanilla Lite
+# image ships kernel headers but not dkms, so ensure our build prerequisites
+# here (they also persist in the final image via runtime-deps.txt). This mirrors
+# the generic-package-hook, which apt-installs its own HOOK_DEP_LIST.
+export DEBIAN_FRONTEND=noninteractive
+if ! command -v dkms >/dev/null 2>&1; then
+	echo "  installing dkms (+ toolchain) in chroot ..."
+	apt-get update -qq
+	apt-get install -y dkms
+fi
+
 PKG=gmsl-vd56g4 ; VER=0.1.0
 DKMS_SRC="/usr/src/${PKG}-${VER}"
 rm -rf "$DKMS_SRC"
@@ -52,6 +67,11 @@ echo "  dkms make line: $(grep -m1 'MAKE\[0\]' "$DKMS_SRC/dkms.conf")"
 # Target kernel = the Pi 5 (2712) kernel whose headers runtime-deps installed.
 KVER="$(ls -1 /lib/modules 2>/dev/null | grep -- '-rpi-2712' | sort -V | tail -1)"
 [ -z "$KVER" ] && KVER="$(ls -1 /lib/modules | sort -V | tail -1)"
+if [ ! -d "/lib/modules/$KVER/build" ]; then
+	echo "  installing kernel headers ..."
+	apt-get install -y linux-headers-rpi-2712 || apt-get install -y "linux-headers-${KVER}" || true
+	KVER="$(ls -1 /lib/modules 2>/dev/null | grep -- '-rpi-2712' | sort -V | tail -1)"
+fi
 [ -d "/lib/modules/$KVER/build" ] || { echo "ERROR: no kernel build tree for $KVER (linux-headers-rpi-2712 not installed?)"; exit 1; }
 echo "  building for kernel $KVER"
 

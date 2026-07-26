@@ -31,7 +31,7 @@
 #   - vb56g4a out-of-tree driver, DKMS-built for the stock 2712 kernel with
 #     DESER=max96716a (survives apt kernel upgrades; dkms + linux-headers-rpi-2712
 #     kept in the image for that).
-#   - Harman sensor firmware blobs in /lib/firmware/harman/.
+#   - gmsl-camera sensor firmware blobs in /lib/firmware/harman/.
 #   - CSI-2 overlays: vd56g4-max96716a-rpi5 (csi1 = Channel A, default) and
 #     vd56g4-max96716a-rpi5-cam0 (csi0 = Channel B).
 #   - config.txt tuned for Channel A + /etc/modprobe.d/vb56g4a.conf (udc variant).

@@ -11,7 +11,7 @@ export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 # Pi OS Lite trixie image so a Pi 5 boots straight into a live HDMI feed:
 #   1. DKMS-install the out-of-tree vb56g4a driver (DESER=max96716a) against the
 #      image's stock kernel headers - no custom kernel, survives apt upgrades.
-#   2. Install the Harman sensor firmware blobs.
+#   2. Install the gmsl-camera sensor firmware blobs.
 #   3. Build + install the CSI-2 overlays (csi1 = Channel A, csi0 = Channel B).
 #   4. config.txt (Channel A default) + modprobe.d (udc variant).
 #   5. Install the gst->kmssink launcher + a channel-select helper.
@@ -83,7 +83,7 @@ echo "  installed modules:"; find /lib/modules/"$KVER" -name 'vb56g4a.ko*' -o -n
 #------------------------------------------------------------------------------
 # 2. Firmware blobs (driver request_firmware()s these from /lib/firmware/harman)
 #------------------------------------------------------------------------------
-echo "[2/6] Installing Harman firmware blobs ..."
+echo "[2/6] Installing gmsl-camera firmware blobs ..."
 mkdir -p /lib/firmware/harman
 cp "$SRC"/firmware/harman_vb56g4a_*.bin /lib/firmware/harman/
 echo "  $(ls /lib/firmware/harman/ | wc -l) blobs in /lib/firmware/harman/"

@@ -1,0 +1,106 @@
+# pi5-gmsl-vd56g4: VD56G4 GMSL camera (AD-GMSL716MIPI-EVK / MAX96716A) -> Pi 5 HDMI
+#
+# Recommended (single command, cached stages, auto-cloned sources):
+#
+#   cd misc-tools
+#   ./build-image.sh --board=pi5-gmsl-vd56g4 --version=01.00 --dry-run   # preflight + plan
+#   sudo ./build-image.sh --board=pi5-gmsl-vd56g4 --version=01.00
+#
+# All settings (trixie image URL, extend size, deps, hook list, source repo)
+# live in board.conf next to this file. The private gmsl-vd56g4 repo is cloned
+# into <workspace>/sources as the invoking user (their git credentials apply
+# under sudo) and referenced from hooks.txt via file://${REPOBINS}/gmsl-vd56g4;
+# use --repobins=DIR to build from an existing local checkout instead.
+#
+# Output: out/pi5-gmsl-vd56g4/2026-06-18-raspios-trixie-arm64-lite-pi5-gmsl-vd56g4-01.00.img
+#
+# ==============================================================================
+# Prerequisites
+# ==============================================================================
+#   - The gmsl-vd56g4 repo (private) must be pushed to 'main' with the Pi 5
+#     bring-up artifacts the hook consumes: dkms.conf, driver/, firmware/,
+#     dts/vd56g4-max96716a-rpi5{,-cam0}.dts, tools/vd56g4-hdmi-rpi5.sh,
+#     tools/vd56g4-chanB-setup.sh. The hook fails fast if any are missing.
+#   - Host git access to that private repo (gh auth setup-git, or a one-shot
+#     sudo GIT_USERNAME=x GIT_TOKEN=<PAT> ./build-image.sh ...).
+#   - Pi OS Lite trixie arm64 vanilla image (auto-downloaded by the base stage).
+#
+# ==============================================================================
+# What the image contains (over pure vanilla Pi OS Lite trixie)
+# ==============================================================================
+#   - vb56g4a out-of-tree driver, DKMS-built for the stock 2712 kernel with
+#     DESER=max96716a (survives apt kernel upgrades; dkms + linux-headers-rpi-2712
+#     kept in the image for that).
+#   - Harman sensor firmware blobs in /lib/firmware/harman/.
+#   - CSI-2 overlays: vd56g4-max96716a-rpi5 (csi1 = Channel A, default) and
+#     vd56g4-max96716a-rpi5-cam0 (csi0 = Channel B).
+#   - config.txt tuned for Channel A + /etc/modprobe.d/vb56g4a.conf (udc variant).
+#   - GStreamer + v4l-utils + i2c-tools + raspi-utils.
+#   - /usr/local/bin/vd56g4-hdmi.sh (gst v4l2src -> kmssink, auto-detects the
+#     HDMI mode) and vd56g4-select-channel.sh helper.
+#   - systemd: vd56g4-camview.service ENABLED (auto-play Channel A on boot);
+#     vd56g4-chanB-setup.service shipped disabled.
+#
+# ==============================================================================
+# Hardware setup on the target Pi 5
+# ==============================================================================
+#   - Power the AD-GMSL716MIPI-EVK from USB-C (switch S1 up).
+#   - Both Pi 5 CSI FFCs cabled to the EVK: Pi CAM1 <-> EVK P1, Pi CAM0 <-> EVK P2.
+#   - VD56G4 camera on FAKRA J1 (= GMSL link A) for the default Channel A.
+#   - HDMI monitor on either Pi 5 HDMI port.
+#
+# ==============================================================================
+# Flash + first boot
+# ==============================================================================
+#   sudo dd if=out/pi5-gmsl-vd56g4/2026-06-18-raspios-trixie-arm64-lite-pi5-gmsl-vd56g4-01.00.img \
+#           of=/dev/sdX bs=8M status=progress conv=fsync
+#   # or: re-run build-image.sh with --flash=/dev/sdX
+#
+#   First boot auto-expands the rootfs and reboots, then comes up straight into
+#   the live VD56G4 feed on HDMI (scaled to the attached monitor).
+#   Login: pi / brb0x
+#
+# ==============================================================================
+# Using it
+# ==============================================================================
+#   Switch camera channel (they cannot run at once - single deserializer):
+#     sudo vd56g4-select-channel.sh a     # camera on J1 (default), then reboot
+#     sudo vd56g4-select-channel.sh b     # camera on J2, then reboot
+#
+#   Verify / debug:
+#     systemctl status vd56g4-camview.service
+#     sudo dmesg | grep -iE 'vb56g4|serdes link active'   # link up + fw uploaded
+#     sudo i2cdetect -y 11                                # Channel A: deser 0x2a
+#     journalctl -u vd56g4-camview.service -b             # 'rendering into WxH', PLAYING
+#
+# ==============================================================================
+# Manual steps (what build-image.sh automates), for reference/debugging:
+# ==============================================================================
+
+BOARD_CFG=./board-configs/pi5-gmsl-vd56g4
+
+# Stage 1: Base OS image (install apt runtime + build deps into vanilla trixie)
+sudo ./custom-pi-imager/custom-pi-imager.sh \
+    --mode=base \
+    --baseimage=$HOME/pi-image-workspace/downloads/2026-06-18-raspios-trixie-arm64-lite.img.xz \
+    --output=/tmp/pi5-gmsl-vd56g4-base \
+    --password=brb0x \
+    --extend-size-mb=1200 \
+    --runtime-package=$BOARD_CFG/runtime-deps.txt \
+    --builddep-package=$BOARD_CFG/build-deps.txt \
+    --version="01.00"
+
+# Stage 2: Apps (DKMS driver + firmware + overlays + config + auto-play service).
+# The gmsl-vd56g4 repo must be cloned host-side first; REPOBINS points at the dir
+# containing that checkout so hooks.txt's file://${REPOBINS}/gmsl-vd56g4 resolves.
+sudo REPOBINS=$HOME/pi-image-workspace/sources ./custom-pi-imager/custom-pi-imager.sh \
+    --mode=incremental \
+    --baseimage=/tmp/pi5-gmsl-vd56g4-base/2026-06-18-raspios-trixie-arm64-lite.img \
+    --output=/tmp/pi5-gmsl-vd56g4-final \
+    --builddep-package=$BOARD_CFG/build-deps.txt \
+    --runtime-package=$BOARD_CFG/runtime-deps.txt \
+    --setup-hook-list=$BOARD_CFG/hooks.txt \
+    --version="01.00"
+
+# No kernel stage: KERNEL=0. The driver is a DKMS module built in the apps hook
+# against the image's stock kernel headers - no custom kernel cross-build.

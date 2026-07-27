@@ -173,3 +173,10 @@ credential store; env vars by design, never CLI flags).
 - Repo branches: everything is merged to `main` in all repos (misc-tools,
   sp6bins) as of 2026-07-22; the historical development branch was
   `unified-build-structure`.
+- Trixie 'pi' login: vanilla Pi OS *trixie* ships the `pi` user as a first-boot
+  placeholder with shell `/usr/sbin/nologin`; sdm's `adduser=pi|password=` sets
+  the password on that existing account but leaves the nologin shell, so the
+  image has a password yet cannot log in ("This account is currently not
+  available"). `set_user_password()` now flips pi's shell to /bin/bash (no-op on
+  bookworm). Bit the trixie boards only (pi5-gmsl-vd56g4, qt-cluster-demo);
+  bookworm boards have no such placeholder.

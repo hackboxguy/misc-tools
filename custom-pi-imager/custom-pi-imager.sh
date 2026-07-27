@@ -461,6 +461,17 @@ setup_qemu_chroot() {
 }
 
 set_user_password() {
+    # Ensure 'pi' has a real login shell in EVERY mode (base AND incremental),
+    # independent of --password. Vanilla Pi OS *trixie* ships 'pi' as a
+    # first-boot placeholder with /usr/sbin/nologin; sdm's adduser leaves it, so
+    # the account is unusable ("This account is currently not available"). Doing
+    # it here (not only in the password path) means a cached base + a re-run
+    # apps stage still repairs it. No-op on bookworm (already /bin/bash).
+    if [ -f "${MOUNT_POINT}/etc/passwd" ]; then
+        sed -i -E 's#^(pi:.*):(/usr/sbin/nologin|/usr/bin/nologin|/bin/false|/usr/bin/false)$#\1:/bin/bash#' \
+            "${MOUNT_POINT}/etc/passwd"
+    fi
+
     if [ -z "$PI_PASSWORD" ]; then
         info "No password provided, keeping existing password"
         
@@ -480,14 +491,6 @@ set_user_password() {
     local epw=$(echo "${PI_PASSWORD}" | openssl passwd -6 -stdin)
     grep -q "^pi:" "${MOUNT_POINT}/etc/passwd" && info "User found" || warn "User 'pi' not found"
     sed -i "s|^pi:[^:]*:|pi:${epw}:|" "${MOUNT_POINT}/etc/shadow"
-
-    # Ensure 'pi' has a real login shell. Vanilla Pi OS *trixie* ships 'pi' as a
-    # first-boot placeholder with /usr/sbin/nologin (meant to be activated by
-    # userconf on first boot); sdm's adduser=pi sets the password on that
-    # existing account but leaves the nologin shell, so it has a password yet
-    # cannot log in. Flip it to /bin/bash. No-op on bookworm (already bash).
-    sed -i -E 's#^(pi:.*):(/usr/sbin/nologin|/usr/bin/nologin|/bin/false|/usr/bin/false)$#\1:/bin/bash#' \
-        "${MOUNT_POINT}/etc/passwd"
     sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' "${MOUNT_POINT}/etc/ssh/sshd_config"
     sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' "${MOUNT_POINT}/etc/ssh/sshd_config"
     

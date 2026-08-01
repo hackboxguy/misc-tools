@@ -10,6 +10,12 @@ gstreamer1.0-plugins-bad
 # silent (the pipeline just fails to build). Verified missing on a stock image.
 gstreamer1.0-plugins-ugly
 
+# gst-discoverer-1.0 lives here, not in gstreamer1.0-tools. It is the natural
+# way to check a recording on the board (duration, frame rate, seekability);
+# nothing at runtime needs it, but debugging a clip without it means parsing
+# MP4 atoms by hand.
+gstreamer1.0-plugins-base-apps
+
 # --- V4L2 / media-controller: media-ctl + v4l2-ctl (pipeline setup, capture) ---
 v4l-utils
 

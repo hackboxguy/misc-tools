@@ -5,6 +5,10 @@ gstreamer1.0-tools
 gstreamer1.0-plugins-base
 gstreamer1.0-plugins-good
 gstreamer1.0-plugins-bad
+# plugins-ugly carries x264enc. Neither the Pi 5 nor the Orin Nano has a
+# hardware H.264 encoder, so this is the ONLY encoder - and its absence is
+# silent (the pipeline just fails to build). Verified missing on a stock image.
+gstreamer1.0-plugins-ugly
 
 # --- V4L2 / media-controller: media-ctl + v4l2-ctl (pipeline setup, capture) ---
 v4l-utils

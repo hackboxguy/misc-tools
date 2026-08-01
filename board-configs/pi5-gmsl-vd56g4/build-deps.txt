@@ -2,3 +2,11 @@
 # device-tree-compiler (dtc) builds the .dtbo overlays from the repo .dts in
 # the hook; not needed at runtime once the .dtbo is in /boot/firmware/overlays.
 device-tree-compiler
+
+# --- cam-recorder: compiled in the apps hook against the image's GStreamer ---
+# Declared here rather than apt-installed inside the hook so the framework
+# stamps them and purges them again after the hooks run (purge_build_dependencies).
+build-essential
+pkg-config
+libgstreamer1.0-dev
+libgstreamer-plugins-base1.0-dev

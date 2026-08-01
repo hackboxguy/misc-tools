@@ -11,3 +11,8 @@
 # all deps are declared in runtime-deps.txt / build-deps.txt so they are
 # stamped and managed by the base/apps stages.
 packages/pi5-gmsl-vd56g4-hook.sh|file://${REPOBINS}/gmsl-vd56g4|local|/home/pi/gmsl-vd56g4|
+
+# cam-recorder: live view + on-demand recording, shared with the Jetson image.
+# Public repo, but sourced host-side like gmsl-vd56g4 so the chroot needs no
+# network. Runs AFTER the camera hook - it only adds userspace apps.
+packages/cam-recorder-hook.sh|file://${REPOBINS}/cam-recorder|local|/home/pi/cam-recorder|

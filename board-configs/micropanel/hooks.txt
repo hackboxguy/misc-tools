@@ -8,6 +8,9 @@
 #micropanel hook - cannot be generic as it has some special cmake flags
 packages/micropanel-hook.sh
 
+# RH850 Bluebox and Pi-GPIO flashing tools, target profiles, and Bluebox udev rule.
+../../custom-pi-imager/packages/generic-package-hook.sh|file://${REPOBINS}/rh850-flash-tools|local|/home/pi/micropanel||install -Dm644 /home/pi/micropanel/share/rh850-flash-tools/udev/99-rh850-bluebox.rules /etc/udev/rules.d/99-rh850-bluebox.rules
+
 #xc3sprog hook - this is the generic one
 ../../custom-pi-imager/packages/generic-package-hook.sh|https://github.com/hackboxguy/xc3sprog.git|master|/home/pi/micropanel/fpga|libusb-dev,libftdi-dev,libgpiod-dev
 

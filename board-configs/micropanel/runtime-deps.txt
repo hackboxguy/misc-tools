@@ -10,6 +10,7 @@ avahi-daemon
 avahi-utils
 fbi
 fxload
+gpiod
 i2c-tools
 iperf3
 libcurl4-openssl-dev

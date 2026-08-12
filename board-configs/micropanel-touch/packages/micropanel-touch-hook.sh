@@ -47,8 +47,13 @@ systemctl enable "$destination/lib/systemd/system/micropanel-touch.service"
 
 # Bake the supported Pi OS overlayfs configuration after all build-time writes
 # are complete. The post-image hook supplies /data as the persistent volume.
+# On Trixie, do_overlayfs also owns the boot-partition write-protection policy;
+# the former do_boot_ro noninteractive action no longer exists.
 raspi-config nonint do_overlayfs 0
-raspi-config nonint do_boot_ro 0
+grep -Eq '(^|[[:space:]])overlayroot=tmpfs([[:space:]]|$)' /boot/firmware/cmdline.txt || {
+    echo "ERROR: raspi-config did not enable overlayroot in cmdline.txt" >&2
+    exit 1
+}
 
 mkdir -p "$destination/share/micropanel-touch"
 cat > "$destination/share/micropanel-touch/image-manifest.env" <<EOF

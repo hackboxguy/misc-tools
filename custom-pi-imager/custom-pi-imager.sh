@@ -1029,7 +1029,11 @@ show_summary() {
     echo ""
     echo "Write to SD: sudo dd if=${WORK_DIR}/${IMAGE_NAME} of=/dev/sdX bs=8M status=progress"
     echo ""
-    info "First boot will auto-expand root"
+    if [ "$EXPAND_ROOT" = true ]; then
+        info "First boot will auto-expand root"
+    else
+        info "Root partition remains at its authored size"
+    fi
 
     if [ "$MODE" = "base" ]; then
         [ -z "$RUNTIME_PACKAGE" ] && warn "No runtime packages installed"

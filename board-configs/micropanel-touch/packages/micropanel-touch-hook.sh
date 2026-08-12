@@ -41,15 +41,28 @@ cmdline=/boot/firmware/cmdline.txt
 if ! grep -Eq '(^|[[:space:]])console=tty1([[:space:]]|$)' "$cmdline"; then
     sed -i '1s/$/ console=tty1/' "$cmdline"
 fi
+# The panel's known-good boot profile requires tty1, but systemd's progress
+# and failure announcements would overwrite the HMI on its shared fb0.
+if ! grep -Eq '(^|[[:space:]])systemd\.show_status=false([[:space:]]|$)' "$cmdline"; then
+    sed -i '1s/$/ systemd.show_status=false/' "$cmdline"
+fi
 
 systemctl enable "$destination/lib/systemd/system/micropanel-touch-privileged.service"
 systemctl enable "$destination/lib/systemd/system/micropanel-touch.service"
 
 # The supported Pi OS Lite base keeps cloud-init to create unique SSH host
-# keys on first boot. Its five stages otherwise write their status (including
-# those public host keys) to tty1 after the HMI has rendered. PiScreen DRM
-# shares fb0 with that console, so send cloud-init output solely to the journal
-# and retain the early appliance UI startup.
+# keys on first boot. Its `keys_to_console` module bypasses systemd and writes
+# those public keys directly to /dev/console, which shares fb0 with PiScreen.
+# Suppress only that disclosure: keys are still generated and SSH still works.
+install -d /etc/cloud/cloud.cfg.d
+cat > /etc/cloud/cloud.cfg.d/90-micropanel-touch-console.cfg <<'EOF'
+#cloud-config
+ssh:
+  emit_keys_to_console: false
+EOF
+
+# Cloud-init's stage shims normally use journal+console. Keep their regular
+# output in the journal as well, while retaining early appliance UI startup.
 for cloud_unit in cloud-init-main.service cloud-init-local.service cloud-init-network.service \
                   cloud-config.service cloud-final.service; do
     install -d "/etc/systemd/system/${cloud_unit}.d"
@@ -57,6 +70,22 @@ for cloud_unit in cloud-init-main.service cloud-init-local.service cloud-init-ne
 [Service]
 StandardOutput=journal
 StandardError=journal
+EOF
+done
+
+# NetworkManager, not systemd-networkd, owns this appliance's networking.
+# The enabled networkd wait job has no interfaces to observe and otherwise
+# adds a two-minute timeout to cloud-init's final stage.
+systemctl mask systemd-networkd-wait-online.service
+
+# An overlay-backed root is intentionally neither remountable nor a block
+# device that can be grown. Treat these generic root-maintenance jobs as not
+# applicable so their expected failures do not cascade into boot warnings.
+for root_unit in systemd-remount-fs.service systemd-growfs-root.service; do
+    install -d "/etc/systemd/system/${root_unit}.d"
+    cat > "/etc/systemd/system/${root_unit}.d/50-micropanel-touch-overlay-root.conf" <<'EOF'
+[Unit]
+ConditionKernelCommandLine=!overlayroot=tmpfs
 EOF
 done
 

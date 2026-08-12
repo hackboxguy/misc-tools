@@ -45,6 +45,21 @@ fi
 systemctl enable "$destination/lib/systemd/system/micropanel-touch-privileged.service"
 systemctl enable "$destination/lib/systemd/system/micropanel-touch.service"
 
+# The supported Pi OS Lite base keeps cloud-init to create unique SSH host
+# keys on first boot. Its five stages otherwise write their status (including
+# those public host keys) to tty1 after the HMI has rendered. PiScreen DRM
+# shares fb0 with that console, so send cloud-init output solely to the journal
+# and retain the early appliance UI startup.
+for cloud_unit in cloud-init-main.service cloud-init-local.service cloud-init-network.service \
+                  cloud-config.service cloud-final.service; do
+    install -d "/etc/systemd/system/${cloud_unit}.d"
+    cat > "/etc/systemd/system/${cloud_unit}.d/50-micropanel-touch-console.conf" <<'EOF'
+[Service]
+StandardOutput=journal
+StandardError=journal
+EOF
+done
+
 # Bake the supported Pi OS overlayfs configuration after all build-time writes
 # are complete. The post-image hook supplies /data as the persistent volume.
 # On Trixie, do_overlayfs also owns the boot-partition write-protection policy;

@@ -1,0 +1,9 @@
+# Needed only while the dedicated in-chroot hook builds micropanel-touch.
+build-essential
+cmake
+git
+ninja-build
+pkg-config
+libdrm-dev
+libgpiod-dev
+nlohmann-json3-dev

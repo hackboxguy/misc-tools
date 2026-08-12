@@ -17,6 +17,7 @@ SETUP_HOOKS_FILE=""
 VERSION=""
 DEBUG_MODE=false
 KEEP_BUILD_DEPS=false
+EXPAND_ROOT=true
 
 # Colors
 RED='\033[0;31m'
@@ -68,6 +69,7 @@ Optional Arguments (Both Modes; in base mode hooks run after package install):
 
 Optional Arguments (Both Modes):
   --version=STRING          Version identifier (creates /etc/base-version.txt or /etc/incremental-version.txt)
+  --no-expand-root          Do not install first-boot root-partition expansion
   --debug                   Debug mode: Keep image mounted on error, skip cleanup
   --keep-build-deps         Keep build dependencies (skip purge even on success)
   --help, -h                Show this help
@@ -136,6 +138,8 @@ parse_arguments() {
             --setup-hook-list=*) SETUP_HOOKS_FILE="${arg#*=}" ;;
             --post-build-script=*) POST_BUILD_SCRIPT="${arg#*=}" ;;
             --version=*) VERSION="${arg#*=}" ;;
+            --expand-root) EXPAND_ROOT=true ;;
+            --no-expand-root) EXPAND_ROOT=false ;;
             --debug) DEBUG_MODE=true ;;
             --keep-build-deps) KEEP_BUILD_DEPS=true ;;
             --help|-h) show_usage ;;
@@ -283,6 +287,7 @@ show_configuration() {
     echo "  Output Dir:      ${WORK_DIR}"
     echo "  Password:        $([ -z "$PI_PASSWORD" ] && echo "[KEEP EXISTING]" || echo "${PI_PASSWORD//?/*}")"
     echo "  Version:         $([ -z "$VERSION" ] && echo "[NONE]" || echo "${VERSION}")"
+    echo "  Expand root:     ${EXPAND_ROOT}"
 
     if [ "$MODE" = "base" ]; then
         echo ""
@@ -411,7 +416,13 @@ run_sdm() {
         sdm_cmd="$sdm_cmd --plugin user:\"adduser=pi|password=${PI_PASSWORD}\""
     fi
 
-    sdm_cmd="$sdm_cmd --plugin disables:piwiz --expand-root --nowait-timesync \
+    if [ "$EXPAND_ROOT" = true ]; then
+        sdm_cmd="$sdm_cmd --expand-root"
+    else
+        info "Leaving the root partition at its authored size"
+    fi
+
+    sdm_cmd="$sdm_cmd --plugin disables:piwiz --nowait-timesync \
         \"${WORK_DIR}/${IMAGE_NAME}\""
 
     if ! eval $sdm_cmd; then

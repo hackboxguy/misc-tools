@@ -159,7 +159,8 @@ BOARD_DESCRIPTION="" IMAGE_URL="" IMAGE_SHA256="" EXTEND_SIZE_MB=0
 DEFAULT_PASSWORD="" DEFAULT_VERSION="01.00"
 RUNTIME_DEPS="none" BUILD_DEPS="none" HOOK_LIST=""
 KERNEL=0 KERNEL_BRANCH="" KERNEL_CONFIG="" DRIVERS_DIR="" SOURCES=""
-BASE_PROFILE="" APPS_EXTEND_SIZE_MB=0
+BASE_PROFILE="" APPS_EXTEND_SIZE_MB=0 EXPAND_ROOT=1
+DATA_PARTITION_MB=0 POST_IMAGE_HOOK=""
 if [ $PROFILE_ONLY -eq 0 ]; then
     BOARD_DIR="$BOARD_CONFIGS_DIR/$BOARD"
     BOARD_CONF="$BOARD_DIR/board.conf"
@@ -184,6 +185,9 @@ BUILD_DEPS="$(resolve_cfg BUILD_DEPS)"
 HOOK_LIST="$(resolve_cfg HOOK_LIST)"
 EXTEND_SIZE_MB="$(resolve_cfg EXTEND_SIZE_MB)"
 APPS_EXTEND_SIZE_MB="$(resolve_cfg APPS_EXTEND_SIZE_MB)"
+EXPAND_ROOT="$(resolve_cfg EXPAND_ROOT)"
+DATA_PARTITION_MB="$(resolve_cfg DATA_PARTITION_MB)"
+POST_IMAGE_HOOK="$(resolve_cfg POST_IMAGE_HOOK)"
 IMAGE_URL_CFG="$(resolve_cfg IMAGE_URL)"
 
 # Base profile: several boards can share one base image (vanilla + common apt
@@ -234,7 +238,14 @@ resolve_board_file() {
 RUNTIME_DEPS="$(resolve_board_file "$RUNTIME_DEPS")"
 BUILD_DEPS="$(resolve_board_file "$BUILD_DEPS")"
 HOOK_LIST="$(resolve_board_file "$HOOK_LIST")"
+POST_IMAGE_HOOK="$(resolve_board_file "$POST_IMAGE_HOOK")"
 [ -n "$KERNEL_CONFIG" ] && [[ "$KERNEL_CONFIG" != /* ]] && KERNEL_CONFIG="$SCRIPT_DIR/$KERNEL_CONFIG"
+
+case "$EXPAND_ROOT" in
+    0|1) ;;
+    *) die "EXPAND_ROOT must be 0 or 1 in $BOARD_CONF" ;;
+esac
+[[ "$DATA_PARTITION_MB" =~ ^[0-9]+$ ]] || die "DATA_PARTITION_MB must be a non-negative integer in $BOARD_CONF"
 
 # Which deps drive the base stage and the apps-stage build-dep purge:
 # with a profile, the profile's lists (a superset of the board's) so the purge
@@ -390,7 +401,7 @@ kernel_hash() { kernel_stamp_inputs | hash_lines; }
 apps_hash()   { apps_stamp_inputs   | hash_lines; }
 
 base_stamp_inputs() {
-    local in=("base-v2" "profile:$BASE_PROFILE" "$VANILLA_NAME" "extend:$EXTEND_SIZE_MB" "pw:$PASSWORD")
+    local in=("base-v3" "profile:$BASE_PROFILE" "$VANILLA_NAME" "extend:$EXTEND_SIZE_MB" "expand-root:$EXPAND_ROOT" "pw:$PASSWORD")
     [ "$BASE_STAGE_RUNTIME" != "none" ] && [ -n "$BASE_STAGE_RUNTIME" ] && in+=("file:$BASE_STAGE_RUNTIME")
     [ "$BASE_STAGE_BUILDDEPS" != "none" ] && [ -n "$BASE_STAGE_BUILDDEPS" ] && in+=("file:$BASE_STAGE_BUILDDEPS")
     if [ -n "$BASE_HOOK_LIST" ]; then
@@ -434,7 +445,7 @@ git_remote_rev() {
 
 apps_stamp_inputs() {
     parse_hook_list "$HOOK_LIST"
-    local in=("apps-v1" "version:$VERSION" "input:$APPS_INPUT_STAMP" "apps-extend:$APPS_EXTEND_SIZE_MB")
+    local in=("apps-v2" "version:$VERSION" "input:$APPS_INPUT_STAMP" "apps-extend:$APPS_EXTEND_SIZE_MB" "expand-root:$EXPAND_ROOT" "data-partition-mb:$DATA_PARTITION_MB")
     [ "$HOOK_LIST" != "none" ] && [ -n "$HOOK_LIST" ] && in+=("file:$HOOK_LIST")
     local h d entry url ref
     for h in "${HOOK_SCRIPTS[@]}"; do in+=("file:$h"); done
@@ -447,6 +458,7 @@ apps_stamp_inputs() {
     done
     [ "$RUNTIME_DEPS" != "none" ] && in+=("file:$RUNTIME_DEPS")
     [ "$BUILD_DEPS" != "none" ] && in+=("file:$BUILD_DEPS")
+    [ "$POST_IMAGE_HOOK" != "none" ] && [ -n "$POST_IMAGE_HOOK" ] && in+=("file:$POST_IMAGE_HOOK")
     printf '%s\n' "${in[@]}"
 }
 
@@ -495,6 +507,9 @@ preflight() {
     [ "$RUNTIME_DEPS" = "none" ] || { [ -f "$RUNTIME_DEPS" ] && pf_ok "runtime deps: $RUNTIME_DEPS" || pf_fail "runtime deps missing: $RUNTIME_DEPS"; }
     if [ -z "$BASE_PROFILE" ]; then
         [ "$BUILD_DEPS" = "none" ] || { [ -f "$BUILD_DEPS" ] && pf_ok "build deps: $BUILD_DEPS" || pf_fail "build deps missing: $BUILD_DEPS"; }
+    fi
+    if [ "$POST_IMAGE_HOOK" != "none" ] && [ -n "$POST_IMAGE_HOOK" ]; then
+        [ -f "$POST_IMAGE_HOOK" ] && pf_ok "post-image hook: $POST_IMAGE_HOOK" || pf_fail "post-image hook missing: $POST_IMAGE_HOOK"
     fi
 
     # Base profile files and hooks
@@ -701,6 +716,7 @@ run_stage_base() {
         --output="$work" \
         ${PASSWORD:+--password="$PASSWORD"} \
         --extend-size-mb="$EXTEND_SIZE_MB" \
+        $([ "$EXPAND_ROOT" = "0" ] && echo "--no-expand-root") \
         ${BASE_STAGE_RUNTIME:+$([ "$BASE_STAGE_RUNTIME" != "none" ] && echo "--runtime-package=$BASE_STAGE_RUNTIME")} \
         --builddep-package="$([ "$BASE_STAGE_BUILDDEPS" != "none" ] && [ -n "$BASE_STAGE_BUILDDEPS" ] && echo "$BASE_STAGE_BUILDDEPS" || echo none)" \
         $([ -n "$BASE_HOOK_LIST" ] && echo "--setup-hook-list=$BASE_HOOK_LIST") \
@@ -783,6 +799,7 @@ run_stage_apps() {
         --baseimage="$APPS_INPUT" \
         --output="$work" \
         --extend-size-mb="$APPS_EXTEND_SIZE_MB" \
+        $([ "$EXPAND_ROOT" = "0" ] && echo "--no-expand-root") \
         --builddep-package="$([ "$APPS_BUILD_DEPS" != "none" ] && [ -n "$APPS_BUILD_DEPS" ] && echo "$APPS_BUILD_DEPS" || echo none)" \
         ${RUNTIME_DEPS:+$([ "$RUNTIME_DEPS" != "none" ] && echo "--runtime-package=$RUNTIME_DEPS")} \
         $([ "$HOOK_LIST" != "none" ] && [ -n "$HOOK_LIST" ] && echo "--setup-hook-list=$HOOK_LIST") \
@@ -791,9 +808,21 @@ run_stage_apps() {
     mkdir -p "$OUT_DIR"
     mv "$work/$(basename "$APPS_INPUT")" "$FINAL_IMG"
     rm -rf "$work"
+    run_post_image_hook
     echo "$hash" > "$OUT_DIR/.stamp"
     own_by_user "$OUT_DIR"
     log "Final image ready: $FINAL_IMG"
+}
+
+# ------------------------------------------------------------------------------
+# Stage: post-image layout
+# ------------------------------------------------------------------------------
+run_post_image_hook() {
+    [ "$POST_IMAGE_HOOK" = "none" ] || [ -z "$POST_IMAGE_HOOK" ] && return 0
+    [ -f "$POST_IMAGE_HOOK" ] || die "Post-image hook missing: $POST_IMAGE_HOOK"
+    stage_banner "Stage 4: Post-image layout"
+    IMAGE_PATH="$FINAL_IMG" BOARD="$BOARD" BOARD_DIR="$BOARD_DIR" \
+        DATA_PARTITION_MB="$DATA_PARTITION_MB" bash "$POST_IMAGE_HOOK"
 }
 
 # ------------------------------------------------------------------------------

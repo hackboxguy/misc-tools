@@ -1,0 +1,9 @@
+# Packages retained in the plain Pi OS Lite appliance image.
+# Keep this list intentionally small; Sprint 4's generated capability matrix
+# becomes the source of truth for future Tier-2 packs.
+iproute2
+libdrm2
+libgpiod3
+network-manager
+polkitd
+raspi-config

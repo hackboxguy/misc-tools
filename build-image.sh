@@ -159,7 +159,7 @@ BOARD_DESCRIPTION="" IMAGE_URL="" IMAGE_SHA256="" EXTEND_SIZE_MB=0
 DEFAULT_PASSWORD="" DEFAULT_VERSION="01.00"
 RUNTIME_DEPS="none" BUILD_DEPS="none" HOOK_LIST=""
 KERNEL=0 KERNEL_BRANCH="" KERNEL_CONFIG="" DRIVERS_DIR="" SOURCES=""
-BASE_PROFILE="" APPS_EXTEND_SIZE_MB=0 EXPAND_ROOT=1
+BASE_PROFILE="" APPS_EXTEND_SIZE_MB=0 EXPAND_ROOT=1 REQUIRE_PASSWORD=0
 DATA_PARTITION_MB=0 POST_IMAGE_HOOK=""
 if [ $PROFILE_ONLY -eq 0 ]; then
     BOARD_DIR="$BOARD_CONFIGS_DIR/$BOARD"
@@ -186,6 +186,7 @@ HOOK_LIST="$(resolve_cfg HOOK_LIST)"
 EXTEND_SIZE_MB="$(resolve_cfg EXTEND_SIZE_MB)"
 APPS_EXTEND_SIZE_MB="$(resolve_cfg APPS_EXTEND_SIZE_MB)"
 EXPAND_ROOT="$(resolve_cfg EXPAND_ROOT)"
+REQUIRE_PASSWORD="$(resolve_cfg REQUIRE_PASSWORD)"
 DATA_PARTITION_MB="$(resolve_cfg DATA_PARTITION_MB)"
 POST_IMAGE_HOOK="$(resolve_cfg POST_IMAGE_HOOK)"
 IMAGE_URL_CFG="$(resolve_cfg IMAGE_URL)"
@@ -245,7 +246,13 @@ case "$EXPAND_ROOT" in
     0|1) ;;
     *) die "EXPAND_ROOT must be 0 or 1 in $BOARD_CONF" ;;
 esac
+case "$REQUIRE_PASSWORD" in
+    0|1) ;;
+    *) die "REQUIRE_PASSWORD must be 0 or 1 in $BOARD_CONF" ;;
+esac
 [[ "$DATA_PARTITION_MB" =~ ^[0-9]+$ ]] || die "DATA_PARTITION_MB must be a non-negative integer in $BOARD_CONF"
+[ "$REQUIRE_PASSWORD" = "0" ] || [ -n "$PASSWORD" ] || \
+    die "Board $BOARD requires an explicit --password=PASS for its development SSH account"
 
 # Which deps drive the base stage and the apps-stage build-dep purge:
 # with a profile, the profile's lists (a superset of the board's) so the purge
@@ -445,7 +452,7 @@ git_remote_rev() {
 
 apps_stamp_inputs() {
     parse_hook_list "$HOOK_LIST"
-    local in=("apps-v2" "version:$VERSION" "input:$APPS_INPUT_STAMP" "apps-extend:$APPS_EXTEND_SIZE_MB" "expand-root:$EXPAND_ROOT" "data-partition-mb:$DATA_PARTITION_MB")
+    local in=("apps-v3" "version:$VERSION" "input:$APPS_INPUT_STAMP" "apps-extend:$APPS_EXTEND_SIZE_MB" "expand-root:$EXPAND_ROOT" "data-partition-mb:$DATA_PARTITION_MB" "pw:$PASSWORD")
     [ "$HOOK_LIST" != "none" ] && [ -n "$HOOK_LIST" ] && in+=("file:$HOOK_LIST")
     local h d entry url ref
     for h in "${HOOK_SCRIPTS[@]}"; do in+=("file:$h"); done
@@ -798,6 +805,7 @@ run_stage_apps() {
         --mode=incremental \
         --baseimage="$APPS_INPUT" \
         --output="$work" \
+        ${PASSWORD:+--password="$PASSWORD"} \
         --extend-size-mb="$APPS_EXTEND_SIZE_MB" \
         $([ "$EXPAND_ROOT" = "0" ] && echo "--no-expand-root") \
         --builddep-package="$([ "$APPS_BUILD_DEPS" != "none" ] && [ -n "$APPS_BUILD_DEPS" ] && echo "$APPS_BUILD_DEPS" || echo none)" \

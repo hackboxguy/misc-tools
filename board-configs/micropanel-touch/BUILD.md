@@ -4,7 +4,7 @@ From the `misc-tools` checkout, build the first Sprint 2.5 appliance slice
 with:
 
 ```sh
-sudo ./build-image.sh --board=micropanel-touch --version=00.10 --password=PASS
+sudo ./build-image.sh --board=micropanel-touch --version=00.10
 ```
 
 The board config pins both the Raspberry Pi OS Lite artifact and the
@@ -12,10 +12,10 @@ The board config pins both the Raspberry Pi OS Lite artifact and the
 from its Git remote before starting the build; the dedicated hook clones it
 with its LVGL submodule recursively.
 
-`PASS` is a development-only, caller-provided SSH password. It is deliberately
-not stored in a board config, script, or commit. The build fails before any
-work if it is omitted. When only the password or an apps hook changed, retain
-the completed base image and rebuild just apps with `--skip-base`.
+The development image uses the build system's standard Pi-user password when
+`--password` is omitted. Supply `--password=PASS` to override it. When only
+the password or an apps hook changed, retain the completed base image and
+rebuild just apps with `--skip-base`.
 
 Before flashing, inspect the result with a loop device or `fdisk -l`: it must
 have boot (`p1`), authored root (`p2`), and the `MICROPANEL_DATA` ext4 data

@@ -99,14 +99,17 @@ Description=Restore persistent MicroPanel Touch SSH host keys
 Wants=data.mount
 After=data.mount
 Before=ssh.service sshd.service
+After=cloud-init-network.service cloud-config.service
 
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/micropanel-touch-restore-ssh-host-keys
 
 [Install]
-RequiredBy=ssh.service
+WantedBy=ssh.service
 EOF
+# Pi OS ships regenerate_ssh_host_keys.service; Debian does not normally ship
+# sshd-keygen.service, but masking the optional compatibility name is harmless.
 systemctl mask regenerate_ssh_host_keys.service sshd-keygen.service
 systemctl enable micropanel-touch-ssh-host-keys.service
 
@@ -131,6 +134,11 @@ cat > /etc/cloud/cloud.cfg.d/90-micropanel-touch-console.cfg <<'EOF'
 #cloud-config
 ssh:
   emit_keys_to_console: false
+# The persistent-key service above is the sole host-key owner. Cloud-init's
+# first-boot state is volatile under overlayroot, so it must not replace those
+# device-specific keys again on every boot.
+ssh_deletekeys: false
+ssh_genkeytypes: []
 EOF
 
 # Cloud-init's stage shims normally use journal+console. Keep their regular
@@ -149,6 +157,17 @@ done
 # The enabled networkd wait job has no interfaces to observe and otherwise
 # adds a two-minute timeout to cloud-init's final stage.
 systemctl mask systemd-networkd-wait-online.service
+
+# `recurse=0` leaves non-root fstab mounts alone. Pi OS's rpi-swap generator
+# otherwise enables a zram device, consuming RAM for swap on an appliance
+# whose writable root is already tmpfs. Disable every rpi-swap mechanism at
+# its source; this also prevents a future zram+file mode from writing below
+# the overlay root.
+install -d /etc/rpi/swap.conf.d
+cat > /etc/rpi/swap.conf.d/90-micropanel-touch.conf <<'EOF'
+[Main]
+Mechanism=none
+EOF
 
 # An overlay-backed root is intentionally neither remountable nor a block
 # device that can be grown. Treat these generic root-maintenance jobs as not

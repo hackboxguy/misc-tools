@@ -25,8 +25,11 @@ On the first hardware boot, verify:
 
 ```sh
 findmnt -no TARGET,OPTIONS /
+findmnt -no TARGET,OPTIONS /boot/firmware
 findmnt -no TARGET,SOURCE,FSTYPE,OPTIONS /data
 findmnt -no TARGET,SOURCE,FSTYPE,OPTIONS /etc/NetworkManager/system-connections
+cat /proc/swaps
+systemctl is-enabled dphys-swapfile
 systemctl is-active micropanel-touch.service micropanel-touch-privileged.service
 stat -c '%U %a %n' /run/micropanel-touch/broker.sock
 systemctl --failed --no-pager
@@ -36,7 +39,12 @@ Hardware acceptance confirms the overlay-backed root, two active appliance
 services, no failed units, a `0600` broker socket owned by
 `micropanel-touch`, `/data` as direct p3 `ext4`, and a data-backed
 NetworkManager profile directory. Its root command line contains
-`overlayroot=tmpfs:recurse=0`.
+`overlayroot=tmpfs:recurse=0`. `/boot/firmware` must be mounted read-only;
+`/proc/swaps` must show only its header and `dphys-swapfile` must be disabled.
+(`swapon` is not installed on the current Lite image.) These last three checks
+guard against `recurse=0` unintentionally making non-root mounts writable or
+creating RAM-backed swap through either `dphys-swapfile` or Pi OS's current
+`rpi-swap` zram generator.
 
 Before treating the image as persistence-ready, perform this harmless
 application-data check, then repeat the read after a normal reboot and an

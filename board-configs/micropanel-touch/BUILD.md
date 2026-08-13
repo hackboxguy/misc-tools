@@ -25,12 +25,18 @@ On the first hardware boot, verify:
 
 ```sh
 findmnt -no TARGET,OPTIONS /
-findmnt /data
+findmnt -no TARGET,SOURCE,FSTYPE,OPTIONS /data
 systemctl is-active micropanel-touch.service micropanel-touch-privileged.service
 stat -c '%U %a %n' /run/micropanel-touch/broker.sock
+systemctl --failed --no-pager
 ```
 
-The expected result is an overlay-backed read-only root, a mounted `/data`,
-two active services, and a `0600` broker socket owned by `micropanel-touch`.
-Do not test a real IP change until the interface, replacement values, and
-recovery path are explicitly chosen.
+The currently validated result is an overlay-backed root, two active services,
+no failed units, and a `0600` broker socket owned by `micropanel-touch`.
+
+`MICROPANEL_DATA` is present as `p3`, but the current overlayroot configuration
+also overlays the visible `/data` with tmpfs. Treat `/data` writes as volatile
+until the mount layout is corrected and persistence across a reboot is proven;
+this image is not yet a release-ready persistent-data implementation. Do not
+test a real IP change until the interface, replacement values, and recovery
+path are explicitly chosen.

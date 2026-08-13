@@ -1,7 +1,7 @@
 # The generic package hook is intentionally not used here: it clones without
 # submodules. This hook performs a recursive clone and records the pinned app
 # and LVGL revisions in the installed image manifest.
-packages/micropanel-touch-hook.sh|https://github.com/hackboxguy/micropanel-touch.git|816a22961b7742b04e1cd3b535b093cd109b6c22|/opt/micropanel-touch|
+packages/micropanel-touch-hook.sh|https://github.com/hackboxguy/micropanel-touch.git|0e9e82e81f24600234f7d98753169e8c7035f5e2|/opt/micropanel-touch|
 
 # Tier-2 domain-pack hooks are added below. Each pack must ship a menu fragment
 # and handlers together and add its capability-matrix rows before it is enabled.

@@ -31,6 +31,8 @@ findmnt -no TARGET,SOURCE,FSTYPE,OPTIONS /etc/NetworkManager/system-connections
 cat /proc/swaps
 systemctl is-enabled dphys-swapfile
 systemctl is-active micropanel-touch.service micropanel-touch-privileged.service
+systemctl is-enabled micropanel-touch-dhcp-server.service
+systemctl is-enabled dnsmasq.service
 stat -c '%U %a %n' /run/micropanel-touch/broker.sock
 systemctl --failed --no-pager
 ```
@@ -72,3 +74,21 @@ follow-up fixes that flag. Flash it, then use the broker to apply static IPv4
 matching the current address, reboot and verify the `manual` profile, apply
 DHCP through the broker, and reboot again to verify the `auto` profile. Record
 the profile and live address after each step.
+
+## DHCP-server acceptance
+
+DHCP Server is intentionally an **isolated eth0 provisioning mode**, not a
+normal-LAN option. Do not enable it on the production LAN: applying it changes
+the panel address, ends the existing SSH session, and a second DHCP authority
+would be unsafe. Use a directly connected client or a dedicated isolated
+switch/VLAN with no other DHCP server.
+
+On the fresh image, `micropanel-touch-dhcp-server.service` must be enabled but
+inactive while the UI is in DHCP-Client or Static-Address mode, and
+`dnsmasq.service` must be masked. In IP Settings select DHCP-Server and use
+the default `192.168.50.1/24` / `.100`–`.200` pool (or a valid private
+alternative), then complete the second confirmation. From the isolated client,
+verify it receives a lease in the selected range, can reach the panel server
+address, and receives neither a default route nor a DNS server from it. Reboot
+the panel and repeat the lease check. Finally select DHCP-Client on the panel,
+verify the dedicated server unit stops and remains inactive after reboot.

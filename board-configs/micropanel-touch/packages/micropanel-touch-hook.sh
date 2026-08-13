@@ -55,6 +55,11 @@ fi
 
 systemctl enable "$destination/lib/systemd/system/micropanel-touch-privileged.service"
 systemctl enable "$destination/lib/systemd/system/micropanel-touch.service"
+# dnsmasq is retained only for the broker-controlled, eth0-bound appliance
+# unit.  The distro-wide service must never become an independent DHCP
+# authority through package defaults or a future preset.
+systemctl mask dnsmasq.service
+systemctl enable "$destination/lib/systemd/system/micropanel-touch-dhcp-server.service"
 
 # Root-overlay images run the stock first-boot key generators on every boot:
 # their writes disappear with the tmpfs upper layer. This unit instead seeds

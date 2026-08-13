@@ -94,15 +94,26 @@ account=$(awk -F: '$1 == "micropanel-touch" { print $3 ":" $4; exit }' "$root_mo
 }
 install -d -m0750 -o "${account%%:*}" -g "${account##*:}" "$data_mount/micropanel-touch"
 install -d -m0750 -o "${account%%:*}" -g "${account##*:}" "$data_mount/micropanel-touch/logs"
+install -d -m0700 "$data_mount/micropanel-touch/ssh-host-keys"
+install -d -m0700 "$data_mount/NetworkManager/system-connections"
 install -d -m0755 "$root_mount/data"
+
+# NetworkManager's keyfile backend persists connection changes below /etc.
+# Seed any image-provided profiles into p3, then bind-mount the directory at
+# boot so broker-applied DHCP/static changes survive the read-only root.
+network_connections="$root_mount/etc/NetworkManager/system-connections"
+if [ -d "$network_connections" ]; then
+    cp -a "$network_connections/." "$data_mount/NetworkManager/system-connections/"
+fi
 
 data_partuuid=$(blkid -s PARTUUID -o value "$data_device")
 [ -n "$data_partuuid" ] || { echo "ERROR: unable to resolve data PARTUUID" >&2; exit 1; }
 fstab="$root_mount/etc/fstab"
 fstab_tmp="$fstab.micropanel-touch"
-grep -vE '[[:space:]]/data[[:space:]]' "$fstab" > "$fstab_tmp" || true
+grep -vE '[[:space:]](/data|/etc/NetworkManager/system-connections)[[:space:]]' "$fstab" > "$fstab_tmp" || true
 printf '\n# MicroPanel Touch persistent state (must not block boot if damaged).\n' >> "$fstab_tmp"
 printf 'PARTUUID=%s /data ext4 defaults,nofail,x-systemd.device-timeout=5s 0 2\n' "$data_partuuid" >> "$fstab_tmp"
+printf '%s\n' '/data/NetworkManager/system-connections /etc/NetworkManager/system-connections none bind,nofail,x-systemd.requires=data.mount,x-systemd.before=NetworkManager.service 0 0' >> "$fstab_tmp"
 mv "$fstab_tmp" "$fstab"
 
 sync

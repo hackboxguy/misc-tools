@@ -1,5 +1,5 @@
 capability,status,owner,privileged_path,devices,writable_paths
 ui-and-touch,supported,micropanel-touch,none,/dev/fb*;/dev/input/event*,none
-network-static-ip,supported,micropanel-touch,typed-broker,NetworkManager D-Bus,/data/micropanel-touch
-network-dhcp,supported,micropanel-touch,typed-broker,NetworkManager D-Bus,/data/micropanel-touch
+network-static-ip,supported,micropanel-touch,typed-broker,NetworkManager D-Bus,/data/micropanel-touch;/data/NetworkManager/system-connections
+network-dhcp,supported,micropanel-touch,typed-broker,NetworkManager D-Bus,/data/micropanel-touch;/data/NetworkManager/system-connections
 fpga-and-mcu-packs,pending,Tier-2-pack,pack-defined,pack-defined,pack-defined

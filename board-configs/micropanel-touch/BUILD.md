@@ -26,17 +26,39 @@ On the first hardware boot, verify:
 ```sh
 findmnt -no TARGET,OPTIONS /
 findmnt -no TARGET,SOURCE,FSTYPE,OPTIONS /data
+findmnt -no TARGET,SOURCE,FSTYPE,OPTIONS /etc/NetworkManager/system-connections
 systemctl is-active micropanel-touch.service micropanel-touch-privileged.service
 stat -c '%U %a %n' /run/micropanel-touch/broker.sock
 systemctl --failed --no-pager
 ```
 
-The currently validated result is an overlay-backed root, two active services,
-no failed units, and a `0600` broker socket owned by `micropanel-touch`.
+The accepted predecessor has an overlay-backed root, two active services, no
+failed units, and a `0600` broker socket owned by `micropanel-touch`. The
+follow-up image must show `/data` as `p3` `ext4` (not `overlay` or `tmpfs`),
+and the NetworkManager profile directory must resolve to the corresponding
+data-backed bind mount. Its root command line must contain
+`overlayroot=tmpfs:recurse=0`.
 
-`MICROPANEL_DATA` is present as `p3`, but the current overlayroot configuration
-also overlays the visible `/data` with tmpfs. Treat `/data` writes as volatile
-until the mount layout is corrected and persistence across a reboot is proven;
-this image is not yet a release-ready persistent-data implementation. Do not
-test a real IP change until the interface, replacement values, and recovery
-path are explicitly chosen.
+Before treating the image as persistence-ready, perform this harmless
+application-data check, then repeat the read after a normal reboot and an
+unplug/reapply-power boot:
+
+```sh
+sudo sh -c 'printf "%s\\n" persistence-check > /data/micropanel-touch/.persistence-check'
+sync
+sudo cat /data/micropanel-touch/.persistence-check
+sudo sha256sum /etc/ssh/ssh_host_*_key.pub | sort
+cat /etc/machine-id
+```
+
+Record the SSH public-key hashes and `machine-id` before reboot. The hashes
+must remain stable; record whether `machine-id` remains stable too. The image
+has a persistent SSH-host-key seed, but `machine-id` has no deliberately
+implemented early-boot persistence yet and must not be claimed stable until
+observed. A broker-applied NetworkManager change must similarly be checked
+after reboot before it is called persistent.
+
+The NetworkManager polkit rule intentionally requires the non-root `pi` account
+to use `sudo` for direct mutation; the appliance's intended mutation route is
+the typed broker. Do not test a real IP change until the interface, replacement
+values, and recovery path are explicitly chosen.

@@ -6,4 +6,3 @@ libdrm2
 libgpiod3
 network-manager
 polkitd
-raspi-config

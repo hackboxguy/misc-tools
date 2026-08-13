@@ -16,7 +16,13 @@ esac
 
 rm -rf "$source_root"
 git clone --recursive "$repo" "$source_root"
-git -C "$source_root" checkout --detach "$revision"
+if ! git -C "$source_root" checkout --detach "$revision"; then
+    # A shallow or branch-limited remote may omit an older pinned commit from
+    # the initial clone. Fetch that exact object once before treating the pin
+    # as unavailable.
+    git -C "$source_root" fetch origin "$revision"
+    git -C "$source_root" checkout --detach "$revision"
+fi
 git -C "$source_root" submodule update --init --recursive
 
 cmake -S "$source_root" -B "$source_root/build" -G Ninja \
@@ -50,6 +56,60 @@ fi
 systemctl enable "$destination/lib/systemd/system/micropanel-touch-privileged.service"
 systemctl enable "$destination/lib/systemd/system/micropanel-touch.service"
 
+# Root-overlay images run the stock first-boot key generators on every boot:
+# their writes disappear with the tmpfs upper layer. This unit instead seeds
+# one set of host keys on /data, then copies that set into the temporary root
+# before sshd starts. If /data cannot mount, the stock lower-image keys remain
+# a recovery fallback rather than preventing SSH from starting.
+install -d /usr/local/sbin /etc/systemd/system
+cat > /usr/local/sbin/micropanel-touch-restore-ssh-host-keys <<'EOF'
+#!/bin/sh
+set -eu
+
+persistent_dir=/data/micropanel-touch/ssh-host-keys
+system_dir=/etc/ssh
+
+[ -d "$persistent_dir" ] && [ -d "$system_dir" ] || exit 0
+[ -w "$persistent_dir" ] || exit 0
+
+umask 077
+for key_type in rsa ecdsa ed25519; do
+    persistent_key="$persistent_dir/ssh_host_${key_type}_key"
+    persistent_public_key="${persistent_key}.pub"
+    system_key="$system_dir/ssh_host_${key_type}_key"
+    system_public_key="${system_key}.pub"
+
+    if ! /usr/bin/ssh-keygen -lf "$persistent_key" >/dev/null 2>&1; then
+        rm -f "$persistent_key" "$persistent_public_key"
+        /usr/bin/ssh-keygen -q -N '' -t "$key_type" -f "$persistent_key"
+    fi
+    if [ ! -s "$persistent_public_key" ]; then
+        /usr/bin/ssh-keygen -y -f "$persistent_key" > "$persistent_public_key"
+    fi
+    chmod 0600 "$persistent_key"
+    chmod 0644 "$persistent_public_key"
+    install -m0600 "$persistent_key" "$system_key"
+    install -m0644 "$persistent_public_key" "$system_public_key"
+done
+EOF
+chmod 0755 /usr/local/sbin/micropanel-touch-restore-ssh-host-keys
+cat > /etc/systemd/system/micropanel-touch-ssh-host-keys.service <<'EOF'
+[Unit]
+Description=Restore persistent MicroPanel Touch SSH host keys
+Wants=data.mount
+After=data.mount
+Before=ssh.service sshd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/micropanel-touch-restore-ssh-host-keys
+
+[Install]
+RequiredBy=ssh.service
+EOF
+systemctl mask regenerate_ssh_host_keys.service sshd-keygen.service
+systemctl enable micropanel-touch-ssh-host-keys.service
+
 # sdm's first-boot pass has no remaining actions after this image pipeline has
 # applied its user and board configuration. On an overlay-root appliance it can
 # only disable itself in transient RAM, so it returns on every boot and writes
@@ -63,10 +123,9 @@ cat > /etc/systemd/system/sdm-firstboot.service.d/50-micropanel-touch-disable.co
 ConditionKernelCommandLine=micropanel-touch.sdm-firstboot=1
 EOF
 
-# The supported Pi OS Lite base keeps cloud-init to create unique SSH host
-# keys on first boot. Its `keys_to_console` module bypasses systemd and writes
-# those public keys directly to /dev/console, which shares fb0 with PiScreen.
-# Suppress only that disclosure: keys are still generated and SSH still works.
+# Pi OS cloud-init can emit SSH public-key material directly to /dev/console,
+# which shares fb0 with PiScreen. Suppress that disclosure independently of
+# the persistent-key service above; this must not restore console output.
 install -d /etc/cloud/cloud.cfg.d
 cat > /etc/cloud/cloud.cfg.d/90-micropanel-touch-console.cfg <<'EOF'
 #cloud-config
@@ -94,11 +153,14 @@ systemctl mask systemd-networkd-wait-online.service
 # An overlay-backed root is intentionally neither remountable nor a block
 # device that can be grown. Treat these generic root-maintenance jobs as not
 # applicable so their expected failures do not cascade into boot warnings.
+# These are exact whole-token conditions, so list both the legacy token and
+# this board's non-recursive form deliberately.
 for root_unit in systemd-remount-fs.service systemd-growfs-root.service; do
     install -d "/etc/systemd/system/${root_unit}.d"
     cat > "/etc/systemd/system/${root_unit}.d/50-micropanel-touch-overlay-root.conf" <<'EOF'
 [Unit]
 ConditionKernelCommandLine=!overlayroot=tmpfs
+ConditionKernelCommandLine=!overlayroot=tmpfs:recurse=0
 EOF
 done
 
@@ -107,8 +169,20 @@ done
 # On Trixie, do_overlayfs also owns the boot-partition write-protection policy;
 # the former do_boot_ro noninteractive action no longer exists.
 raspi-config nonint do_overlayfs 0
-grep -Eq '(^|[[:space:]])overlayroot=tmpfs([[:space:]]|$)' /boot/firmware/cmdline.txt || {
+overlayroot_token='overlayroot=tmpfs:recurse=0'
+if grep -Eq "(^|[[:space:]])${overlayroot_token}([[:space:]]|$)" /boot/firmware/cmdline.txt; then
+    :
+elif grep -Eq '(^|[[:space:]])overlayroot=tmpfs([[:space:]]|$)' /boot/firmware/cmdline.txt; then
+    # overlayroot's default recurse=1 overlays every fstab mount below /,
+    # including /data. The appliance root is volatile, but p3 must stay ext4.
+    sed -i -E 's/(^|[[:space:]])overlayroot=tmpfs([[:space:]]|$)/\1overlayroot=tmpfs:recurse=0\2/' \
+        /boot/firmware/cmdline.txt
+else
     echo "ERROR: raspi-config did not enable overlayroot in cmdline.txt" >&2
+    exit 1
+fi
+grep -Eq "(^|[[:space:]])${overlayroot_token}([[:space:]]|$)" /boot/firmware/cmdline.txt || {
+    echo "ERROR: unable to configure non-recursive overlayroot" >&2
     exit 1
 }
 

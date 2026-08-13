@@ -1,5 +1,5 @@
 capability,status,owner,privileged_path,devices,writable_paths
-ui-and-touch,supported,micropanel-touch,none,/dev/fb*;/dev/input/event*,none
+ui-and-touch,supported,micropanel-touch,none,/dev/fb*;/dev/input/event*,/data/micropanel-touch
 network-static-ip,supported,micropanel-touch,typed-broker,NetworkManager D-Bus,/data/micropanel-touch;/data/NetworkManager/system-connections
 network-dhcp,supported,micropanel-touch,typed-broker,NetworkManager D-Bus,/data/micropanel-touch;/data/NetworkManager/system-connections
 network-dhcp-server,supported,micropanel-touch,typed-broker+dedicated-dnsmasq,NetworkManager D-Bus;/usr/sbin/dnsmasq,/data/micropanel-touch-network/dhcp-server;/data/NetworkManager/system-connections

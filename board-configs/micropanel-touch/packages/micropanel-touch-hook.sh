@@ -50,6 +50,19 @@ fi
 systemctl enable "$destination/lib/systemd/system/micropanel-touch-privileged.service"
 systemctl enable "$destination/lib/systemd/system/micropanel-touch.service"
 
+# sdm's first-boot pass has no remaining actions after this image pipeline has
+# applied its user and board configuration. On an overlay-root appliance it can
+# only disable itself in transient RAM, so it returns on every boot and writes
+# a final status message directly to tty1. Remove it from multi-user.target in
+# the immutable image and retain a condition guard against future re-enabling.
+systemctl disable sdm-firstboot.service
+install -d /etc/systemd/system/sdm-firstboot.service.d
+cat > /etc/systemd/system/sdm-firstboot.service.d/50-micropanel-touch-disable.conf <<'EOF'
+[Unit]
+# Explicitly opt in only when debugging an image-builder first-boot pass.
+ConditionKernelCommandLine=micropanel-touch.sdm-firstboot=1
+EOF
+
 # The supported Pi OS Lite base keeps cloud-init to create unique SSH host
 # keys on first boot. Its `keys_to_console` module bypasses systemd and writes
 # those public keys directly to /dev/console, which shares fb0 with PiScreen.

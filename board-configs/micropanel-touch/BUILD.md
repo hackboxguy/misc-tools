@@ -7,6 +7,22 @@ with:
 sudo ./build-image.sh --board=micropanel-touch --version=00.10
 ```
 
+The command above remains the verified PiScreen ILI9486/ADS7846 image. For
+the separately verified Luckfox **3.5-RPi-LCD-CTP** (ST7796S display and GT911
+touch) build the opt-in variant instead:
+
+```sh
+sudo ./build-image.sh --board=micropanel-touch --variant=luckfox-ctp --version=00.10
+```
+
+The variant installs the pinned ST7796S MIPI-DBI command firmware, enables
+SPI0/I²C1, and replaces the PiScreen managed overlay block with the GT911
+`0x5d` profile. Do not use a PiScreen and Luckfox panel together: they have
+mutually exclusive SPI0/GPIO claims. After flashing the Luckfox image, retain
+SSH access for initial acceptance and check `--probe`, the service journal,
+portrait geometry, touch navigation, and a clean power-cycle before treating
+the panel as released.
+
 The board config pins both the Raspberry Pi OS Lite artifact and the
 `micropanel-touch` commit named in `hooks.txt`. That commit must be available
 from its Git remote before starting the build; the dedicated hook clones it

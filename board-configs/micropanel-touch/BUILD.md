@@ -90,5 +90,9 @@ the default `192.168.50.1/24` / `.100`–`.200` pool (or a valid private
 alternative), then complete the second confirmation. From the isolated client,
 verify it receives a lease in the selected range, can reach the panel server
 address, and receives neither a default route nor a DNS server from it. Reboot
-the panel and repeat the lease check. Finally select DHCP-Client on the panel,
-verify the dedicated server unit stops and remains inactive after reboot.
+the panel and repeat the lease check: the lease database is intentionally
+volatile, so the client may rediscover rather than retain its previous lease.
+The server uses dnsmasq dynamic binding to tolerate NetworkManager applying
+the saved manual address during boot; it should not emit an address-bind retry
+failure. Finally select DHCP-Client on the panel, verify the dedicated server
+unit stops and remains inactive after reboot.

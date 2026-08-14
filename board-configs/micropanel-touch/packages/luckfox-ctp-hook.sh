@@ -13,7 +13,7 @@ firmware_sha256=17204e39cce35fba857ad2dff14243e1d3a958c4dac00283f8df9b7ad5147cc7
 profile_tool="$app_root/usr/share/micropanel-touch/tools/enable-luckfox-ctp.sh"
 manifest="$app_root/share/micropanel-touch/image-manifest.env"
 systemd_root=${MICROPANEL_TOUCH_SYSTEMD_ROOT:-/etc/systemd/system}
-backlight_path=/sys/class/backlight/backlight_pwm/brightness
+udev_rules_root=${MICROPANEL_TOUCH_UDEV_RULES_ROOT:-/etc/udev/rules.d}
 
 for required in "$firmware_source" "$profile_tool" "$manifest"; do
     [ -f "$required" ] || { echo "ERROR: required Luckfox artifact missing: $required" >&2; exit 1; }
@@ -34,28 +34,22 @@ installed_sha256=$(sha256sum "$firmware_destination" | awk '{print $1}')
 
 "$profile_tool"
 
-# The HMI intentionally has no general root helper for display power. The
-# profile's kernel-owned PWM-backlight attribute is the sole grant, and this
-# unit exists only on the opt-in Luckfox image. systemd-modules-load creates
-# the attribute before this ordered one-shot service runs.
-install -d "$systemd_root/micropanel-touch.service.d"
-cat > "$systemd_root/micropanel-touch-backlight-permissions.service" <<EOF
-[Unit]
-Description=Grant MicroPanel Touch access to the Luckfox backlight
-ConditionPathExists=$backlight_path
-After=systemd-modules-load.service
-Before=micropanel-touch.service
+# The HMI intentionally has no general root helper for display power. Apply
+# the least-privilege grant when udev creates the PWM-backlight node; unlike a
+# one-shot unit this has no panel-probe timing race. Backlights have no devnode
+# (their writable brightness file is sysfs), so fixed RUN commands target only
+# that attribute rather than relying on a devnode MODE rule. This is installed
+# only by the opt-in Luckfox image hook.
+install -d "$udev_rules_root"
+cat > "$udev_rules_root/70-micropanel-touch-luckfox-backlight.rules" <<'EOF'
+ACTION=="add", SUBSYSTEM=="backlight", KERNEL=="backlight_pwm", RUN+="/usr/bin/chown root:micropanel-touch /sys/class/backlight/%k/brightness", RUN+="/usr/bin/chmod 0660 /sys/class/backlight/%k/brightness"
+EOF
 
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/chown root:micropanel-touch $backlight_path
-ExecStart=/usr/bin/chmod 0660 $backlight_path
-EOF
-cat > "$systemd_root/micropanel-touch.service.d/20-luckfox-backlight.conf" <<'EOF'
-[Unit]
-Wants=micropanel-touch-backlight-permissions.service
-After=micropanel-touch-backlight-permissions.service
-EOF
+# A builder can resume after a previous hook revision. Remove only the two
+# obsolete generated files so an incremental image cannot retain the old,
+# timing-sensitive one-shot permission path.
+rm -f "$systemd_root/micropanel-touch-backlight-permissions.service" \
+    "$systemd_root/micropanel-touch.service.d/20-luckfox-backlight.conf"
 
 # A normal image build executes this hook once, but make a re-run safe for
 # incremental-builder recovery and for deterministic chroot tests.

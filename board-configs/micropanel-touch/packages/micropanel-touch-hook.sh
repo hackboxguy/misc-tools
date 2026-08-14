@@ -39,14 +39,6 @@ install -Dm0644 "$destination/usr/lib/sysctl.d/micropanel-touch-console.conf" \
     /etc/sysctl.d/49-micropanel-touch-console.conf
 install -Dm0644 "$destination/share/micropanel-touch/polkit/49-micropanel-touch-network-manager.rules" \
     /etc/polkit-1/rules.d/49-micropanel-touch-network-manager.rules
-# PiScreen's GPIO-22 backlight-enable is exposed by the boot profile as a
-# binary gpio-led node. Apply the same narrow, event-driven access grant used
-# by the Luckfox PWM node; it is intentionally not a general GPIO privilege.
-install -d /etc/udev/rules.d
-cat > /etc/udev/rules.d/70-micropanel-touch-piscreen-backlight.rules <<'EOF'
-ACTION=="add", SUBSYSTEM=="leds", KERNEL=="micropanel-touch-piscreen-backlight", RUN+="/usr/bin/chown root:micropanel-touch /sys/class/leds/%k/brightness", RUN+="/usr/bin/chmod 0660 /sys/class/leds/%k/brightness"
-EOF
-
 # This helper owns all PiScreen overlay lines and masks the panel getty. It
 # preserves the known-good native portrait mapping and never adds speed=.
 "$destination/usr/share/micropanel-touch/tools/enable-piscreen.sh"

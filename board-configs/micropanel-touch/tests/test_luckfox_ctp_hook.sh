@@ -37,16 +37,17 @@ run_hook() {
 run_hook
 sha256sum "$firmware" | grep -q '^17204e39cce35fba857ad2dff14243e1d3a958c4dac00283f8df9b7ad5147cc7 '
 grep -Fqx 'panel_mipi_dbi' "$modules_load"
-grep -Fqx 'ConditionPathExists=/sys/class/backlight/backlight_gpio/brightness' \
+grep -Fqx 'ConditionPathExists=/sys/class/backlight/backlight_pwm/brightness' \
     "$systemd_root/micropanel-touch-backlight-permissions.service"
-grep -Fqx 'ExecStart=/usr/bin/chown root:micropanel-touch /sys/class/backlight/backlight_gpio/brightness' \
+grep -Fqx 'ExecStart=/usr/bin/chown root:micropanel-touch /sys/class/backlight/backlight_pwm/brightness' \
     "$systemd_root/micropanel-touch-backlight-permissions.service"
-grep -Fqx 'ExecStart=/usr/bin/chmod 0660 /sys/class/backlight/backlight_gpio/brightness' \
+grep -Fqx 'ExecStart=/usr/bin/chmod 0660 /sys/class/backlight/backlight_pwm/brightness' \
     "$systemd_root/micropanel-touch-backlight-permissions.service"
 grep -Fqx 'Wants=micropanel-touch-backlight-permissions.service' \
     "$systemd_root/micropanel-touch.service.d/20-luckfox-backlight.conf"
 ! grep -q '^[[:space:]]*dtoverlay=piscreen\(,\|$\)' "$config"
 grep -Fqx 'dtoverlay=mipi-dbi-spi,spi0-0,speed=48000000' "$config"
+grep -Fqx 'dtparam=reset-gpio=27,dc-gpio=22,backlight-pwm=0,backlight-pwm-chan=0,backlight-pwm-gpio=18,backlight-pwm-func=2' "$config"
 grep -Fqx 'dtoverlay=goodix,addr=0x5d,interrupt=4,reset=17' "$config"
 grep -Fqx 'PANEL_PROFILE=luckfox-ctp-st7796s-gt911-portrait' "$manifest"
 grep -Fqx 'PANEL_VARIANT=luckfox-ctp' "$manifest"

@@ -13,7 +13,7 @@ firmware_sha256=17204e39cce35fba857ad2dff14243e1d3a958c4dac00283f8df9b7ad5147cc7
 profile_tool="$app_root/usr/share/micropanel-touch/tools/enable-luckfox-ctp.sh"
 manifest="$app_root/share/micropanel-touch/image-manifest.env"
 systemd_root=${MICROPANEL_TOUCH_SYSTEMD_ROOT:-/etc/systemd/system}
-backlight_path=/sys/class/backlight/backlight_gpio/brightness
+backlight_path=/sys/class/backlight/backlight_pwm/brightness
 
 for required in "$firmware_source" "$profile_tool" "$manifest"; do
     [ -f "$required" ] || { echo "ERROR: required Luckfox artifact missing: $required" >&2; exit 1; }
@@ -35,7 +35,7 @@ installed_sha256=$(sha256sum "$firmware_destination" | awk '{print $1}')
 "$profile_tool"
 
 # The HMI intentionally has no general root helper for display power. The
-# profile's kernel-owned gpio-backlight attribute is the sole grant, and this
+# profile's kernel-owned PWM-backlight attribute is the sole grant, and this
 # unit exists only on the opt-in Luckfox image. systemd-modules-load creates
 # the attribute before this ordered one-shot service runs.
 install -d "$systemd_root/micropanel-touch.service.d"

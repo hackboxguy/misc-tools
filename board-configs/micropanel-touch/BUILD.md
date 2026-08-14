@@ -60,9 +60,14 @@ findmnt -no TARGET,SOURCE,FSTYPE,OPTIONS /etc/NetworkManager/system-connections
 cat /proc/swaps
 systemctl is-enabled dphys-swapfile
 systemctl is-active micropanel-touch.service micropanel-touch-privileged.service
+systemctl is-active micropanel-touch-machine-id.service
 systemctl is-enabled micropanel-touch-dhcp-server.service
 systemctl is-enabled dnsmasq.service
 stat -c '%U %a %n' /run/micropanel-touch/broker.sock
+sudo stat -c '%U:%G %a %n' /data/micropanel-touch-system /data/micropanel-touch-system/machine-id
+printf 'persistent='; sudo cat /data/micropanel-touch-system/machine-id
+printf 'etc='; cat /etc/machine-id
+printf 'dbus='; cat /var/lib/dbus/machine-id
 systemctl --failed --no-pager
 ```
 
@@ -86,13 +91,17 @@ sudo sh -c 'printf "%s\\n" persistence-check > /data/micropanel-touch/.persisten
 sync
 sudo cat /data/micropanel-touch/.persistence-check
 sudo sha256sum /etc/ssh/ssh_host_*_key.pub | sort
-cat /etc/machine-id
+machine_id=$(cat /etc/machine-id)
+test "$machine_id" = "$(cat /var/lib/dbus/machine-id)"
+test "$machine_id" = "$(sudo cat /data/micropanel-touch-system/machine-id)"
 ```
 
-The marker and SSH public-key hashes remained stable through normal reboot and
-physical power-cycle; `machine-id` was also stable on that hardware. Keep this
-check as a regression acceptance test. A broker-applied NetworkManager change
-still needs its own post-reboot test.
+After each boot, repeat the three identity reads and compare them with the
+recorded `machine_id`. The marker, SSH public-key hashes, and machine ID must
+remain stable through normal reboot and physical power-cycle. A fresh image
+must report a non-empty, non-zero ID and it must differ from a separately
+flashed card. Keep this check as a regression acceptance test. A
+broker-applied NetworkManager change still needs its own post-reboot test.
 
 The NetworkManager polkit rule intentionally requires the non-root `pi` account
 to use `sudo` for direct mutation; the appliance's intended mutation route is

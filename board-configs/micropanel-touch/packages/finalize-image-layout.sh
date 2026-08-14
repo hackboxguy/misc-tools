@@ -95,6 +95,9 @@ account=$(awk -F: '$1 == "micropanel-touch" { print $3 ":" $4; exit }' "$root_mo
 install -d -m0750 -o "${account%%:*}" -g "${account##*:}" "$data_mount/micropanel-touch"
 install -d -m0750 -o "${account%%:*}" -g "${account##*:}" "$data_mount/micropanel-touch/logs"
 install -d -m0700 "$data_mount/micropanel-touch/ssh-host-keys"
+# Device identity is security-sensitive system state. It intentionally lives
+# outside the HMI account's writable application directory.
+install -d -m0700 -o root -g root "$data_mount/micropanel-touch-system"
 # The DHCP server configuration is consumed by a root service but read by the
 # HMI only to restore its selector state.  Keep the directory root-owned and
 # grant the appliance account group read/execute, never write, access.

@@ -61,12 +61,41 @@ systemctl enable "$destination/lib/systemd/system/micropanel-touch.service"
 systemctl mask dnsmasq.service
 systemctl enable "$destination/lib/systemd/system/micropanel-touch-dhcp-server.service"
 
+# Never carry the build chroot's identity into every flashed appliance. On a
+# first boot systemd supplies a random transient ID; this unit records it in
+# /data, then restores it before D-Bus starts on later boots. PID 1 necessarily
+# starts before /data, but no network-visible service receives the shared,
+# lower-image identity.
+install -d /usr/local/sbin /etc/systemd/system
+install -Dm0755 "$destination/usr/share/micropanel-touch/tools/micropanel-touch-restore-machine-id" \
+    /usr/local/sbin/micropanel-touch-restore-machine-id
+cat > /etc/systemd/system/micropanel-touch-machine-id.service <<'EOF'
+[Unit]
+Description=Restore persistent MicroPanel Touch machine identity
+DefaultDependencies=no
+Wants=data.mount
+After=data.mount
+Before=systemd-machine-id-commit.service dbus.service dbus.socket
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/micropanel-touch-restore-machine-id
+
+[Install]
+WantedBy=sysinit.target
+EOF
+systemctl enable micropanel-touch-machine-id.service
+: > /etc/machine-id
+chmod 0444 /etc/machine-id
+install -d /var/lib/dbus
+: > /var/lib/dbus/machine-id
+chmod 0444 /var/lib/dbus/machine-id
+
 # Root-overlay images run the stock first-boot key generators on every boot:
 # their writes disappear with the tmpfs upper layer. This unit instead seeds
 # one set of host keys on /data, then copies that set into the temporary root
 # before sshd starts. If /data cannot mount, the stock lower-image keys remain
 # a recovery fallback rather than preventing SSH from starting.
-install -d /usr/local/sbin /etc/systemd/system
 cat > /usr/local/sbin/micropanel-touch-restore-ssh-host-keys <<'EOF'
 #!/bin/sh
 set -eu

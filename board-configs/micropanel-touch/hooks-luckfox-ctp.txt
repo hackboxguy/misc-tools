@@ -1,5 +1,5 @@
 # The default hooks retain the verified PiScreen ILI9486/ADS7846 boot profile.
 # This variant hook replaces that managed block with the mutually exclusive
 # Luckfox 3.5-RPi-LCD-CTP ST7796S/GT911 configuration.
-packages/micropanel-touch-hook.sh|https://github.com/hackboxguy/micropanel-touch.git|025e5ea6c3a85744e6be92b9b0c76ff04651d1b3|/opt/micropanel-touch|
+packages/micropanel-touch-hook.sh|https://github.com/hackboxguy/micropanel-touch.git|257031e2575deec4a2f2093d43954702af0444b8|/opt/micropanel-touch|
 packages/luckfox-ctp-hook.sh

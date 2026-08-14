@@ -4,6 +4,7 @@
 iproute2
 libdrm2
 libgpiod3
+libssl3
 dnsmasq
 network-manager
 polkitd

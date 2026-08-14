@@ -7,4 +7,5 @@ pkg-config
 raspi-config
 libdrm-dev
 libgpiod-dev
+libssl-dev
 nlohmann-json3-dev

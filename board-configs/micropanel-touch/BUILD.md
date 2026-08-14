@@ -18,6 +18,13 @@ sudo ./build-image.sh --board=micropanel-touch --variant=luckfox-ctp --version=0
 The variant installs the pinned ST7796S MIPI-DBI command firmware, enables
 SPI0/I²C1, writes a variant-only `panel_mipi_dbi` module-load rule, and
 replaces the PiScreen managed overlay block with the GT911 `0x5d` profile.
+It also installs a Luckfox-only ordered one-shot service that grants the HMI
+account read/write access to exactly
+`/sys/class/backlight/backlight_gpio/brightness`; no raw GPIO access or
+general-purpose privileged display helper is added. The app blanks this
+kernel-owned backlight after 60 seconds by default and consumes the complete
+wake touch. Set `"power": {"display_sleep_sec": 0}` in the starter config
+to disable sleep for an acceptance session.
 The explicit module rule is required on the modular Debian kernel: `st7796s`
 must remain the first compatible string so the MIPI-DBI driver selects
 `st7796s.bin`, but it does not match the driver's autoload alias. Do not use a

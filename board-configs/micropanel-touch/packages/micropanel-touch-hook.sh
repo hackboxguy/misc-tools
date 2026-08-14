@@ -65,7 +65,10 @@ systemctl enable "$destination/lib/systemd/system/micropanel-touch-dhcp-server.s
 # first boot systemd supplies a random transient ID; this unit records it in
 # /data, then restores it before D-Bus starts on later boots. PID 1 necessarily
 # starts before /data, but no network-visible service receives the shared,
-# lower-image identity.
+# lower-image identity. Journald starts still earlier, so once the durable ID
+# is in place restart it before the journal-flush phase: otherwise it retains
+# a directory named after the transient identity and journalctl cannot find
+# the current boot under the restored ID.
 install -d /usr/local/sbin /etc/systemd/system
 install -Dm0755 "$destination/usr/share/micropanel-touch/tools/micropanel-touch-restore-machine-id" \
     /usr/local/sbin/micropanel-touch-restore-machine-id
@@ -75,11 +78,16 @@ Description=Restore persistent MicroPanel Touch machine identity
 DefaultDependencies=no
 Wants=data.mount
 After=data.mount
-Before=systemd-machine-id-commit.service dbus.service dbus.socket
+Before=systemd-machine-id-commit.service dbus.service dbus.socket systemd-journal-flush.service
 
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/micropanel-touch-restore-machine-id
+# Keep boot viable if a future systemd layout does not permit the restart; the
+# image acceptance checks below deliberately verify that the HMI journal is
+# still queryable after the first boot.
+ExecStartPost=-/usr/bin/systemctl try-restart systemd-journald.service
+RemainAfterExit=yes
 
 [Install]
 WantedBy=sysinit.target

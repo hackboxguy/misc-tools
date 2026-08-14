@@ -19,7 +19,8 @@ The variant installs the pinned ST7796S MIPI-DBI command firmware, enables
 SPI0/I²C1, writes a variant-only `panel_mipi_dbi` module-load rule, and
 replaces the PiScreen managed overlay block with the GT911 `0x5d` profile.
 It also enables the MIPI-DBI PWM backlight on GPIO 18, explicitly disables
-analogue audio, and installs a Luckfox-only udev rule that grants the HMI
+analogue audio and blacklists its competing `snd_bcm2835` module, and installs
+a Luckfox-only udev rule that grants the HMI
 account read/write access to exactly
 `/sys/class/backlight/backlight_pwm/brightness` when that node is created; no
 raw GPIO access or general-purpose privileged display helper is added. The app
@@ -68,6 +69,7 @@ sudo stat -c '%U:%G %a %n' /data/micropanel-touch-system /data/micropanel-touch-
 printf 'persistent='; sudo cat /data/micropanel-touch-system/machine-id
 printf 'etc='; cat /etc/machine-id
 printf 'dbus='; cat /var/lib/dbus/machine-id
+journalctl -b -u micropanel-touch.service --no-pager -n 5
 systemctl --failed --no-pager
 ```
 
@@ -81,6 +83,11 @@ NetworkManager profile directory. Its root command line contains
 guard against `recurse=0` unintentionally making non-root mounts writable or
 creating RAM-backed swap through either `dphys-swapfile` or Pi OS's current
 `rpi-swap` zram generator.
+
+The `journalctl` command must show current-boot HMI entries. The early
+machine-ID service restarts journald before the journal-flush phase after it
+restores the durable ID, so the running journal directory matches the ID that
+`journalctl` uses for its lookup.
 
 Before treating the image as persistence-ready, perform this harmless
 application-data check, then repeat the read after a normal reboot and an

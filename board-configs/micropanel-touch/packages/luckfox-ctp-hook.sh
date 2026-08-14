@@ -14,6 +14,7 @@ profile_tool="$app_root/usr/share/micropanel-touch/tools/enable-luckfox-ctp.sh"
 manifest="$app_root/share/micropanel-touch/image-manifest.env"
 systemd_root=${MICROPANEL_TOUCH_SYSTEMD_ROOT:-/etc/systemd/system}
 udev_rules_root=${MICROPANEL_TOUCH_UDEV_RULES_ROOT:-/etc/udev/rules.d}
+modprobe_root=${MICROPANEL_TOUCH_MODPROBE_ROOT:-/etc/modprobe.d}
 
 for required in "$firmware_source" "$profile_tool" "$manifest"; do
     [ -f "$required" ] || { echo "ERROR: required Luckfox artifact missing: $required" >&2; exit 1; }
@@ -43,6 +44,15 @@ installed_sha256=$(sha256sum "$firmware_destination" | awk '{print $1}')
 install -d "$udev_rules_root"
 cat > "$udev_rules_root/70-micropanel-touch-luckfox-backlight.rules" <<'EOF'
 ACTION=="add", SUBSYSTEM=="backlight", KERNEL=="backlight_pwm", RUN+="/usr/bin/chown root:micropanel-touch /sys/class/backlight/%k/brightness", RUN+="/usr/bin/chmod 0660 /sys/class/backlight/%k/brightness"
+EOF
+
+# The managed PWM backlight uses a resource that the legacy BCM analogue-audio
+# driver can also claim. The profile already disables the DT audio route; keep
+# the module from being loaded later by an alias or manual request as well.
+install -d "$modprobe_root"
+cat > "$modprobe_root/90-micropanel-touch-luckfox-audio.conf" <<'EOF'
+# Luckfox CTP backlight PWM is reserved for the appliance display.
+blacklist snd_bcm2835
 EOF
 
 # A builder can resume after a previous hook revision. Remove only the two

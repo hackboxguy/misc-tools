@@ -11,6 +11,7 @@ firmware=$temporary_directory/lib/firmware/st7796s.bin
 modules_load=$temporary_directory/etc/modules-load.d/micropanel-touch-luckfox-ctp.conf
 systemd_root=$temporary_directory/etc/systemd/system
 udev_rules_root=$temporary_directory/etc/udev/rules.d
+modprobe_root=$temporary_directory/etc/modprobe.d
 config=$temporary_directory/config.txt
 cmdline=$temporary_directory/cmdline.txt
 manifest=$app_root/share/micropanel-touch/image-manifest.env
@@ -29,6 +30,7 @@ run_hook() {
     MICROPANEL_TOUCH_MODULES_LOAD_PATH="$modules_load" \
     MICROPANEL_TOUCH_SYSTEMD_ROOT="$systemd_root" \
     MICROPANEL_TOUCH_UDEV_RULES_ROOT="$udev_rules_root" \
+    MICROPANEL_TOUCH_MODPROBE_ROOT="$modprobe_root" \
     MICROPANEL_TOUCH_ALLOW_UNPRIVILEGED_TEST=1 \
     MICROPANEL_TOUCH_CONFIG_PATH="$config" \
     MICROPANEL_TOUCH_CMDLINE_PATH="$cmdline" \
@@ -44,6 +46,8 @@ sha256sum "$firmware" | grep -q '^17204e39cce35fba857ad2dff14243e1d3a958c4dac002
 grep -Fqx 'panel_mipi_dbi' "$modules_load"
 grep -Fqx 'ACTION=="add", SUBSYSTEM=="backlight", KERNEL=="backlight_pwm", RUN+="/usr/bin/chown root:micropanel-touch /sys/class/backlight/%k/brightness", RUN+="/usr/bin/chmod 0660 /sys/class/backlight/%k/brightness"' \
     "$udev_rules_root/70-micropanel-touch-luckfox-backlight.rules"
+grep -Fqx 'blacklist snd_bcm2835' \
+    "$modprobe_root/90-micropanel-touch-luckfox-audio.conf"
 ! test -e "$systemd_root/micropanel-touch-backlight-permissions.service"
 ! test -e "$systemd_root/micropanel-touch.service.d/20-luckfox-backlight.conf"
 ! grep -q '^[[:space:]]*dtoverlay=piscreen\(,\|$\)' "$config"
@@ -60,6 +64,8 @@ cp "$manifest" "$temporary_directory/first-manifest.txt"
 cp "$modules_load" "$temporary_directory/first-modules-load.txt"
 cp "$udev_rules_root/70-micropanel-touch-luckfox-backlight.rules" \
     "$temporary_directory/first-backlight-rule.txt"
+cp "$modprobe_root/90-micropanel-touch-luckfox-audio.conf" \
+    "$temporary_directory/first-audio-blacklist.txt"
 
 run_hook
 cmp "$temporary_directory/first-config.txt" "$config"
@@ -67,3 +73,5 @@ cmp "$temporary_directory/first-manifest.txt" "$manifest"
 cmp "$temporary_directory/first-modules-load.txt" "$modules_load"
 cmp "$temporary_directory/first-backlight-rule.txt" \
     "$udev_rules_root/70-micropanel-touch-luckfox-backlight.rules"
+cmp "$temporary_directory/first-audio-blacklist.txt" \
+    "$modprobe_root/90-micropanel-touch-luckfox-audio.conf"

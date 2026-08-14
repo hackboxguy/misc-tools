@@ -8,6 +8,7 @@ trap 'rm -rf "$temporary_directory"' EXIT HUP INT TERM
 
 app_root=$temporary_directory/opt/micropanel-touch
 firmware=$temporary_directory/lib/firmware/st7796s.bin
+modules_load=$temporary_directory/etc/modules-load.d/micropanel-touch-luckfox-ctp.conf
 config=$temporary_directory/config.txt
 cmdline=$temporary_directory/cmdline.txt
 manifest=$app_root/share/micropanel-touch/image-manifest.env
@@ -23,6 +24,7 @@ printf '%s\n' 'console=tty1 root=LABEL=writable rootwait' > "$cmdline"
 run_hook() {
     MICROPANEL_TOUCH_APP_ROOT="$app_root" \
     MICROPANEL_TOUCH_FIRMWARE_DESTINATION="$firmware" \
+    MICROPANEL_TOUCH_MODULES_LOAD_PATH="$modules_load" \
     MICROPANEL_TOUCH_ALLOW_UNPRIVILEGED_TEST=1 \
     MICROPANEL_TOUCH_CONFIG_PATH="$config" \
     MICROPANEL_TOUCH_CMDLINE_PATH="$cmdline" \
@@ -32,6 +34,7 @@ run_hook() {
 
 run_hook
 sha256sum "$firmware" | grep -q '^17204e39cce35fba857ad2dff14243e1d3a958c4dac00283f8df9b7ad5147cc7 '
+grep -Fqx 'panel_mipi_dbi' "$modules_load"
 ! grep -q '^[[:space:]]*dtoverlay=piscreen\(,\|$\)' "$config"
 grep -Fqx 'dtoverlay=mipi-dbi-spi,spi0-0,speed=48000000' "$config"
 grep -Fqx 'dtoverlay=goodix,addr=0x5d,interrupt=4,reset=17' "$config"
@@ -42,7 +45,9 @@ grep -Fqx 'PANEL_FIRMWARE_SHA256=17204e39cce35fba857ad2dff14243e1d3a958c4dac0028
     "$manifest"
 cp "$config" "$temporary_directory/first-config.txt"
 cp "$manifest" "$temporary_directory/first-manifest.txt"
+cp "$modules_load" "$temporary_directory/first-modules-load.txt"
 
 run_hook
 cmp "$temporary_directory/first-config.txt" "$config"
 cmp "$temporary_directory/first-manifest.txt" "$manifest"
+cmp "$temporary_directory/first-modules-load.txt" "$modules_load"

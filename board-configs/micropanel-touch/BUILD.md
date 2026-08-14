@@ -16,12 +16,15 @@ sudo ./build-image.sh --board=micropanel-touch --variant=luckfox-ctp --version=0
 ```
 
 The variant installs the pinned ST7796S MIPI-DBI command firmware, enables
-SPI0/I²C1, and replaces the PiScreen managed overlay block with the GT911
-`0x5d` profile. Do not use a PiScreen and Luckfox panel together: they have
-mutually exclusive SPI0/GPIO claims. After flashing the Luckfox image, retain
-SSH access for initial acceptance and check `--probe`, the service journal,
-portrait geometry, touch navigation, and a clean power-cycle before treating
-the panel as released.
+SPI0/I²C1, writes a variant-only `panel_mipi_dbi` module-load rule, and
+replaces the PiScreen managed overlay block with the GT911 `0x5d` profile.
+The explicit module rule is required on the modular Debian kernel: `st7796s`
+must remain the first compatible string so the MIPI-DBI driver selects
+`st7796s.bin`, but it does not match the driver's autoload alias. Do not use a
+PiScreen and Luckfox panel together: they have mutually exclusive SPI0/GPIO
+claims. After flashing the Luckfox image, retain SSH access for initial
+acceptance and check `--probe`, the service journal, portrait geometry, touch
+navigation, and a clean power-cycle before treating the panel as released.
 
 The board config pins both the Raspberry Pi OS Lite artifact and the
 `micropanel-touch` commit named in `hooks.txt`. That commit must be available

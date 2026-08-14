@@ -15,6 +15,11 @@ touch) build the opt-in variant instead:
 sudo ./build-image.sh --board=micropanel-touch --variant=luckfox-ctp --version=00.10
 ```
 
+The default PiScreen profile exposes its measured GPIO-22 backlight-enable as
+a kernel `gpio-led` node. It supports automatic/manual standby and wake, but
+the wiring is binary rather than PWM, so **Display → Brightness** correctly
+remains unavailable on that panel.
+
 The variant installs the pinned ST7796S MIPI-DBI command firmware, enables
 SPI0/I²C1, writes a variant-only `panel_mipi_dbi` module-load rule, and
 replaces the PiScreen managed overlay block with the GT911 `0x5d` profile.

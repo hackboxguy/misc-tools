@@ -15,10 +15,11 @@ touch) build the opt-in variant instead:
 sudo ./build-image.sh --board=micropanel-touch --variant=luckfox-ctp --version=00.10
 ```
 
-The default PiScreen profile has no verified independent kernel-owned
-backlight interface. It therefore leaves **Display → Standby** and
-**Display → Brightness** unavailable; its GPIO 22 is claimed by the ILI9486
-driver's pinctrl group and must not be claimed again by an overlay.
+The default PiScreen profile has a fixed-on backlight. A three-second
+libgpiod low drive of GPIO 22 on the accepted bench panel caused no visible
+change; the ILI9486 driver also claims that line. It therefore leaves
+**Display → Standby** and **Display → Brightness** unavailable, and no
+overlay may claim GPIO 22 again.
 
 The variant installs the pinned ST7796S MIPI-DBI command firmware, enables
 SPI0/I²C1, writes a variant-only `panel_mipi_dbi` module-load rule, and

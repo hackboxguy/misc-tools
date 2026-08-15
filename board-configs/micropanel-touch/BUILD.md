@@ -17,7 +17,7 @@ sudo ./build-image.sh --board=micropanel-touch --variant=luckfox-ctp --version=0
 
 The default PiScreen profile has a fixed-on backlight. A three-second
 libgpiod low drive of GPIO 22 on the accepted bench panel caused no visible
-change; the ILI9486 driver also claims that line. It therefore leaves
+change; GPIO 22 belongs to the panel overlay's pin group. It therefore leaves
 **Display → Standby** and **Display → Brightness** unavailable, and no
 overlay may claim GPIO 22 again.
 

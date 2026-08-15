@@ -3,4 +3,8 @@ ui-and-touch,supported,micropanel-touch,none,/dev/fb*;/dev/input/event*,/data/mi
 network-static-ip,supported,micropanel-touch,typed-broker,NetworkManager D-Bus,/data/micropanel-touch;/data/NetworkManager/system-connections
 network-dhcp,supported,micropanel-touch,typed-broker,NetworkManager D-Bus,/data/micropanel-touch;/data/NetworkManager/system-connections
 network-dhcp-server,supported,micropanel-touch,typed-broker+dedicated-dnsmasq,NetworkManager D-Bus;/usr/sbin/dnsmasq,/data/micropanel-touch-network/dhcp-server;/data/NetworkManager/system-connections
+display-standby-luckfox-ctp,supported,micropanel-touch,kernel-backlight-sysfs,/sys/class/backlight/backlight_pwm/brightness,/data/micropanel-touch/display-settings.conf
+display-brightness-luckfox-ctp,supported,micropanel-touch,kernel-backlight-sysfs,/sys/class/backlight/backlight_pwm/brightness,/data/micropanel-touch/display-brightness.conf
+display-standby-piscreen,unavailable-hardware,micropanel-touch,none,PiScreen fixed-on backlight;GPIO 22 panel-overlay pin group,
+display-brightness-piscreen,unavailable-hardware,micropanel-touch,none,PiScreen fixed-on backlight;GPIO 22 is not PWM-capable,
 fpga-and-mcu-packs,pending,Tier-2-pack,pack-defined,pack-defined,pack-defined

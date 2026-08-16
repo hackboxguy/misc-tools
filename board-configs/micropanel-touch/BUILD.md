@@ -22,8 +22,10 @@ The A/B artifact is fixed at 15,000 MiB, so flash it only to a nominal 16 GB
 or larger card.  It has an MBR table with `MP_BOOT_A` (p1), reserved empty
 `MP_BOOT_B` (p2), an extended p3, roots `MP_ROOT_A` (p5) and `MP_ROOT_B`
 (p6), empty `MP_FACTORY` (p7), and the remaining `MICROPANEL_DATA` p8.
-The builder preserves and expands the completed source image's data
-filesystem into p8; it must never create a blank replacement for that state.
+The apps-stage source has only boot and root partitions. The finalizer creates
+p8 through the shared durable-state skeleton and seeds shipped NetworkManager
+profiles from the authored root; it must never leave p8 as a bare empty ext4
+filesystem.
 
 Before flashing an A/B artifact, run the read-only host check as root:
 

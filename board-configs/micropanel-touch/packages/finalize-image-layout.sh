@@ -313,7 +313,7 @@ copy_slot_boot_tree() { # $1=source boot mount; $2=destination boot mount; $3=sl
 }
 
 finalize_ab_layout() {
-    local partition_count source_root source_data source_boot
+    local partition_count source_root source_boot
     local target_size_bytes total_sectors sectors_per_mib
     local boot_size root_size factory_size p1_start p2_start extended_start
     local p5_start p6_start p7_start p8_start data_size extended_size
@@ -323,8 +323,8 @@ finalize_ab_layout() {
         exit 1
     }
     partition_count=$(image_partition_lines "$image_path" | sed '/^$/d' | wc -l)
-    [ "$partition_count" -eq 3 ] || {
-        echo "ERROR: A/B layout expects the completed single-slot image (boot, root, data); found $partition_count partitions" >&2
+    [ "$partition_count" -eq 2 ] || {
+        echo "ERROR: A/B layout expects the authored apps image (boot and root); found $partition_count partitions" >&2
         exit 1
     }
     [ -x "$data_skeleton_script" ] || { echo "ERROR: data skeleton script is not executable: $data_skeleton_script" >&2; exit 1; }
@@ -354,16 +354,11 @@ finalize_ab_layout() {
 
     source_loop=$(losetup --find --show --partscan --read-only "$image_path")
     partx --update "$source_loop" || true
-    wait_for_partitions "$source_loop" 1 2 3
+    wait_for_partitions "$source_loop" 1 2
     source_boot="${source_loop}p1"
     source_root="${source_loop}p2"
-    source_data="${source_loop}p3"
     [ "$(blockdev --getsize64 "$source_root")" -le $((ab_root_partition_mb * 1024 * 1024)) ] || {
         echo "ERROR: authored root does not fit the configured ${ab_root_partition_mb}MiB A/B slot" >&2
-        exit 1
-    }
-    [ "$(blockdev --getsize64 "$source_data")" -le $((data_size * 512)) ] || {
-        echo "ERROR: source persistent data does not fit the A/B image remainder" >&2
         exit 1
     }
 
@@ -393,7 +388,7 @@ EOF
     clone_and_expand_ext4 "$source_root" "${target_loop}p5" MP_ROOT_A
     mkfs.ext4 -F -L MP_ROOT_B "${target_loop}p6" >/dev/null
     mkfs.ext4 -F -L MP_FACTORY "${target_loop}p7" >/dev/null
-    clone_and_expand_ext4 "$source_data" "${target_loop}p8" "$data_label"
+    mkfs.ext4 -F -L "$data_label" "${target_loop}p8" >/dev/null
 
     source_boot_mount=$(mktemp -d)
     root_mount=$(mktemp -d)
@@ -426,9 +421,11 @@ EOF
         "$root_mount/usr/lib/micropanel-touch/boot-selector-config.base"
     { printf 'os_prefix=B/\n'; cat "$boot_mount/config.txt"; } > "$boot_mount/tryboot.txt"
 
-    # p8 inherits all existing appliance state from the completed source
-    # image. Reassert the contract instead of replacing it with a blank fs.
+    # The apps image has no /data partition yet. Seed the exact same durable
+    # first-boot contract as the single-slot finalizer, including any shipped
+    # NetworkManager keyfiles; a bare empty ext4 filesystem is not sufficient.
     seed_data_skeleton "$root_mount" "$data_mount"
+    seed_network_connections "$root_mount" "$data_mount"
     install_data_skeleton_tool "$root_mount"
     install -Dm0755 "$selector_script" "$root_mount/usr/local/sbin/micropanel-touch-slot-selector"
     install -d -m0755 "$root_mount/data"

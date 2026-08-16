@@ -20,6 +20,10 @@ printf '%s\n' "$plan" | grep -Fqx 'p7=MP_FACTORY:2048MiB:ext4-reserved'
 printf '%s\n' "$plan" | grep -Fqx 'p8=MICROPANEL_DATA:remainder:ext4'
 printf '%s\n' "$plan" | grep -Fqx 'normal_selector=flat-A-config.txt'
 printf '%s\n' "$plan" | grep -Fqx 'tryboot_selector=os_prefix=B/'
+# The post-image hook is invoked once, immediately after the two-partition
+# apps image is authored. Its A/B branch must create, rather than expect, p8.
+grep -Fqx "    [ \"\$partition_count\" -eq 2 ] || {" "$finalizer"
+grep -Fqx "    seed_network_connections \"\$root_mount\" \"\$data_mount\"" "$finalizer"
 
 "$builder" --help | grep -Fq -- '--layout=MODE'
 if "$builder" --board=micropanel-touch --layout=invalid --dry-run >/dev/null 2>&1; then

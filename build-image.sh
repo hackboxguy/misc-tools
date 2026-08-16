@@ -26,6 +26,8 @@
 # Options:
 #   --board=NAME        Board config from board-configs/ (required)
 #   --variant=NAME      Board variant (per-variant overrides in board.conf)
+#   --layout=MODE       Image layout: single (default) or ab; the A/B mode
+#                       needs a 16 GB or larger card
 #   --version=VER       Image version string (default: DEFAULT_VERSION)
 #   --password=PASS     'pi' user password (default: DEFAULT_PASSWORD)
 #   --extend-size-mb=N  Image extension applied by sdm in the base stage
@@ -88,7 +90,7 @@ stage_banner() { echo ""; echo "================================================
 # ------------------------------------------------------------------------------
 BOARD="" VARIANT="" VERSION="" PASSWORD="" WORKSPACE=""
 ARG_BASEIMAGE="" ARG_IMAGE_URL="" ARG_START_FROM="" ARG_REPOBINS="" ARG_FLASH=""
-ARG_SOURCES_DIR="" ARG_OUTPUT_DIR="" ARG_EXTEND_SIZE="" ARG_BASE_PROFILE=""
+ARG_SOURCES_DIR="" ARG_OUTPUT_DIR="" ARG_EXTEND_SIZE="" ARG_BASE_PROFILE="" ARG_LAYOUT=""
 SKIP_BASE=0 SKIP_KERNEL=0 SKIP_APPS=0
 FORCE_BASE=0 FORCE_KERNEL=0 FORCE_APPS=0
 DRY_RUN=0 OFFLINE=0 KEEP_BUILD_DEPS=0 DEBUG=0 LIST_BOARDS=0
@@ -99,6 +101,7 @@ for arg in "$@"; do
     case "$arg" in
         --board=*)      BOARD="${arg#*=}" ;;
         --variant=*)    VARIANT="${arg#*=}" ;;
+        --layout=*)     ARG_LAYOUT="${arg#*=}" ;;
         --version=*)    VERSION="${arg#*=}" ;;
         --password=*)   PASSWORD="${arg#*=}" ;;
         --workspace=*)  WORKSPACE="${arg#*=}" ;;
@@ -161,6 +164,9 @@ RUNTIME_DEPS="none" BUILD_DEPS="none" HOOK_LIST=""
 KERNEL=0 KERNEL_BRANCH="" KERNEL_CONFIG="" DRIVERS_DIR="" SOURCES=""
 BASE_PROFILE="" APPS_EXTEND_SIZE_MB=0 EXPAND_ROOT=1 REQUIRE_PASSWORD=0
 DATA_PARTITION_MB=0 POST_IMAGE_HOOK=""
+AB_LAYOUT=0 AB_IMAGE_SIZE_MB=15000 AB_BOOT_PARTITION_MB=256
+AB_ROOT_PARTITION_MB=5120 AB_FACTORY_PARTITION_MB=2048
+SLOT_COMPATIBLE_BOARDS="pi4,pi5"
 if [ $PROFILE_ONLY -eq 0 ]; then
     BOARD_DIR="$BOARD_CONFIGS_DIR/$BOARD"
     BOARD_CONF="$BOARD_DIR/board.conf"
@@ -189,6 +195,12 @@ EXPAND_ROOT="$(resolve_cfg EXPAND_ROOT)"
 REQUIRE_PASSWORD="$(resolve_cfg REQUIRE_PASSWORD)"
 DATA_PARTITION_MB="$(resolve_cfg DATA_PARTITION_MB)"
 POST_IMAGE_HOOK="$(resolve_cfg POST_IMAGE_HOOK)"
+AB_LAYOUT="$(resolve_cfg AB_LAYOUT)"
+AB_IMAGE_SIZE_MB="$(resolve_cfg AB_IMAGE_SIZE_MB)"
+AB_BOOT_PARTITION_MB="$(resolve_cfg AB_BOOT_PARTITION_MB)"
+AB_ROOT_PARTITION_MB="$(resolve_cfg AB_ROOT_PARTITION_MB)"
+AB_FACTORY_PARTITION_MB="$(resolve_cfg AB_FACTORY_PARTITION_MB)"
+SLOT_COMPATIBLE_BOARDS="$(resolve_cfg SLOT_COMPATIBLE_BOARDS)"
 IMAGE_URL_CFG="$(resolve_cfg IMAGE_URL)"
 
 # Base profile: several boards can share one base image (vanilla + common apt
@@ -226,6 +238,13 @@ fi
 
 [ -n "$ARG_EXTEND_SIZE" ] && EXTEND_SIZE_MB="$ARG_EXTEND_SIZE"
 [ -n "$ARG_IMAGE_URL" ] && IMAGE_URL_CFG="$ARG_IMAGE_URL"
+if [ -n "$ARG_LAYOUT" ]; then
+    case "$ARG_LAYOUT" in
+        single) AB_LAYOUT=0 ;;
+        ab) AB_LAYOUT=1 ;;
+        *) die "--layout must be 'single' or 'ab'" ;;
+    esac
+fi
 VERSION="${VERSION:-$DEFAULT_VERSION}"
 PASSWORD="${PASSWORD:-$DEFAULT_PASSWORD}"
 
@@ -251,6 +270,12 @@ case "$REQUIRE_PASSWORD" in
     *) die "REQUIRE_PASSWORD must be 0 or 1 in $BOARD_CONF" ;;
 esac
 [[ "$DATA_PARTITION_MB" =~ ^[0-9]+$ ]] || die "DATA_PARTITION_MB must be a non-negative integer in $BOARD_CONF"
+case "$AB_LAYOUT" in 0|1) ;; *) die "AB_LAYOUT must be 0 or 1 in $BOARD_CONF" ;; esac
+for _ab_size in "$AB_IMAGE_SIZE_MB" "$AB_BOOT_PARTITION_MB" "$AB_ROOT_PARTITION_MB" "$AB_FACTORY_PARTITION_MB"; do
+    [[ "$_ab_size" =~ ^[1-9][0-9]*$ ]] || die "A/B partition sizes must be positive integers in $BOARD_CONF"
+done
+unset _ab_size
+if [ "$AB_LAYOUT" = "1" ]; then IMAGE_LAYOUT=ab; else IMAGE_LAYOUT=single; fi
 [ "$REQUIRE_PASSWORD" = "0" ] || [ -n "$PASSWORD" ] || \
     die "Board $BOARD requires an explicit --password=PASS for its development SSH account"
 
@@ -452,7 +477,7 @@ git_remote_rev() {
 
 apps_stamp_inputs() {
     parse_hook_list "$HOOK_LIST"
-    local in=("apps-v3" "version:$VERSION" "input:$APPS_INPUT_STAMP" "apps-extend:$APPS_EXTEND_SIZE_MB" "expand-root:$EXPAND_ROOT" "data-partition-mb:$DATA_PARTITION_MB" "pw:$PASSWORD")
+    local in=("apps-v4" "version:$VERSION" "input:$APPS_INPUT_STAMP" "apps-extend:$APPS_EXTEND_SIZE_MB" "expand-root:$EXPAND_ROOT" "data-partition-mb:$DATA_PARTITION_MB" "ab-layout:$AB_LAYOUT" "ab-image-mb:$AB_IMAGE_SIZE_MB" "ab-boot-mb:$AB_BOOT_PARTITION_MB" "ab-root-mb:$AB_ROOT_PARTITION_MB" "ab-factory-mb:$AB_FACTORY_PARTITION_MB" "slot-boards:$SLOT_COMPATIBLE_BOARDS" "pw:$PASSWORD")
     [ "$HOOK_LIST" != "none" ] && [ -n "$HOOK_LIST" ] && in+=("file:$HOOK_LIST")
     local h d entry url ref
     for h in "${HOOK_SCRIPTS[@]}"; do in+=("file:$h"); done
@@ -517,6 +542,12 @@ preflight() {
     fi
     if [ "$POST_IMAGE_HOOK" != "none" ] && [ -n "$POST_IMAGE_HOOK" ]; then
         [ -f "$POST_IMAGE_HOOK" ] && pf_ok "post-image hook: $POST_IMAGE_HOOK" || pf_fail "post-image hook missing: $POST_IMAGE_HOOK"
+    fi
+    if [ "$AB_LAYOUT" = "1" ]; then
+        for tool in sfdisk fdisk partx mkfs.ext4 mkfs.vfat e2fsck resize2fs e2label blkid blockdev mount; do
+            command -v "$tool" >/dev/null 2>&1 && pf_ok "A/B layout tool: $tool" \
+                || pf_fail "A/B layout tool not found: $tool"
+        done
     fi
 
     # Base profile files and hooks
@@ -830,7 +861,13 @@ run_post_image_hook() {
     [ -f "$POST_IMAGE_HOOK" ] || die "Post-image hook missing: $POST_IMAGE_HOOK"
     stage_banner "Stage 4: Post-image layout"
     IMAGE_PATH="$FINAL_IMG" BOARD="$BOARD" BOARD_DIR="$BOARD_DIR" \
-        DATA_PARTITION_MB="$DATA_PARTITION_MB" bash "$POST_IMAGE_HOOK"
+        DATA_PARTITION_MB="$DATA_PARTITION_MB" AB_LAYOUT="$AB_LAYOUT" \
+        AB_IMAGE_SIZE_MB="$AB_IMAGE_SIZE_MB" \
+        AB_BOOT_PARTITION_MB="$AB_BOOT_PARTITION_MB" \
+        AB_ROOT_PARTITION_MB="$AB_ROOT_PARTITION_MB" \
+        AB_FACTORY_PARTITION_MB="$AB_FACTORY_PARTITION_MB" \
+        SLOT_COMPATIBLE_BOARDS="$SLOT_COMPATIBLE_BOARDS" \
+        bash "$POST_IMAGE_HOOK"
 }
 
 # ------------------------------------------------------------------------------
@@ -866,6 +903,7 @@ plan_stage() { # $1=name $2=skip-flag $3=force-flag $4=stamp-file $5=hash $6=out
 show_plan() {
     stage_banner "Build plan (dry run)"
     echo "  board:     $BOARD${VARIANT:+ ($VARIANT)}"
+    echo "  layout:    $IMAGE_LAYOUT"
     echo "  version:   $VERSION"
     echo "  workspace: $WORKSPACE"
     echo "  vanilla:   $VANILLA_XZ"
@@ -894,7 +932,7 @@ show_plan() {
 # ------------------------------------------------------------------------------
 main() {
     log "misc-tools unified image builder"
-    info "board=$BOARD${VARIANT:+ variant=$VARIANT} version=$VERSION workspace=$WORKSPACE"
+    info "board=$BOARD${VARIANT:+ variant=$VARIANT} layout=$IMAGE_LAYOUT version=$VERSION workspace=$WORKSPACE"
 
     setup_git_credentials   # one-shot GIT_USERNAME/GIT_TOKEN, if provided
     preflight

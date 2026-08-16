@@ -7,6 +7,39 @@ with:
 sudo ./build-image.sh --board=micropanel-touch --version=00.10
 ```
 
+## A/B Stage 1 layout
+
+The normal command above deliberately remains the established single-slot
+image during the transition.  Build the in-system-update foundation with the
+explicit A/B option instead:
+
+```sh
+sudo ./build-image.sh --board=micropanel-touch --variant=luckfox-ctp \
+  --layout=ab --version=00.13
+```
+
+The A/B artifact is fixed at 15,000 MiB, so flash it only to a nominal 16 GB
+or larger card.  It has an MBR table with `MP_BOOT_A` (p1), reserved empty
+`MP_BOOT_B` (p2), an extended p3, roots `MP_ROOT_A` (p5) and `MP_ROOT_B`
+(p6), empty `MP_FACTORY` (p7), and the remaining `MICROPANEL_DATA` p8.
+The builder preserves and expands the completed source image's data
+filesystem into p8; it must never create a blank replacement for that state.
+
+Before flashing an A/B artifact, run the read-only host check as root:
+
+```sh
+sudo board-configs/micropanel-touch/packages/verify-ab-image-layout.sh \
+  /path/to/micropanel-touch-luckfox-ctp-00.13.img
+```
+
+On a freshly flashed A/B image only slot A is populated.  `MP_ROOT_B` and
+`MP_FACTORY` are intentionally empty reserves; do not `tryboot` B until a
+payload or the Stage 1 manual-population acceptance procedure has filled it.
+The boot selector's normal A path is source-compatible `config.txt`; its
+`tryboot.txt` is the full configuration with `os_prefix=B/`.  This is the
+accepted Pi 4 fixture, rather than a `[tryboot]` section embedded in
+`config.txt`.
+
 The command above remains the verified PiScreen ILI9486/ADS7846 image. For
 the separately verified Luckfox **3.5-RPi-LCD-CTP** (ST7796S display and GT911
 touch) build the opt-in variant instead:
@@ -53,9 +86,10 @@ The development image uses the build system's standard Pi-user password when
 the password or an apps hook changed, retain the completed base image and
 rebuild just apps with `--skip-base`.
 
-Before flashing, inspect the result with a loop device or `fdisk -l`: it must
-have boot (`p1`), authored root (`p2`), and the `MICROPANEL_DATA` ext4 data
-partition (`p3`). The image must not carry an `expand-root` first-boot action.
+Before flashing a normal single-slot image, inspect the result with a loop
+device or `fdisk -l`: it must have boot (`p1`), authored root (`p2`), and the
+`MICROPANEL_DATA` ext4 data partition (`p3`). The image must not carry an
+`expand-root` first-boot action. Use the A/B verifier above for an A/B image.
 
 On the first hardware boot, verify:
 
@@ -81,7 +115,8 @@ systemctl --failed --no-pager
 
 Hardware acceptance confirms the overlay-backed root, two active appliance
 services, no failed units, a `0600` broker socket owned by
-`micropanel-touch`, `/data` as direct p3 `ext4`, and a data-backed
+`micropanel-touch`, `/data` as the direct label-backed data `ext4` partition
+(p3 on a single-slot image; p8 on an A/B image), and a data-backed
 NetworkManager profile directory. Its root command line contains
 `overlayroot=tmpfs:recurse=0`. `/boot/firmware` must be mounted read-only;
 `/proc/swaps` must show only its header and `dphys-swapfile` must be disabled.
@@ -119,7 +154,8 @@ broker-applied NetworkManager change still needs its own post-reboot test.
 The NetworkManager polkit rule intentionally requires the non-root `pi` account
 to use `sudo` for direct mutation; the appliance's intended mutation route is
 the typed broker. A first approved static-IP test on `eth0` found a broker
-cancellation-flag defect: the profile was saved to p3 and activated, but the
+cancellation-flag defect: the profile was saved to the persistent data
+partition and activated, but the
 broker falsely returned `cancelled`; DHCP was restored directly. The pinned
 follow-up fixes that flag. Flash it, then use the broker to apply static IPv4
 matching the current address, reboot and verify the `manual` profile, apply

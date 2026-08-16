@@ -2,8 +2,10 @@
 
 `micropanel-touch` is an overlay-root appliance. Its root filesystem and boot
 filesystem are deliberately disposable; `/data` is the only durable local
-write target and is the direct `MICROPANEL_DATA` ext4 partition. This document
-is the release inventory for every stateful path in the board image.
+write target and is the direct `MICROPANEL_DATA` ext4 partition. The
+single-slot image places it at p3; the opt-in A/B layout keeps the same label
+and contract at p8. This document is the release inventory for every stateful
+path in the board image.
 
 ## Durable state on `/data`
 
@@ -47,7 +49,8 @@ older data volume.
 
 No HMI or handler may treat `/boot/firmware`, the lower root image, or an
 arbitrary path below `/` as durable state. The persistent data mount is
-`nofail` so a damaged or absent p3 does not prevent boot. In that case the HMI
+`nofail` so a damaged or absent data partition (p3 single-slot; p8 A/B) does
+not prevent boot. In that case the HMI
 uses its documented in-memory defaults, the system identity remains the random
 systemd transient identity for that boot (never the build machine's ID), and
 the lower-image SSH keys are only a recovery fallback. Such a boot is not

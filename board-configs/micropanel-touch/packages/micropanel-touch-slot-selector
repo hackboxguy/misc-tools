@@ -1,0 +1,93 @@
+#!/bin/bash
+# Minimal SD-card selector backend for MicroPanel Touch A/B images.
+#
+# The updater and its commit service are added later.  This backend is shipped
+# now so they share one exact implementation of the selector-file protocol.
+set -euo pipefail
+
+boot_dir=${MICROPANEL_BOOT_DIR:-/boot/firmware}
+template=${MICROPANEL_BOOT_CONFIG_TEMPLATE:-/usr/lib/micropanel-touch/boot-selector-config.base}
+
+usage() {
+    cat >&2 <<'EOF'
+Usage: micropanel-touch-slot-selector current-slot
+       micropanel-touch-slot-selector arm-candidate A|B
+       micropanel-touch-slot-selector commit A|B
+EOF
+    exit 2
+}
+
+slot_arg() {
+    case ${1:-} in
+        A|B) printf '%s\n' "$1" ;;
+        *) echo "ERROR: slot must be A or B" >&2; usage ;;
+    esac
+}
+
+current_slot() {
+    case " $(cat /proc/cmdline) " in
+        *' root=LABEL=MP_ROOT_A '*) printf 'A\n' ;;
+        *' root=LABEL=MP_ROOT_B '*) printf 'B\n' ;;
+        *) echo "ERROR: active root is not an A/B MicroPanel slot" >&2; exit 1 ;;
+    esac
+}
+
+render_config() { # $1=slot $2=normal (0/1)
+    local slot=$1 normal=$2
+    [ -r "$template" ] || { echo "ERROR: selector template unavailable: $template" >&2; exit 1; }
+    # The accepted Stage 0 fixture leaves normal A at the boot-root paths.
+    # All other selections use a self-contained os_prefix directory.
+    if [ "$normal" != 1 ] || [ "$slot" != A ]; then
+        printf 'os_prefix=%s/\n' "$slot"
+    fi
+    cat "$template"
+}
+
+boot_was_rw=0
+restore_boot_ro() {
+    local status=$?
+    if [ "$boot_was_rw" = 1 ]; then
+        mount -o remount,ro "$boot_dir" || true
+    fi
+    exit "$status"
+}
+
+make_boot_writable() {
+    [ -d "$boot_dir" ] || { echo "ERROR: boot directory missing: $boot_dir" >&2; exit 1; }
+    mountpoint -q "$boot_dir" || { echo "ERROR: boot directory is not mounted: $boot_dir" >&2; exit 1; }
+    mount -o remount,rw "$boot_dir"
+    boot_was_rw=1
+    trap restore_boot_ro EXIT HUP INT TERM
+}
+
+replace_config() { # $1=destination $2=slot $3=normal
+    local destination=$1 slot=$2 normal=$3 temporary
+    temporary=$(mktemp "$boot_dir/.${destination}.XXXXXX")
+    render_config "$slot" "$normal" > "$temporary"
+    sync "$temporary"
+    mv -f "$temporary" "$boot_dir/$destination"
+    sync "$boot_dir/$destination"
+}
+
+[ "$#" -ge 1 ] || usage
+case "$1" in
+    current-slot)
+        [ "$#" -eq 1 ] || usage
+        current_slot
+        ;;
+    arm-candidate)
+        [ "$#" -eq 2 ] || usage
+        candidate=$(slot_arg "$2")
+        make_boot_writable
+        replace_config tryboot.txt "$candidate" 0
+        ;;
+    commit)
+        [ "$#" -eq 2 ] || usage
+        selected=$(slot_arg "$2")
+        if [ "$selected" = A ]; then other=B; else other=A; fi
+        make_boot_writable
+        replace_config config.txt "$selected" 1
+        replace_config tryboot.txt "$other" 0
+        ;;
+    *) usage ;;
+esac

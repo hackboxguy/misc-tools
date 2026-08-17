@@ -158,6 +158,10 @@ seed_network_connections() { # $1=root mount; $2=data mount
     if [ -d "$network_connections" ]; then
         cp -a "$network_connections/." "$2/NetworkManager/system-connections/"
     fi
+    # `cp -a DIR/. DEST/` can apply the authored root directory's mode to
+    # DEST. Reassert NetworkManager's keyfile-directory requirement after the
+    # copy, not merely when the data skeleton is first created.
+    install -d -m0700 -o root -g root "$2/NetworkManager/system-connections"
 }
 
 replace_data_fstab_single() { # $1=root mount; $2=data PARTUUID

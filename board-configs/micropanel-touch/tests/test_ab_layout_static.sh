@@ -24,6 +24,7 @@ printf '%s\n' "$plan" | grep -Fqx 'tryboot_selector=os_prefix=B/'
 # apps image is authored. Its A/B branch must create, rather than expect, p8.
 grep -Fqx "    [ \"\$partition_count\" -eq 2 ] || {" "$finalizer"
 grep -Fqx "    seed_network_connections \"\$root_mount\" \"\$data_mount\"" "$finalizer"
+grep -Fqx "    install -d -m0700 -o root -g root \"\$2/NetworkManager/system-connections\"" "$finalizer"
 
 "$builder" --help | grep -Fq -- '--layout=MODE'
 if "$builder" --board=micropanel-touch --layout=invalid --dry-run >/dev/null 2>&1; then

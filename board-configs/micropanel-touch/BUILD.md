@@ -65,8 +65,8 @@ successful `Created update payload` message before copying anything to USB.
 An update streams directly into the inactive root partition, then reboots into
 that candidate once. Do not remove power while the display says it is writing.
 After candidate boot, the appliance waits for its HMI, broker, `/data`, and a
-rendered first frame to remain healthy for 30 seconds before committing. If a
-candidate does not return within three minutes, remove and reapply power: the
+rendered first frame to remain healthy without an HMI restart for 30 seconds
+before committing. If a candidate does not return, remove and reapply power: the
 one-shot candidate is abandoned and the previously committed slot returns.
 Every published payload must first complete a Pi 4 + Luckfox CTP bench boot
 acceptance.

@@ -253,6 +253,7 @@ mkdir -p "$destination/share/micropanel-touch"
 cat > "$destination/share/micropanel-touch/image-manifest.env" <<EOF
 MICROPANEL_TOUCH_REVISION=$revision
 LVGL_REVISION=$(git -C "$source_root/external/lvgl" rev-parse HEAD)
+PANEL_VARIANT=piscreen
 EOF
 
 rm -rf "$source_root"

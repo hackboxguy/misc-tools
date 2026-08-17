@@ -13,7 +13,7 @@ payload_generator="$repo_root/board-configs/micropanel-touch/packages/make-ab-up
     echo "ERROR: run as root so the fixture can use loop partitions" >&2
     exit 1
 }
-for tool in truncate sfdisk losetup mkfs.vfat mkfs.ext4 mount umount mountpoint install sync; do
+for tool in truncate sfdisk losetup mkfs.vfat mkfs.ext4 mount umount mountpoint install sync dd tr xz tar sha256sum wc; do
     command -v "$tool" >/dev/null 2>&1 || {
         echo "ERROR: missing host tool: $tool" >&2
         exit 1
@@ -89,7 +89,7 @@ printf '%s\n' \
     'PARTUUID=fixture-root / ext4 defaults 0 1' \
     'PARTUUID=fixture-boot /boot/firmware vfat defaults 0 2' \
     > "$source_root_mount/etc/fstab"
-printf '%s\n' 'IMAGE_VERSION=fixture' > "$manifest"
+printf '%s\n' 'IMAGE_VERSION=fixture' 'PANEL_VARIANT=piscreen' > "$manifest"
 printf '%s\n' '[connection]' 'id=fixture' > "$source_root_mount/etc/NetworkManager/system-connections/fixture.nmconnection"
 chmod 0600 "$source_root_mount/etc/NetworkManager/system-connections/fixture.nmconnection"
 chmod 0700 "$source_root_mount/etc/NetworkManager/system-connections"
@@ -132,6 +132,10 @@ boot_sha256=$(awk -F= '$1 == "boot_sha256" {print $2}' "$manifest")
 [[ "$boot_sha256" =~ ^[0-9a-f]{64}$ ]]
 [ "$(xz -dc "$rootfs" | sha256sum | awk '{print $1}')" = "$rootfs_sha256" ]
 [ "$(xz -dc "$rootfs" | wc -c | tr -d '[:space:]')" = "$rootfs_bytes" ]
+[ -z "$(xz -dc "$rootfs" | dd bs=1 skip=$((1024 + 0x78)) count=16 status=none | tr -d '\000')" ] || {
+    echo 'ERROR: payload rootfs retained its source-slot ext4 label' >&2
+    exit 1
+}
 [ "$(sha256sum "$boot_tar" | awk '{print $1}')" = "$boot_sha256" ]
 tar -tf "$boot_tar" | grep -Fqx './cmdline.txt.template'
 if tar -tf "$boot_tar" | grep -Fqx './cmdline.txt'; then

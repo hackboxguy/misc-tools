@@ -149,6 +149,8 @@ require grep -Fq 'IMAGE_LAYOUT=ab' \
     "$root_a_mount/opt/micropanel-touch/share/micropanel-touch/image-manifest.env"
 require grep -Fq 'SLOT_COMPATIBLE_BOARDS=pi4' \
     "$root_a_mount/opt/micropanel-touch/share/micropanel-touch/image-manifest.env"
+require grep -Eq '^PANEL_VARIANT=[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' \
+    "$root_a_mount/opt/micropanel-touch/share/micropanel-touch/image-manifest.env"
 
 for directory in micropanel-touch micropanel-touch/logs micropanel-touch/ssh-host-keys \
                  micropanel-touch-system micropanel-touch-network/dhcp-server \

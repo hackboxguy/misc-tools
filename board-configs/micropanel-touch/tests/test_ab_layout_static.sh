@@ -49,8 +49,13 @@ grep -Fq 'for tool in sfdisk fdisk mkfs.ext4 mkfs.vfat e2fsck resize2fs e2label 
 grep -Fq "bash \"\$ab_static_test\"" "$builder"
 grep -Fq -- '--payload requires --layout=ab' "$builder"
 grep -Fq 'make-ab-update-payload.sh' "$builder"
+grep -Fq 'PAYLOAD_VARIANT="${VARIANT:-${DEFAULT_PANEL_VARIANT:-default}}"' "$builder"
 grep -Fq 'root=LABEL=@MICROPANEL_SLOT@' "$payload_generator"
-grep -Fq 'tee >(sha256sum' "$payload_generator"
+grep -Fq 'stream_label_neutral_rootfs' "$payload_generator"
+grep -Fq 'mkfifo "$hash_fifo" "$count_fifo"' "$payload_generator"
+grep -Fq 'wait "$hash_pid"' "$payload_generator"
+grep -Fq 'PANEL_VARIANT=piscreen' "$repo_root/board-configs/micropanel-touch/packages/micropanel-touch-hook.sh"
+grep -Fqx 'DEFAULT_PANEL_VARIANT=piscreen' "$repo_root/board-configs/micropanel-touch/board.conf"
 
 template=$(mktemp)
 trap 'rm -f "$template"' EXIT HUP INT TERM

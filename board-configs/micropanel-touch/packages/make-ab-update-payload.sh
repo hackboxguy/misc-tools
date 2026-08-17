@@ -47,7 +47,7 @@ safe_token "$version" || { echo 'ERROR: --version must be a safe release token' 
 safe_token "$variant" || { echo 'ERROR: --variant must be a safe release token' >&2; exit 1; }
 safe_boards "$boards" || { echo 'ERROR: --boards must be a comma-separated board allow-list' >&2; exit 1; }
 
-for tool in losetup mount umount mountpoint mktemp dd tee sha256sum xz tar sed awk stat install mv rm sync \
+for tool in losetup mount umount mountpoint mktemp mkfifo dd tee sha256sum xz tar sed awk stat install mv rm sync \
             blkid blockdev wc tr cp mkdir sleep; do
     command -v "$tool" >/dev/null 2>&1 || {
         echo "ERROR: required host tool is missing: $tool" >&2
@@ -61,14 +61,21 @@ work=""
 rootfs_publish=""
 boot_tar_publish=""
 manifest_publish=""
+hash_fifo=""
+count_fifo=""
+hash_pid=""
+count_pid=""
 
 cleanup() {
     local status=$?
+    [ -z "$hash_pid" ] || wait "$hash_pid" 2>/dev/null || true
+    [ -z "$count_pid" ] || wait "$count_pid" 2>/dev/null || true
     if [ -n "$boot_mount" ] && mountpoint -q "$boot_mount"; then
         umount "$boot_mount" || true
     fi
     [ -z "$loop" ] || losetup -d "$loop" 2>/dev/null || true
     rm -f -- "$rootfs_publish" "$boot_tar_publish" "$manifest_publish"
+    rm -f -- "$hash_fifo" "$count_fifo"
     [ -z "$work" ] || rm -rf "$work"
     exit "$status"
 }
@@ -102,6 +109,10 @@ install -d "$boot_mount" "$work/boot-tree"
 mount -o ro "${loop}p1" "$boot_mount"
 [ -d "$boot_mount/A" ] || { echo 'ERROR: A/B image has no A boot tree' >&2; exit 1; }
 [ -f "$boot_mount/A/cmdline.txt" ] || { echo 'ERROR: A boot tree has no cmdline.txt' >&2; exit 1; }
+[ "$(wc -l < "$boot_mount/A/cmdline.txt")" -eq 1 ] || {
+    echo 'ERROR: A cmdline must contain exactly one line' >&2
+    exit 1
+}
 
 # The release payload must not inherit its source slot's root label.  Keep
 # every other cmdline token byte-for-byte, but require exactly one root token
@@ -134,19 +145,44 @@ rootfs_digest="$work/rootfs.sha256"
 rootfs_count="$work/rootfs.bytes"
 rootfs_bytes=$(blockdev --getsize64 "${loop}p5")
 
+# ext4's primary superblock begins at byte 1024 and s_volume_name is the
+# 16-byte field at superblock offset 0x78.  Blank it in the release artifact
+# so copying A's root into B can never create a second MP_ROOT_A label.  The
+# device handler applies its target label only after the artifact hash passes.
+ext4_volume_label_offset=$((1024 + 0x78))
+ext4_volume_label_size=16
+ext4_after_label_offset=$((ext4_volume_label_offset + ext4_volume_label_size))
+
+stream_label_neutral_rootfs() {
+    dd if="${loop}p5" bs=1 count="$ext4_volume_label_offset" status=none
+    dd if=/dev/zero bs=1 count="$ext4_volume_label_size" status=none
+    dd if="${loop}p5" bs=8M iflag=skip_bytes skip="$ext4_after_label_offset" status=progress
+}
+
 # The only multi-gigabyte data path is this pipeline.  tee feeds the hasher
-# and byte counter while xz writes the release artifact; it never stages an
-# uncompressed rootfs in RAM or on the host filesystem.
+# and byte counter through explicitly waited-for FIFOs while xz writes the
+# release artifact; it never stages an uncompressed rootfs in RAM or on the
+# host filesystem.
+hash_fifo="$work/rootfs-hash.fifo"
+count_fifo="$work/rootfs-count.fifo"
+mkfifo "$hash_fifo" "$count_fifo"
+sha256sum < "$hash_fifo" | awk '{print $1}' > "$rootfs_digest" & hash_pid=$!
+wc -c < "$count_fifo" > "$rootfs_count" & count_pid=$!
 set +e
 set -o pipefail
-dd if="${loop}p5" bs=8M status=progress | \
-    tee >(sha256sum | awk '{print $1}' > "$rootfs_digest") \
-        >(wc -c > "$rootfs_count") | \
+stream_label_neutral_rootfs | tee "$hash_fifo" "$count_fifo" | \
     xz --threads=0 --check=crc64 --lzma2=dict=64MiB --stdout > "$rootfs_tmp"
 pipeline_status=$?
-wait
+wait "$hash_pid"; hash_status=$?; hash_pid=""
+wait "$count_pid"; count_status=$?; count_pid=""
 set -e
-[ "$pipeline_status" -eq 0 ] || { echo 'ERROR: rootfs compression pipeline failed' >&2; exit 1; }
+[ "$pipeline_status" -eq 0 ] && [ "$hash_status" -eq 0 ] && [ "$count_status" -eq 0 ] || {
+    echo 'ERROR: rootfs compression pipeline failed' >&2
+    exit 1
+}
+rm -f -- "$hash_fifo" "$count_fifo"
+hash_fifo=""
+count_fifo=""
 rootfs_sha256=$(cat "$rootfs_digest")
 actual_rootfs_bytes=$(tr -d '[:space:]' < "$rootfs_count")
 [[ "$rootfs_sha256" =~ ^[0-9a-f]{64}$ ]] || { echo 'ERROR: invalid rootfs digest' >&2; exit 1; }

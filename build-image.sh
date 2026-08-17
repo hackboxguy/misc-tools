@@ -371,7 +371,11 @@ if [ -n "$ARG_START_FROM" ]; then
 else
     FINAL_IMG="$OUT_DIR/$VANILLA_STEM-$ARTIFACT_ID-$VERSION.img"
 fi
-PAYLOAD_PREFIX="micropanel-touch-${VERSION}-${VARIANT:-default}"
+# A board may name its default panel separately from the empty command-line
+# variant.  MicroPanel Touch's base PiScreen image is `piscreen`, while an
+# explicit --variant continues to name its own payload/manifest variant.
+PAYLOAD_VARIANT="${VARIANT:-${DEFAULT_PANEL_VARIANT:-default}}"
+PAYLOAD_PREFIX="micropanel-touch-${VERSION}-${PAYLOAD_VARIANT}"
 PAYLOAD_MANIFEST="$PAYLOAD_DIR/$PAYLOAD_PREFIX.manifest"
 PAYLOAD_GENERATOR="$BOARD_DIR/packages/make-ab-update-payload.sh"
 
@@ -927,7 +931,7 @@ run_payload() {
         --image="$FINAL_IMG" \
         --output-dir="$PAYLOAD_DIR" \
         --version="$VERSION" \
-        --variant="${VARIANT:-default}" \
+        --variant="$PAYLOAD_VARIANT" \
         --boards="$SLOT_COMPATIBLE_BOARDS"
     own_by_user "$PAYLOAD_DIR"
 }

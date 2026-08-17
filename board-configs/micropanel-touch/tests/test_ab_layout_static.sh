@@ -6,9 +6,11 @@ finalizer="$repo_root/board-configs/micropanel-touch/packages/finalize-image-lay
 selector="$repo_root/board-configs/micropanel-touch/packages/micropanel-touch-slot-selector"
 skeleton="$repo_root/board-configs/micropanel-touch/packages/micropanel-touch-data-skeleton.sh"
 verifier="$repo_root/board-configs/micropanel-touch/packages/verify-ab-image-layout.sh"
+payload_generator="$repo_root/board-configs/micropanel-touch/packages/make-ab-update-payload.sh"
 builder="$repo_root/build-image.sh"
 
-bash -n "$finalizer" "$selector" "$skeleton" "$verifier" "$builder"
+bash -n "$finalizer" "$selector" "$skeleton" "$verifier" "$payload_generator" "$builder"
+[ -x "$payload_generator" ] || { echo "missing payload generator: $payload_generator" >&2; exit 1; }
 
 plan=$(AB_IMAGE_SIZE_MB=15000 "$finalizer" --print-ab-layout)
 printf '%s\n' "$plan" | grep -Fqx 'layout=ab'
@@ -34,6 +36,7 @@ if grep -Fq "'LABEL=MP_ROOT_A / ext4" "$finalizer"; then
 fi
 
 "$builder" --help | grep -Fq -- '--layout=MODE'
+"$builder" --help | grep -Fq -- '--payload'
 if "$builder" --board=micropanel-touch --layout=invalid --dry-run >/dev/null 2>&1; then
     echo 'invalid --layout was accepted' >&2
     exit 1
@@ -44,6 +47,10 @@ grep -Fqx 'xz-utils' "$repo_root/board-configs/micropanel-touch/runtime-deps.txt
 grep -Fq 'requires EXPAND_ROOT=0; first-boot root expansion would corrupt the A/B partition layout' "$builder"
 grep -Fq 'for tool in sfdisk fdisk mkfs.ext4 mkfs.vfat e2fsck resize2fs e2label blkid blockdev mount; do' "$builder"
 grep -Fq "bash \"\$ab_static_test\"" "$builder"
+grep -Fq -- '--payload requires --layout=ab' "$builder"
+grep -Fq 'make-ab-update-payload.sh' "$builder"
+grep -Fq 'root=LABEL=@MICROPANEL_SLOT@' "$payload_generator"
+grep -Fq 'tee >(sha256sum' "$payload_generator"
 
 template=$(mktemp)
 trap 'rm -f "$template"' EXIT HUP INT TERM

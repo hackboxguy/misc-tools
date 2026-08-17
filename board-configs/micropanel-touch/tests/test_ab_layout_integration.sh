@@ -7,6 +7,7 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "$0")/../../.." && pwd)
 finalizer="$repo_root/board-configs/micropanel-touch/packages/finalize-image-layout.sh"
 verifier="$repo_root/board-configs/micropanel-touch/packages/verify-ab-image-layout.sh"
+payload_generator="$repo_root/board-configs/micropanel-touch/packages/make-ab-update-payload.sh"
 
 [ "$(id -u)" -eq 0 ] || {
     echo "ERROR: run as root so the fixture can use loop partitions" >&2
@@ -109,4 +110,31 @@ env -u DATA_PARTITION_MB \
     "$finalizer"
 
 "$verifier" "$image"
+"$payload_generator" --image="$image" --output-dir="$work/payload" \
+    --version=fixture-1 --variant=luckfox-ctp --boards=pi4
+
+payload_prefix="$work/payload/micropanel-touch-fixture-1-luckfox-ctp"
+manifest="$payload_prefix.manifest"
+rootfs="$payload_prefix.rootfs.img.xz"
+boot_tar="$payload_prefix.boot.tar"
+[ -f "$manifest" ] && [ -f "$rootfs" ] && [ -f "$boot_tar" ]
+grep -Fqx 'version=fixture-1' "$manifest"
+grep -Fqx 'variant=luckfox-ctp' "$manifest"
+grep -Fqx 'boards=pi4' "$manifest"
+grep -Fqx 'format=1' "$manifest"
+rootfs_sha256=$(awk -F= '$1 == "rootfs_sha256" {print $2}' "$manifest")
+rootfs_bytes=$(awk -F= '$1 == "rootfs_bytes" {print $2}' "$manifest")
+boot_sha256=$(awk -F= '$1 == "boot_sha256" {print $2}' "$manifest")
+[[ "$rootfs_sha256" =~ ^[0-9a-f]{64}$ ]]
+[[ "$boot_sha256" =~ ^[0-9a-f]{64}$ ]]
+[ "$(xz -dc "$rootfs" | sha256sum | awk '{print $1}')" = "$rootfs_sha256" ]
+[ "$(xz -dc "$rootfs" | wc -c | tr -d '[:space:]')" = "$rootfs_bytes" ]
+[ "$(sha256sum "$boot_tar" | awk '{print $1}')" = "$boot_sha256" ]
+tar -tf "$boot_tar" | grep -Fqx './cmdline.txt.template'
+if tar -tf "$boot_tar" | grep -Fqx './cmdline.txt'; then
+    echo 'ERROR: boot payload retained slot-bound cmdline.txt' >&2
+    exit 1
+fi
+tar -xOf "$boot_tar" ./cmdline.txt.template | tr ' ' '\n' | \
+    grep -Fqx 'root=LABEL=@MICROPANEL_SLOT@'
 echo "A/B finalizer integration test passed"

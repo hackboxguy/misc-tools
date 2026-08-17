@@ -26,6 +26,7 @@ so there is no `/` fstab line that could name the inactive slot. `/boot` and
 | `micropanel-touch/logs/` | HMI account | Action/application logs | Best-effort diagnostics only; never stores secrets. |
 | `micropanel-touch/ssh-host-keys/` | root, `0700` | Persistent SSH host private/public keys | The early key service validates or creates keys, then copies them into volatile `/etc/ssh` before `sshd`. |
 | `/data/micropanel-touch-system/machine-id` | root, `0700` directory; file `0444` | One identity per flashed appliance | An early root service captures systemd's random first-boot ID with atomic replace and fsync, then restores it before D-Bus, NetworkManager, SSH, and the HMI start; it restarts journald before journal flush so journal lookup uses the restored ID. |
+| `/data/micropanel-touch-system/update-state` | root, `0700` directory; file `0600` | A/B updater candidate/committed slot record | The root updater atomically records the candidate before arming tryboot. The root commit service accepts only an exact candidate record on a real tryboot boot, then atomically marks it committed after sustained health; a fallback leaves it uncommitted. |
 | `/data/NetworkManager/system-connections/` | root, `0700` | NetworkManager DHCP/static connection keyfiles | Bind-mounted at the normal `/etc/NetworkManager/system-connections` path. |
 | `/data/micropanel-touch-network/dhcp-server/` | root with HMI group read access, `0750` | Broker-owned dnsmasq server configuration | The privileged handler writes validated configuration; DHCP leases themselves are intentionally volatile. |
 
@@ -41,6 +42,9 @@ older data volume.
   runtime copies of the durable state above.
 - `/run/micropanel-touch/` and the broker socket; it is recreated with its
   service on every boot.
+- `/run/micropanel-touch-ui/first-frame-ready` and the private USB source
+  mount used by a Stage 2 update; both are per-boot evidence/scratch state,
+  never payload staging or durable update state.
 - System journal (journald is restarted before journal flush after durable
   machine-ID restoration so current-boot lookup works), package-manager state,
   cloud-init state, temporary files, NetworkManager DHCP lease database,

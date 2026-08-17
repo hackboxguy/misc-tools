@@ -58,6 +58,9 @@
 #   --dry-run           Preflight checks + build plan only, change nothing
 #   --offline           No downloads/clones/fetches; fail if anything is missing
 #   --flash=/dev/sdX    Write the final image to a block device (asks first)
+#   --payload           Create the unsigned Stage 2 update payload beside an
+#                       A/B image (rootfs.img.xz, boot.tar, manifest)
+#   --payload-dir=DIR   Directory for --payload (default: <output>/payloads)
 #   --keep-build-deps   Pass through to imager (skip build-dep purge)
 #   --debug             Pass --debug to imager (keep mounted on error)
 #   --list-boards       List available board configs and exit
@@ -91,9 +94,10 @@ stage_banner() { echo ""; echo "================================================
 BOARD="" VARIANT="" VERSION="" PASSWORD="" WORKSPACE=""
 ARG_BASEIMAGE="" ARG_IMAGE_URL="" ARG_START_FROM="" ARG_REPOBINS="" ARG_FLASH=""
 ARG_SOURCES_DIR="" ARG_OUTPUT_DIR="" ARG_EXTEND_SIZE="" ARG_BASE_PROFILE="" ARG_LAYOUT=""
+ARG_PAYLOAD_DIR=""
 SKIP_BASE=0 SKIP_KERNEL=0 SKIP_APPS=0
 FORCE_BASE=0 FORCE_KERNEL=0 FORCE_APPS=0
-DRY_RUN=0 OFFLINE=0 KEEP_BUILD_DEPS=0 DEBUG=0 LIST_BOARDS=0
+DRY_RUN=0 OFFLINE=0 KEEP_BUILD_DEPS=0 DEBUG=0 LIST_BOARDS=0 BUILD_PAYLOAD=0
 
 usage() { sed -n '/^# Usage:/,/^# ====/p' "$0" | sed -e 's/^# \{0,1\}//' -e '$d'; exit 0; }
 
@@ -107,6 +111,8 @@ for arg in "$@"; do
         --workspace=*)  WORKSPACE="${arg#*=}" ;;
         --sources-dir=*) ARG_SOURCES_DIR="${arg#*=}" ;;
         --output-dir=*)  ARG_OUTPUT_DIR="${arg#*=}" ;;
+        --payload)       BUILD_PAYLOAD=1 ;;
+        --payload-dir=*) ARG_PAYLOAD_DIR="${arg#*=}" ;;
         --extend-size-mb=*) ARG_EXTEND_SIZE="${arg#*=}" ;;
         --base-profile=*)   ARG_BASE_PROFILE="${arg#*=}" ;;
         --baseimage=*)  ARG_BASEIMAGE="${arg#*=}" ;;
@@ -280,6 +286,8 @@ if [ "$AB_LAYOUT" = "1" ]; then IMAGE_LAYOUT=ab; else IMAGE_LAYOUT=single; fi
     die "--layout=ab requires a board POST_IMAGE_HOOK"
 [ "$AB_LAYOUT" = "0" ] || [ "$EXPAND_ROOT" = "0" ] || \
     die "--layout=ab requires EXPAND_ROOT=0; first-boot root expansion would corrupt the A/B partition layout"
+[ "$BUILD_PAYLOAD" = "0" ] || [ "$AB_LAYOUT" = "1" ] || \
+    die "--payload requires --layout=ab; single-slot images have no inactive update slot"
 [ "$REQUIRE_PASSWORD" = "0" ] || [ -n "$PASSWORD" ] || \
     die "Board $BOARD requires an explicit --password=PASS for its development SSH account"
 
@@ -321,6 +329,8 @@ fi
 KERNEL_DIR="$WORKSPACE/kernel/$BUILD_ID"
 OUT_DIR="${ARG_OUTPUT_DIR:-$WORKSPACE/out/$ARTIFACT_ID}"
 [[ "$OUT_DIR" != /* ]] && OUT_DIR="$(pwd)/$OUT_DIR"
+PAYLOAD_DIR="${ARG_PAYLOAD_DIR:-$OUT_DIR/payloads}"
+[[ "$PAYLOAD_DIR" != /* ]] && PAYLOAD_DIR="$(pwd)/$PAYLOAD_DIR"
 TMP_DIR="$WORKSPACE/tmp"
 
 export REPOBINS="${ARG_REPOBINS:-$SRC_DIR}"
@@ -361,6 +371,9 @@ if [ -n "$ARG_START_FROM" ]; then
 else
     FINAL_IMG="$OUT_DIR/$VANILLA_STEM-$ARTIFACT_ID-$VERSION.img"
 fi
+PAYLOAD_PREFIX="micropanel-touch-${VERSION}-${VARIANT:-default}"
+PAYLOAD_MANIFEST="$PAYLOAD_DIR/$PAYLOAD_PREFIX.manifest"
+PAYLOAD_GENERATOR="$BOARD_DIR/packages/make-ab-update-payload.sh"
 
 # ------------------------------------------------------------------------------
 # Hook-list parsing (for preflight + stamps)
@@ -567,6 +580,14 @@ preflight() {
             fi
         else
             pf_warn "no board-specific A/B static contract test: $ab_static_test"
+        fi
+        if [ "$BUILD_PAYLOAD" = "1" ]; then
+            [ -x "$PAYLOAD_GENERATOR" ] && pf_ok "A/B payload generator: ${PAYLOAD_GENERATOR#"$SCRIPT_DIR"/}" \
+                || pf_fail "A/B payload generator missing or not executable: $PAYLOAD_GENERATOR"
+            for tool in tar xz tee sha256sum; do
+                command -v "$tool" >/dev/null 2>&1 && pf_ok "A/B payload tool: $tool" \
+                    || pf_fail "A/B payload tool not found: $tool"
+            done
         fi
     fi
 
@@ -891,6 +912,27 @@ run_post_image_hook() {
 }
 
 # ------------------------------------------------------------------------------
+# Stage: unsigned A/B update payload
+# ------------------------------------------------------------------------------
+run_payload() {
+    [ "$BUILD_PAYLOAD" = "1" ] || return 0
+    [ -f "$FINAL_IMG" ] || die "Cannot create payload; final image is missing: $FINAL_IMG"
+    [ -x "$PAYLOAD_GENERATOR" ] || die "A/B payload generator is unavailable: $PAYLOAD_GENERATOR"
+    if [ -e "$PAYLOAD_MANIFEST" ]; then
+        die "Payload already exists: $PAYLOAD_MANIFEST (choose a new --version or --payload-dir)"
+    fi
+    stage_banner "Stage 5: A/B update payload"
+    mkdir -p "$PAYLOAD_DIR"
+    "$PAYLOAD_GENERATOR" \
+        --image="$FINAL_IMG" \
+        --output-dir="$PAYLOAD_DIR" \
+        --version="$VERSION" \
+        --variant="${VARIANT:-default}" \
+        --boards="$SLOT_COMPATIBLE_BOARDS"
+    own_by_user "$PAYLOAD_DIR"
+}
+
+# ------------------------------------------------------------------------------
 # Flash
 # ------------------------------------------------------------------------------
 flash_image() {
@@ -943,6 +985,9 @@ show_plan() {
     fi
     resolve_apps_input
     plan_stage "apps" "$SKIP_APPS" "$FORCE_APPS" "$OUT_DIR/.stamp" "$(apps_hash)" "$FINAL_IMG"
+    if [ "$BUILD_PAYLOAD" = "1" ]; then
+        printf "  %-8s %-18s -> %s\n" "payload" "RUN" "$PAYLOAD_MANIFEST"
+    fi
     echo ""
     info "Dry run complete - nothing was changed"
 }
@@ -976,10 +1021,12 @@ main() {
         run_stage_kernel
     fi
     run_stage_apps
+    run_payload
 
     stage_banner "Build complete"
     echo "  Final image: $FINAL_IMG"
     [ -f "$FINAL_IMG" ] && echo "  Size:        $(du -h "$FINAL_IMG" | cut -f1)"
+    [ "$BUILD_PAYLOAD" = "0" ] || echo "  Payload:     $PAYLOAD_MANIFEST"
     echo ""
     echo "  Write to SD card:"
     echo "    sudo dd if=$FINAL_IMG of=/dev/sdX bs=8M status=progress conv=fsync"

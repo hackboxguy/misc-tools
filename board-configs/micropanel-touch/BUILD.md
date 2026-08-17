@@ -38,6 +38,34 @@ The A/B build uses a separate `out/micropanel-touch-luckfox-ctp-ab/`
 directory and an `-ab-` filename infix. This prevents it being mistaken for,
 or overwriting, a same-version single-slot artifact.
 
+### Stage 2 payload output
+
+Add `--payload` to derive the unsigned, slot-neutral update artifacts from
+the same completed A/B image. The root filesystem is compressed only while it
+is read and is never materialized as a second uncompressed host file.
+
+```sh
+sudo ./build-image.sh --board=micropanel-touch --variant=luckfox-ctp \
+  --layout=ab --payload --payload-dir=/srv/micropanel-release/00.15 \
+  --version=00.15
+```
+
+This writes one matching `.rootfs.img.xz`, `.boot.tar`, and `.manifest` under
+the chosen payload directory. Copy all three, without renaming them, to the
+root of one USB filesystem labelled `MICROPANEL_UPDATE`. The Stage 2 UI mounts
+only that labelled filesystem read-only; it rejects a missing, extra, renamed,
+wrong-variant, wrong-board, malformed, or hash-mismatched payload before it
+can arm tryboot.
+
+An update streams directly into the inactive root partition, then reboots into
+that candidate once. Do not remove power while the display says it is writing.
+After candidate boot, the appliance waits for its HMI, broker, `/data`, and a
+rendered first frame to remain healthy for 30 seconds before committing. If a
+candidate does not return within three minutes, remove and reapply power: the
+one-shot candidate is abandoned and the previously committed slot returns.
+Every published payload must first complete a Pi 4 + Luckfox CTP bench boot
+acceptance.
+
 The static A/B contract check runs automatically during an A/B build's
 preflight. The finalizer/verifier integration fixture remains a manual
 pre-flash check and uses only a temporary loopback image:

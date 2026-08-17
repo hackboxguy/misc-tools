@@ -52,10 +52,11 @@ sudo ./build-image.sh --board=micropanel-touch --variant=luckfox-ctp \
 
 This writes one matching `.rootfs.img.xz`, `.boot.tar`, and `.manifest` under
 the chosen payload directory. Copy all three, without renaming them, to the
-root of one USB filesystem labelled `MICROPANEL_UPDATE`. The Stage 2 UI mounts
-only that labelled filesystem read-only; it rejects a missing, extra, renamed,
-wrong-variant, wrong-board, malformed, or hash-mismatched payload before it
-can arm tryboot.
+root of one FAT32 USB filesystem labelled `MP_UPDATE`. FAT32 labels are limited
+to eleven characters; this label is deliberately within that limit. The Stage
+2 UI mounts only that labelled filesystem read-only; it rejects a missing,
+extra, renamed, wrong-variant, wrong-board, malformed, or hash-mismatched
+payload before it can arm tryboot.
 
 An update streams directly into the inactive root partition, then reboots into
 that candidate once. Do not remove power while the display says it is writing.

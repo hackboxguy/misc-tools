@@ -157,10 +157,13 @@ for directory in micropanel-touch micropanel-touch/logs micropanel-touch/ssh-hos
 done
 app_account=$(awk -F: '$1 == "micropanel-touch" { print $3 ":" $4; exit }' "$root_a_mount/etc/passwd")
 case "$app_account" in [0-9]*:[0-9]*) ;; *) echo "ERROR: missing micropanel-touch account in root A" >&2; exit 1 ;; esac
+app_group=${app_account#*:}
 require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel-touch")" = "${app_account}:750"
 require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel-touch/logs")" = "${app_account}:750"
 require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel-touch/ssh-host-keys")" = '0:0:700'
 require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel-touch-system")" = '0:0:700'
+require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel-touch-network")" = "0:${app_group}:750"
+require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel-touch-network/dhcp-server")" = "0:${app_group}:750"
 require test "$(stat -c '%u:%g:%a' "$data_mount/NetworkManager/system-connections")" = '0:0:700'
 
 # A newly flashed image deliberately leaves B and the factory reserve empty.

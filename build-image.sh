@@ -278,6 +278,8 @@ unset _ab_size
 if [ "$AB_LAYOUT" = "1" ]; then IMAGE_LAYOUT=ab; else IMAGE_LAYOUT=single; fi
 [ "$AB_LAYOUT" = "0" ] || { [ "$POST_IMAGE_HOOK" != "none" ] && [ -n "$POST_IMAGE_HOOK" ]; } || \
     die "--layout=ab requires a board POST_IMAGE_HOOK"
+[ "$AB_LAYOUT" = "0" ] || [ "$EXPAND_ROOT" = "0" ] || \
+    die "--layout=ab requires EXPAND_ROOT=0; first-boot root expansion would corrupt the A/B partition layout"
 [ "$REQUIRE_PASSWORD" = "0" ] || [ -n "$PASSWORD" ] || \
     die "Board $BOARD requires an explicit --password=PASS for its development SSH account"
 
@@ -552,10 +554,20 @@ preflight() {
         [ -f "$POST_IMAGE_HOOK" ] && pf_ok "post-image hook: $POST_IMAGE_HOOK" || pf_fail "post-image hook missing: $POST_IMAGE_HOOK"
     fi
     if [ "$AB_LAYOUT" = "1" ]; then
-        for tool in sfdisk fdisk partx mkfs.ext4 mkfs.vfat e2fsck resize2fs e2label blkid blockdev mount; do
+        for tool in sfdisk fdisk mkfs.ext4 mkfs.vfat e2fsck resize2fs e2label blkid blockdev mount; do
             command -v "$tool" >/dev/null 2>&1 && pf_ok "A/B layout tool: $tool" \
                 || pf_fail "A/B layout tool not found: $tool"
         done
+        local ab_static_test="$BOARD_DIR/tests/test_ab_layout_static.sh"
+        if [ -f "$ab_static_test" ]; then
+            if bash "$ab_static_test"; then
+                pf_ok "A/B static contract: ${ab_static_test#"$SCRIPT_DIR"/}"
+            else
+                pf_fail "A/B static contract failed: ${ab_static_test#"$SCRIPT_DIR"/}"
+            fi
+        else
+            pf_warn "no board-specific A/B static contract test: $ab_static_test"
+        fi
     fi
 
     # Base profile files and hooks

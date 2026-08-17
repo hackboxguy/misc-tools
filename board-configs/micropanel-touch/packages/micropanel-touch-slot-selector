@@ -8,6 +8,9 @@ set -euo pipefail
 boot_dir=${MICROPANEL_BOOT_DIR:-/boot/firmware}
 template=${MICROPANEL_BOOT_CONFIG_TEMPLATE:-/usr/lib/micropanel-touch/boot-selector-config.base}
 
+# These render operations are intentionally identical today. Keeping separate
+# names reserves candidate-only selector policy without changing the updater.
+
 usage() {
     cat >&2 <<'EOF'
 Usage: micropanel-touch-slot-selector current-slot
@@ -34,7 +37,7 @@ current_slot() {
     esac
 }
 
-render_config() { # $1=slot; callers retain normal/candidate names for the public protocol
+render_config() { # $1=slot; render names intentionally remain separate protocol operations
     local slot=$1
     [ -r "$template" ] || { echo "ERROR: selector template unavailable: $template" >&2; exit 1; }
     # Both normal and one-shot selections use their complete, independently

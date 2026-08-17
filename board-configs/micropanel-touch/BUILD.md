@@ -38,8 +38,9 @@ The A/B build uses a separate `out/micropanel-touch-luckfox-ctp-ab/`
 directory and an `-ab-` filename infix. This prevents it being mistaken for,
 or overwriting, a same-version single-slot artifact.
 
-The host-side A/B regression tests are a fast finalizer/verifier fixture and
-the static contract check; both use only temporary loopback images:
+The static A/B contract check runs automatically during an A/B build's
+preflight. The finalizer/verifier integration fixture remains a manual
+pre-flash check and uses only a temporary loopback image:
 
 ```sh
 board-configs/micropanel-touch/tests/test_ab_layout_static.sh
@@ -56,6 +57,62 @@ rather than a `[tryboot]` section embedded in `config.txt`. Normal
 data skeleton, including an A-only cmdline marker proof. A subsequent update
 therefore writes only the target slot's `A/` or `B/` boot tree; flat p1 boot
 files are not a committed path.
+
+Those flat p1 files are a factory-version snapshot only. After any slot
+update they can be stale and must never be selected by removing `os_prefix`.
+Recover a selector by rendering it from the running slot's selector template;
+if a slot boot tree itself is damaged, reflash rather than attempting to pair
+a flat factory kernel with a later root filesystem.
+
+### Manual slot-B population and Stage 1 selector acceptance
+
+Run this only on a disposable bench card while a person is present. Keep the
+known-good recovery card available: a candidate that fails before PID 1 is
+currently recovered by one manual power-cycle. It is the manual analogue of
+the future updater's stream → hash → `e2label` → arm sequence.
+
+The commands assume the freshly flashed card is running slot A from its SD
+device (`/dev/mmcblk0`), p6 is unmounted, and B is still empty. Do **not**
+reboot between `dd` and `e2label`: copying p5 initially clones the
+`MP_ROOT_A` ext4 label and creates an unsafe duplicate-label state.
+
+```sh
+# On the Pi, while running A. p5 is the read-only lower root; p6 must be idle.
+if findmnt -rn -S /dev/mmcblk0p6 >/dev/null; then
+  echo 'MP_ROOT_B is mounted'
+  exit 1
+fi
+sudo dd if=/dev/mmcblk0p5 of=/dev/mmcblk0p6 bs=8M status=progress conv=fsync
+sudo e2label /dev/mmcblk0p6 MP_ROOT_B
+sudo e2fsck -pf /dev/mmcblk0p6
+sudo blkid /dev/mmcblk0p5 /dev/mmcblk0p6
+
+# Arm only the inactive B slot, then boot it exactly once.
+selector=/usr/local/sbin/micropanel-touch-slot-selector
+sudo "$selector" current-slot                 # must print A
+sudo "$selector" arm-candidate B
+sudo reboot "0 tryboot"
+```
+
+After SSH returns, confirm `current-slot` prints B, the HMI, broker,
+machine-ID service and `/data` are healthy, then commit **from B**. The
+selector intentionally rejects `commit B` while A is running.
+
+```sh
+selector=/usr/local/sbin/micropanel-touch-slot-selector
+sudo "$selector" current-slot                 # must print B
+systemctl is-active micropanel-touch.service micropanel-touch-privileged.service \
+  micropanel-touch-machine-id.service
+findmnt -no TARGET,SOURCE,OPTIONS /data
+sudo "$selector" commit B
+sudo reboot
+```
+
+The next normal boot must remain on B. Finally arm A from B, use
+`reboot "0 tryboot"` to prove a healthy one-shot A boot, do **not** commit A,
+then use an ordinary reboot and confirm normal boot returns to B. This proves
+the selector guards and the one-shot path without hand-editing generated
+`config.txt` or `tryboot.txt`.
 
 On A/B images, `config.txt` and `tryboot.txt` are selector-managed generated
 files. Persistent image-level configuration changes belong in

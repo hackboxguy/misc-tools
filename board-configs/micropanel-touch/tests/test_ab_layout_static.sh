@@ -41,6 +41,9 @@ fi
 grep -Fqx 'AB_LAYOUT=0' "$repo_root/board-configs/micropanel-touch/board.conf"
 grep -Fqx 'SLOT_COMPATIBLE_BOARDS="pi4"' "$repo_root/board-configs/micropanel-touch/board.conf"
 grep -Fqx 'xz-utils' "$repo_root/board-configs/micropanel-touch/runtime-deps.txt"
+grep -Fq 'requires EXPAND_ROOT=0; first-boot root expansion would corrupt the A/B partition layout' "$builder"
+grep -Fq 'for tool in sfdisk fdisk mkfs.ext4 mkfs.vfat e2fsck resize2fs e2label blkid blockdev mount; do' "$builder"
+grep -Fq "bash \"\$ab_static_test\"" "$builder"
 
 template=$(mktemp)
 trap 'rm -f "$template"' EXIT HUP INT TERM

@@ -58,6 +58,10 @@ to eleven characters; this label is deliberately within that limit. The Stage
 extra, renamed, wrong-variant, wrong-board, malformed, or hash-mismatched
 payload before it can arm tryboot.
 
+It is safe to rerun `--payload` for the same version and payload directory:
+the completed triplet replaces the matching previous triplet. Wait for the
+successful `Created update payload` message before copying anything to USB.
+
 An update streams directly into the inactive root partition, then reboots into
 that candidate once. Do not remove power while the display says it is writing.
 After candidate boot, the appliance waits for its HMI, broker, `/data`, and a

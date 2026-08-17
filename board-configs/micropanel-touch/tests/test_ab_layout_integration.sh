@@ -110,13 +110,16 @@ env -u DATA_PARTITION_MB \
     "$finalizer"
 
 "$verifier" "$image"
-"$payload_generator" --image="$image" --output-dir="$work/payload" \
-    --version=fixture-1 --variant=luckfox-ctp --boards=pi4
-
 payload_prefix="$work/payload/micropanel-touch-fixture-1-luckfox-ctp"
 manifest="$payload_prefix.manifest"
 rootfs="$payload_prefix.rootfs.img.xz"
 boot_tar="$payload_prefix.boot.tar"
+mkdir -p "$work/payload"
+printf '%s\n' 'obsolete payload artifact' > "$manifest"
+printf '%s\n' 'obsolete payload artifact' > "$rootfs"
+printf '%s\n' 'obsolete payload artifact' > "$boot_tar"
+"$payload_generator" --image="$image" --output-dir="$work/payload" \
+    --version=fixture-1 --variant=luckfox-ctp --boards=pi4
 [ -f "$manifest" ] && [ -f "$rootfs" ] && [ -f "$boot_tar" ]
 grep -Fqx 'version=fixture-1' "$manifest"
 grep -Fqx 'variant=luckfox-ctp' "$manifest"

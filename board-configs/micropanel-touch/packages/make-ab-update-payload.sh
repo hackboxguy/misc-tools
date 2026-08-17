@@ -58,6 +58,9 @@ done
 loop=""
 boot_mount=""
 work=""
+rootfs_publish=""
+boot_tar_publish=""
+manifest_publish=""
 
 cleanup() {
     local status=$?
@@ -65,6 +68,7 @@ cleanup() {
         umount "$boot_mount" || true
     fi
     [ -z "$loop" ] || losetup -d "$loop" 2>/dev/null || true
+    rm -f -- "$rootfs_publish" "$boot_tar_publish" "$manifest_publish"
     [ -z "$work" ] || rm -rf "$work"
     exit "$status"
 }
@@ -119,7 +123,10 @@ rootfs="$output_dir/${prefix}.rootfs.img.xz"
 boot_tar="$output_dir/${prefix}.boot.tar"
 manifest="$output_dir/${prefix}.manifest"
 for destination in "$rootfs" "$boot_tar" "$manifest"; do
-    [ ! -e "$destination" ] || { echo "ERROR: payload destination already exists: $destination" >&2; exit 1; }
+    [ ! -d "$destination" ] || {
+        echo "ERROR: payload destination is a directory: $destination" >&2
+        exit 1
+    }
 done
 
 rootfs_tmp="$work/rootfs.img.xz"
@@ -153,8 +160,15 @@ tar --format=posix --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 \
 boot_sha256=$(sha256sum "$work/boot.tar" | awk '{print $1}')
 [[ "$boot_sha256" =~ ^[0-9a-f]{64}$ ]] || { echo 'ERROR: invalid boot archive digest' >&2; exit 1; }
 
-install -m0644 "$rootfs_tmp" "$rootfs"
-install -m0644 "$work/boot.tar" "$boot_tar"
+# Rebuilding an existing release version is intentional. Stage each artifact
+# beside its destination, then publish only after the complete replacement
+# triplet has been generated and checked. Publishing the manifest last makes a
+# partially interrupted publish fail closed at the device-side hash checks.
+rootfs_publish=$(mktemp "$output_dir/.${prefix}.rootfs.img.xz.XXXXXX")
+boot_tar_publish=$(mktemp "$output_dir/.${prefix}.boot.tar.XXXXXX")
+manifest_publish=$(mktemp "$output_dir/.${prefix}.manifest.XXXXXX")
+install -m0644 "$rootfs_tmp" "$rootfs_publish"
+install -m0644 "$work/boot.tar" "$boot_tar_publish"
 cat > "$work/manifest" <<EOF
 version=$version
 variant=$variant
@@ -164,7 +178,14 @@ rootfs_bytes=$rootfs_bytes
 boot_sha256=$boot_sha256
 format=1
 EOF
-install -m0644 "$work/manifest" "$manifest"
+install -m0644 "$work/manifest" "$manifest_publish"
+sync "$rootfs_publish" "$boot_tar_publish" "$manifest_publish"
+mv -f -- "$rootfs_publish" "$rootfs"
+rootfs_publish=""
+mv -f -- "$boot_tar_publish" "$boot_tar"
+boot_tar_publish=""
+mv -f -- "$manifest_publish" "$manifest"
+manifest_publish=""
 sync "$rootfs" "$boot_tar" "$manifest"
 
 echo "Created update payload: $manifest"

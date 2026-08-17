@@ -918,11 +918,11 @@ run_payload() {
     [ "$BUILD_PAYLOAD" = "1" ] || return 0
     [ -f "$FINAL_IMG" ] || die "Cannot create payload; final image is missing: $FINAL_IMG"
     [ -x "$PAYLOAD_GENERATOR" ] || die "A/B payload generator is unavailable: $PAYLOAD_GENERATOR"
-    if [ -e "$PAYLOAD_MANIFEST" ]; then
-        die "Payload already exists: $PAYLOAD_MANIFEST (choose a new --version or --payload-dir)"
-    fi
     stage_banner "Stage 5: A/B update payload"
     mkdir -p "$PAYLOAD_DIR"
+    if [ -e "$PAYLOAD_MANIFEST" ]; then
+        info "Replacing existing payload triplet: $PAYLOAD_PREFIX"
+    fi
     "$PAYLOAD_GENERATOR" \
         --image="$FINAL_IMG" \
         --output-dir="$PAYLOAD_DIR" \

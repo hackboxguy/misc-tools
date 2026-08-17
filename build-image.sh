@@ -166,7 +166,7 @@ BASE_PROFILE="" APPS_EXTEND_SIZE_MB=0 EXPAND_ROOT=1 REQUIRE_PASSWORD=0
 DATA_PARTITION_MB=0 POST_IMAGE_HOOK=""
 AB_LAYOUT=0 AB_IMAGE_SIZE_MB=15000 AB_BOOT_PARTITION_MB=256
 AB_ROOT_PARTITION_MB=5120 AB_FACTORY_PARTITION_MB=2048
-SLOT_COMPATIBLE_BOARDS="pi4,pi5"
+SLOT_COMPATIBLE_BOARDS="pi4"
 if [ $PROFILE_ONLY -eq 0 ]; then
     BOARD_DIR="$BOARD_CONFIGS_DIR/$BOARD"
     BOARD_CONF="$BOARD_DIR/board.conf"
@@ -276,6 +276,8 @@ for _ab_size in "$AB_IMAGE_SIZE_MB" "$AB_BOOT_PARTITION_MB" "$AB_ROOT_PARTITION_
 done
 unset _ab_size
 if [ "$AB_LAYOUT" = "1" ]; then IMAGE_LAYOUT=ab; else IMAGE_LAYOUT=single; fi
+[ "$AB_LAYOUT" = "0" ] || { [ "$POST_IMAGE_HOOK" != "none" ] && [ -n "$POST_IMAGE_HOOK" ]; } || \
+    die "--layout=ab requires a board POST_IMAGE_HOOK"
 [ "$REQUIRE_PASSWORD" = "0" ] || [ -n "$PASSWORD" ] || \
     die "Board $BOARD requires an explicit --password=PASS for its development SSH account"
 
@@ -302,6 +304,8 @@ WORKSPACE="${WORKSPACE:-$REAL_HOME/pi-image-workspace}"
 [[ "$WORKSPACE" != /* ]] && WORKSPACE="$(pwd)/$WORKSPACE"
 
 BUILD_ID="$BOARD${VARIANT:+-$VARIANT}"
+ARTIFACT_ID="$BUILD_ID"
+[ "$AB_LAYOUT" = "0" ] || ARTIFACT_ID="${BUILD_ID}-ab"
 DL_DIR="$WORKSPACE/downloads"
 SRC_DIR="${ARG_SOURCES_DIR:-$WORKSPACE/sources}"
 [[ "$SRC_DIR" != /* ]] && SRC_DIR="$(pwd)/$SRC_DIR"
@@ -313,7 +317,7 @@ else
     BASE_DIR="$WORKSPACE/base/$BUILD_ID"
 fi
 KERNEL_DIR="$WORKSPACE/kernel/$BUILD_ID"
-OUT_DIR="${ARG_OUTPUT_DIR:-$WORKSPACE/out/$BUILD_ID}"
+OUT_DIR="${ARG_OUTPUT_DIR:-$WORKSPACE/out/$ARTIFACT_ID}"
 [[ "$OUT_DIR" != /* ]] && OUT_DIR="$(pwd)/$OUT_DIR"
 TMP_DIR="$WORKSPACE/tmp"
 
@@ -347,9 +351,13 @@ BASE_IMG="$BASE_DIR/$VANILLA_STEM-${BASE_PROFILE:-$BUILD_ID}-base.img"
 KERNEL_IMG="$KERNEL_DIR/$VANILLA_STEM-$BUILD_ID-base-kernel.img"
 if [ -n "$ARG_START_FROM" ]; then
     # start-from image names usually carry the board already
-    FINAL_IMG="$OUT_DIR/$VANILLA_STEM-$VERSION.img"
+    if [ "$AB_LAYOUT" = "1" ]; then
+        FINAL_IMG="$OUT_DIR/$VANILLA_STEM-$ARTIFACT_ID-$VERSION.img"
+    else
+        FINAL_IMG="$OUT_DIR/$VANILLA_STEM-$VERSION.img"
+    fi
 else
-    FINAL_IMG="$OUT_DIR/$VANILLA_STEM-$BUILD_ID-$VERSION.img"
+    FINAL_IMG="$OUT_DIR/$VANILLA_STEM-$ARTIFACT_ID-$VERSION.img"
 fi
 
 # ------------------------------------------------------------------------------

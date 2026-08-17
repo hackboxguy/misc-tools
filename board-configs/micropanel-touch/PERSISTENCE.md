@@ -7,6 +7,13 @@ single-slot image places it at p3; the opt-in A/B layout keeps the same label
 and contract at p8. This document is the release inventory for every stateful
 path in the board image.
 
+The legacy single-slot finalizer deliberately keeps its established
+`PARTUUID=` `/data` fstab reference; it is not retroactively changed merely
+because the new A/B layout uses labels. In A/B images, the slot root is chosen
+only by the per-slot kernel command line (`root=LABEL=MP_ROOT_A|MP_ROOT_B`),
+so there is no `/` fstab line that could name the inactive slot. `/boot` and
+`/data` use their A/B labels as shown below.
+
 ## Durable state on `/data`
 
 | Path | Owner / mode | Writer and purpose | Durability rule |

@@ -11,6 +11,8 @@ template=${MICROPANEL_BOOT_CONFIG_TEMPLATE:-/usr/lib/micropanel-touch/boot-selec
 usage() {
     cat >&2 <<'EOF'
 Usage: micropanel-touch-slot-selector current-slot
+       micropanel-touch-slot-selector render-normal A|B
+       micropanel-touch-slot-selector render-candidate A|B
        micropanel-touch-slot-selector arm-candidate A|B
        micropanel-touch-slot-selector commit A|B
 EOF
@@ -32,21 +34,24 @@ current_slot() {
     esac
 }
 
-render_config() { # $1=slot $2=normal (0/1)
-    local slot=$1 normal=$2
+render_config() { # $1=slot; callers retain normal/candidate names for the public protocol
+    local slot=$1
     [ -r "$template" ] || { echo "ERROR: selector template unavailable: $template" >&2; exit 1; }
-    # The accepted Stage 0 fixture leaves normal A at the boot-root paths.
-    # All other selections use a self-contained os_prefix directory.
-    if [ "$normal" != 1 ] || [ "$slot" != A ]; then
-        printf 'os_prefix=%s/\n' "$slot"
-    fi
+    # Both normal and one-shot selections use their complete, independently
+    # updated os_prefix boot tree. Pi 4 hardware acceptance covers normal A
+    # as well as tryboot B, so no flat-A compatibility path remains.
+    printf 'os_prefix=%s/\n' "$slot"
     cat "$template"
 }
 
-boot_was_rw=0
-restore_boot_ro() {
+boot_remounted_rw=0
+temporary_path=""
+restore_boot_state() {
     local status=$?
-    if [ "$boot_was_rw" = 1 ]; then
+    if [ -n "$temporary_path" ]; then
+        rm -f "$temporary_path" || true
+    fi
+    if [ "$boot_remounted_rw" = 1 ]; then
         mount -o remount,ro "$boot_dir" || true
     fi
     exit "$status"
@@ -55,18 +60,24 @@ restore_boot_ro() {
 make_boot_writable() {
     [ -d "$boot_dir" ] || { echo "ERROR: boot directory missing: $boot_dir" >&2; exit 1; }
     mountpoint -q "$boot_dir" || { echo "ERROR: boot directory is not mounted: $boot_dir" >&2; exit 1; }
-    mount -o remount,rw "$boot_dir"
-    boot_was_rw=1
-    trap restore_boot_ro EXIT HUP INT TERM
+    if ! findmnt -no OPTIONS -T "$boot_dir" | grep -Eq '(^|,)rw(,|$)'; then
+        mount -o remount,rw "$boot_dir"
+        boot_remounted_rw=1
+    fi
+    trap restore_boot_state EXIT HUP INT TERM
 }
 
 replace_config() { # $1=destination $2=slot $3=normal
-    local destination=$1 slot=$2 normal=$3 temporary
-    temporary=$(mktemp "$boot_dir/.${destination}.XXXXXX")
-    render_config "$slot" "$normal" > "$temporary"
-    sync "$temporary"
-    mv -f "$temporary" "$boot_dir/$destination"
+    local destination=$1 slot=$2 normal=$3
+    temporary_path=$(mktemp "$boot_dir/.${destination}.XXXXXX")
+    render_config "$slot" "$normal" > "$temporary_path"
+    sync "$temporary_path"
+    mv -f "$temporary_path" "$boot_dir/$destination"
+    temporary_path=""
     sync "$boot_dir/$destination"
+    # FAT has no directory fsync interface; a final whole-system sync commits
+    # the rename's directory entry before a subsequent selector write.
+    sync
 }
 
 [ "$#" -ge 1 ] || usage
@@ -75,19 +86,36 @@ case "$1" in
         [ "$#" -eq 1 ] || usage
         current_slot
         ;;
+    render-normal)
+        [ "$#" -eq 2 ] || usage
+        render_config "$(slot_arg "$2")" 1
+        ;;
+    render-candidate)
+        [ "$#" -eq 2 ] || usage
+        render_config "$(slot_arg "$2")" 0
+        ;;
     arm-candidate)
         [ "$#" -eq 2 ] || usage
         candidate=$(slot_arg "$2")
+        [ "$(current_slot)" != "$candidate" ] || {
+            echo "ERROR: refusing to arm the currently running slot $candidate" >&2
+            exit 1
+        }
         make_boot_writable
         replace_config tryboot.txt "$candidate" 0
         ;;
     commit)
         [ "$#" -eq 2 ] || usage
         selected=$(slot_arg "$2")
+        [ "$(current_slot)" = "$selected" ] || {
+            echo "ERROR: refusing to commit inactive slot $selected" >&2
+            exit 1
+        }
         if [ "$selected" = A ]; then other=B; else other=A; fi
         make_boot_writable
-        replace_config config.txt "$selected" 1
+        # Preserve a complete fallback selector before changing the default.
         replace_config tryboot.txt "$other" 0
+        replace_config config.txt "$selected" 1
         ;;
     *) usage ;;
 esac

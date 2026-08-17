@@ -15,7 +15,7 @@ ab_image_size_mb=${AB_IMAGE_SIZE_MB:-0}
 ab_boot_partition_mb=${AB_BOOT_PARTITION_MB:-256}
 ab_root_partition_mb=${AB_ROOT_PARTITION_MB:-5120}
 ab_factory_partition_mb=${AB_FACTORY_PARTITION_MB:-2048}
-slot_compatible_boards=${SLOT_COMPATIBLE_BOARDS:-pi4,pi5}
+slot_compatible_boards=${SLOT_COMPATIBLE_BOARDS:-pi4}
 
 script_dir=$(cd "$(dirname "$0")" && pwd)
 data_skeleton_script=${DATA_SKELETON_SCRIPT:-$script_dir/micropanel-touch-data-skeleton.sh}
@@ -49,7 +49,7 @@ print_ab_layout() {
         "p6=MP_ROOT_B:${ab_root_partition_mb}MiB:ext4-reserved" \
         "p7=MP_FACTORY:${ab_factory_partition_mb}MiB:ext4-reserved" \
         'p8=MICROPANEL_DATA:remainder:ext4' \
-        'normal_selector=flat-A-config.txt' \
+        'normal_selector=os_prefix=A/' \
         'tryboot_selector=os_prefix=B/'
 }
 
@@ -60,7 +60,7 @@ if [ "${1:-}" = "--print-ab-layout" ]; then
 fi
 [ "$#" -eq 0 ] || usage
 
-for tool in sfdisk fdisk losetup partx mkfs.ext4 mkfs.vfat e2fsck resize2fs \
+for tool in sfdisk fdisk losetup mkfs.ext4 mkfs.vfat e2fsck resize2fs \
             e2label blkid blockdev mount umount mountpoint cp install awk sed \
             truncate stat sync; do
     command -v "$tool" >/dev/null 2>&1 || {
@@ -71,13 +71,15 @@ done
 
 [ "$(id -u)" -eq 0 ] || { echo "ERROR: post-image layout must run as root" >&2; exit 1; }
 [ -n "$image_path" ] || { echo "ERROR: IMAGE_PATH is required" >&2; exit 1; }
-[ -n "$data_partition_mb" ] || { echo "ERROR: DATA_PARTITION_MB is required" >&2; exit 1; }
 [ -f "$image_path" ] || { echo "ERROR: image does not exist: $image_path" >&2; exit 1; }
-[[ "$data_partition_mb" =~ ^[1-9][0-9]*$ ]] || {
-    echo "ERROR: DATA_PARTITION_MB must be a positive integer" >&2
-    exit 1
-}
 case "$ab_layout" in 0|1) ;; *) echo "ERROR: AB_LAYOUT must be 0 or 1" >&2; exit 1 ;; esac
+if [ "$ab_layout" = 0 ]; then
+    [ -n "$data_partition_mb" ] || { echo "ERROR: DATA_PARTITION_MB is required for the single-slot layout" >&2; exit 1; }
+    [[ "$data_partition_mb" =~ ^[1-9][0-9]*$ ]] || {
+        echo "ERROR: DATA_PARTITION_MB must be a positive integer" >&2
+        exit 1
+    }
+fi
 
 for value in "$ab_boot_partition_mb" "$ab_root_partition_mb" "$ab_factory_partition_mb"; do
     positive_integer "$value" || { echo "ERROR: A/B partition sizes must be positive integers" >&2; exit 1; }
@@ -185,7 +187,6 @@ replace_ab_fstab() { # $1=root mount
         "$fstab" > "$temporary"
     printf '\n# MicroPanel Touch A/B layout. Labels keep each slot independent of partition numbering.\n' >> "$temporary"
     printf '%s\n' \
-        'LABEL=MP_ROOT_A / ext4 defaults,noatime 0 1' \
         'LABEL=MP_BOOT_A /boot/firmware vfat defaults,ro,nofail,x-systemd.device-timeout=5s 0 2' \
         'LABEL=MICROPANEL_DATA /data ext4 defaults,nofail,x-systemd.device-timeout=5s 0 2' \
         '/data/NetworkManager/system-connections /etc/NetworkManager/system-connections none bind,nofail,x-systemd.requires=data.mount,x-systemd.before=NetworkManager.service 0 0' \
@@ -217,7 +218,10 @@ EOF
 append_ab_manifest() { # $1=root mount
     local manifest="$1/opt/micropanel-touch/share/micropanel-touch/image-manifest.env"
     local temporary
-    [ -f "$manifest" ] || return 0
+    [ -f "$manifest" ] || {
+        echo "ERROR: required MicroPanel Touch image manifest is missing: $manifest" >&2
+        exit 1
+    }
     temporary="$manifest.micropanel-touch"
     grep -vE '^(IMAGE_LAYOUT|SLOT_COMPATIBLE_BOARDS)=' "$manifest" > "$temporary" || true
     printf 'IMAGE_LAYOUT=ab\nSLOT_COMPATIBLE_BOARDS=%s\n' "$slot_compatible_boards" >> "$temporary"
@@ -282,7 +286,6 @@ finalize_single_layout() {
 
     printf 'start=%s, size=%s, type=83\n' "$data_start" "$data_size" | sfdisk --append "$image_path"
     target_loop=$(losetup --find --show --partscan "$image_path")
-    partx --update "$target_loop" || true
     wait_for_partitions "$target_loop" 2 3
     data_device="${target_loop}p3"
     root_device="${target_loop}p2"
@@ -312,15 +315,27 @@ copy_slot_boot_tree() { # $1=source boot mount; $2=destination boot mount; $3=sl
         exit 1
     }
     install -d "$slot_dir"
+    # Keep a byte-for-byte boot-tree copy for now. os_prefix consumes only
+    # the kernel, initramfs, DTB/overlays and cmdline, but pruning needs an
+    # explicit inventory for every Pi OS kernel packaging change. The selector
+    # renders only p1/config.txt and p1/tryboot.txt, so the copied per-slot
+    # config.txt is deliberately never authoritative.
     cp -a "$source_boot/." "$slot_dir/"
     set_cmdline_root_label "$slot_dir/cmdline.txt" "MP_ROOT_$slot"
+}
+
+render_boot_selector() { # $1=root mount; $2=boot mount; $3=selector command; $4=slot; $5=destination
+    local root=$1 boot=$2 selector_command=$3 slot=$4 destination=$5
+    MICROPANEL_BOOT_CONFIG_TEMPLATE="$root/usr/lib/micropanel-touch/boot-selector-config.base" \
+        "$root/usr/local/sbin/micropanel-touch-slot-selector" \
+        "$selector_command" "$slot" > "$boot/$destination"
 }
 
 finalize_ab_layout() {
     local partition_count source_root source_boot
     local target_size_bytes total_sectors sectors_per_mib
     local boot_size root_size factory_size p1_start p2_start extended_start
-    local p5_start p6_start p7_start p8_start data_size extended_size
+    local p5_start p6_start p7_start p8_start data_size extended_size source_sector_size
 
     positive_integer "$ab_image_size_mb" || {
         echo "ERROR: AB_IMAGE_SIZE_MB must be a positive integer" >&2
@@ -333,6 +348,11 @@ finalize_ab_layout() {
     }
     [ -x "$data_skeleton_script" ] || { echo "ERROR: data skeleton script is not executable: $data_skeleton_script" >&2; exit 1; }
     [ -x "$selector_script" ] || { echo "ERROR: selector script is not executable: $selector_script" >&2; exit 1; }
+    source_sector_size=$(fdisk -l "$image_path" | sed -n 's/^Sector size (logical\/physical): \([0-9][0-9]*\).*/\1/p')
+    [ "$source_sector_size" = 512 ] || {
+        echo "ERROR: A/B MBR layout requires 512-byte sectors; source reports ${source_sector_size:-unknown}" >&2
+        exit 1
+    }
 
     target_size_bytes=$((ab_image_size_mb * 1024 * 1024))
     sectors_per_mib=$((1024 * 1024 / 512))
@@ -357,7 +377,6 @@ finalize_ab_layout() {
     }
 
     source_loop=$(losetup --find --show --partscan --read-only "$image_path")
-    partx --update "$source_loop" || true
     wait_for_partitions "$source_loop" 1 2
     source_boot="${source_loop}p1"
     source_root="${source_loop}p2"
@@ -385,7 +404,6 @@ ${ab_image_path}8 : start=$p8_start, size=$data_size, type=83
 EOF
 
     target_loop=$(losetup --find --show --partscan "$ab_image_path")
-    partx --update "$target_loop" || true
     wait_for_partitions "$target_loop" 1 2 5 6 7 8
     mkfs.vfat -F32 -n MP_BOOT_A "${target_loop}p1" >/dev/null
     mkfs.vfat -F32 -n MP_BOOT_B "${target_loop}p2" >/dev/null
@@ -403,8 +421,9 @@ EOF
     mount "${target_loop}p8" "$data_mount"
     mount "${target_loop}p1" "$boot_mount"
 
-    # Normal A remains a flat, source-compatible boot root. A/ and B/ carry
-    # complete per-slot artifacts for tryboot and post-commit operation.
+    # A/ and B/ are the complete, independently updated boot trees used by
+    # both normal and tryboot selectors. The flat p1 copies are retained only
+    # as source material/recovery files; they are not a committed boot path.
     cp -a "$source_boot_mount/." "$boot_mount/"
     if ! { [ ! -e "$boot_mount/A" ] && [ ! -e "$boot_mount/B" ]; }; then
         echo "ERROR: source boot filesystem already contains A/ or B/" >&2
@@ -423,7 +442,9 @@ EOF
     }
     install -D -m0644 "$boot_mount/config.txt" \
         "$root_mount/usr/lib/micropanel-touch/boot-selector-config.base"
-    { printf 'os_prefix=B/\n'; cat "$boot_mount/config.txt"; } > "$boot_mount/tryboot.txt"
+    install -Dm0755 "$selector_script" "$root_mount/usr/local/sbin/micropanel-touch-slot-selector"
+    render_boot_selector "$root_mount" "$boot_mount" render-normal A config.txt
+    render_boot_selector "$root_mount" "$boot_mount" render-candidate B tryboot.txt
 
     # The apps image has no /data partition yet. Seed the exact same durable
     # first-boot contract as the single-slot finalizer, including any shipped
@@ -431,7 +452,6 @@ EOF
     seed_data_skeleton "$root_mount" "$data_mount"
     seed_network_connections "$root_mount" "$data_mount"
     install_data_skeleton_tool "$root_mount"
-    install -Dm0755 "$selector_script" "$root_mount/usr/local/sbin/micropanel-touch-slot-selector"
     install -d -m0755 "$root_mount/data"
     replace_ab_fstab "$root_mount"
     write_watchdog_config "$root_mount"

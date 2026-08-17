@@ -31,16 +31,41 @@ Before flashing an A/B artifact, run the read-only host check as root:
 
 ```sh
 sudo board-configs/micropanel-touch/packages/verify-ab-image-layout.sh \
-  /path/to/micropanel-touch-luckfox-ctp-00.13.img
+  /path/to/micropanel-touch-luckfox-ctp-ab-00.13.img
+```
+
+The A/B build uses a separate `out/micropanel-touch-luckfox-ctp-ab/`
+directory and an `-ab-` filename infix. This prevents it being mistaken for,
+or overwriting, a same-version single-slot artifact.
+
+The host-side A/B regression tests are a fast finalizer/verifier fixture and
+the static contract check; both use only temporary loopback images:
+
+```sh
+board-configs/micropanel-touch/tests/test_ab_layout_static.sh
+sudo board-configs/micropanel-touch/tests/test_ab_layout_integration.sh
 ```
 
 On a freshly flashed A/B image only slot A is populated.  `MP_ROOT_B` and
 `MP_FACTORY` are intentionally empty reserves; do not `tryboot` B until a
 payload or the Stage 1 manual-population acceptance procedure has filled it.
-The boot selector's normal A path is source-compatible `config.txt`; its
-`tryboot.txt` is the full configuration with `os_prefix=B/`.  This is the
-accepted Pi 4 fixture, rather than a `[tryboot]` section embedded in
-`config.txt`.
+The normal and one-shot selectors are complete files: normal `config.txt`
+uses `os_prefix=A/` and `tryboot.txt` uses `os_prefix=B/` on first flash,
+rather than a `[tryboot]` section embedded in `config.txt`. Normal
+`os_prefix=A/` was accepted on the Pi 4 + Luckfox CTP card with the real p8
+data skeleton, including an A-only cmdline marker proof. A subsequent update
+therefore writes only the target slot's `A/` or `B/` boot tree; flat p1 boot
+files are not a committed path.
+
+On A/B images, `config.txt` and `tryboot.txt` are selector-managed generated
+files. Persistent image-level configuration changes belong in
+`/usr/lib/micropanel-touch/boot-selector-config.base` before the image is
+built; an ad-hoc edit to p1 is overwritten by the next selector commit.
+Because `config.txt` itself is shared by both slots, a template change is a
+special release: it must be called out in the release notes and the fallback
+slot must be re-tested. The accepted Luckfox CTP A/B manifest currently names
+**Pi 4 only**. Do not use it on Pi 5 until the RP1-specific panel overlay has
+separate hardware acceptance.
 
 The command above remains the verified PiScreen ILI9486/ADS7846 image. For
 the separately verified Luckfox **3.5-RPi-LCD-CTP** (ST7796S display and GT911

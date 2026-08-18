@@ -85,6 +85,21 @@ board-configs/micropanel-touch/tests/test_ab_layout_static.sh
 sudo board-configs/micropanel-touch/tests/test_ab_layout_integration.sh
 ```
 
+#### Latest Stage 2 bench evidence — 2026-08-18
+
+`misc-tools` commit `bde05af` generated the `00.21` Luckfox CTP payload used
+for the checksum-safe acceptance run. A `00.20` A/B card on slot A first
+survived a power cut at approximately 35% of its write, returning to A without
+arming B. A fresh retry then booted and committed `00.21` on B; a physical
+power-cycle remained on B. The USB artifact's full decompressed SHA-256
+matched its manifest and its ext4 volume-label field was blank. The device
+post-write `e2fsck` and relabel sequence therefore completed successfully.
+
+No extra runtime package is needed for `blkid`: it is already installed at
+`/usr/sbin/blkid` (with `e2fsck` and `e2label`) and the root updater explicitly
+adds `/usr/sbin` to `PATH`. An unprivileged interactive shell may not include
+that directory, so use `sudo blkid` or `/usr/sbin/blkid` for manual diagnosis.
+
 On a freshly flashed A/B image only slot A is populated.  `MP_ROOT_B` and
 `MP_FACTORY` are intentionally empty reserves; do not `tryboot` B until a
 payload or the Stage 1 manual-population acceptance procedure has filled it.

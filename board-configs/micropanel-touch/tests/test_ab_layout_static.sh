@@ -51,7 +51,13 @@ grep -Fq -- '--payload requires --layout=ab' "$builder"
 grep -Fq 'make-ab-update-payload.sh' "$builder"
 grep -Fq 'PAYLOAD_VARIANT="${VARIANT:-${DEFAULT_PANEL_VARIANT:-default}}"' "$builder"
 grep -Fq 'root=LABEL=@MICROPANEL_SLOT@' "$payload_generator"
-grep -Fq 'stream_label_neutral_rootfs' "$payload_generator"
+grep -Fq 'e2label "${loop}p5" ""' "$payload_generator"
+grep -Fq 'restore_source_root_label' "$payload_generator"
+grep -Fq 'dd if="${loop}p5" bs=8M status=progress' "$payload_generator"
+if grep -Fq 'ext4_volume_label_offset' "$payload_generator"; then
+    echo 'payload generator must not edit ext4 superblock bytes directly' >&2
+    exit 1
+fi
 grep -Fq 'mkfifo "$hash_fifo" "$count_fifo"' "$payload_generator"
 grep -Fq 'wait "$hash_pid"' "$payload_generator"
 grep -Fq 'PANEL_VARIANT=piscreen' "$repo_root/board-configs/micropanel-touch/packages/micropanel-touch-hook.sh"

@@ -48,7 +48,7 @@ safe_token "$variant" || { echo 'ERROR: --variant must be a safe release token' 
 safe_boards "$boards" || { echo 'ERROR: --boards must be a comma-separated board allow-list' >&2; exit 1; }
 
 for tool in losetup mount umount mountpoint mktemp mkfifo dd tee sha256sum xz tar sed awk stat install mv rm sync \
-            blkid blockdev wc tr cp mkdir sleep; do
+            blkid blockdev wc tr cp mkdir sleep e2label; do
     command -v "$tool" >/dev/null 2>&1 || {
         echo "ERROR: required host tool is missing: $tool" >&2
         exit 1
@@ -65,6 +65,22 @@ hash_fifo=""
 count_fifo=""
 hash_pid=""
 count_pid=""
+source_root_label_neutralized=0
+
+# e2label updates the ext4 superblock checksum.  Directly overwriting
+# s_volume_name in a raw stream does not, so it produces an image that e2fsck
+# correctly rejects before the device can arm the candidate slot.
+restore_source_root_label() {
+    [ "$source_root_label_neutralized" -eq 1 ] || return 0
+    [ -n "$loop" ] || return 1
+    if ! e2label "${loop}p5" MP_ROOT_A; then
+        return 1
+    fi
+    if ! sync -f "${loop}p5"; then
+        return 1
+    fi
+    source_root_label_neutralized=0
+}
 
 cleanup() {
     local status=$?
@@ -72,6 +88,11 @@ cleanup() {
     [ -z "$count_pid" ] || wait "$count_pid" 2>/dev/null || true
     if [ -n "$boot_mount" ] && mountpoint -q "$boot_mount"; then
         umount "$boot_mount" || true
+    fi
+    if [ "$source_root_label_neutralized" -eq 1 ]; then
+        if ! restore_source_root_label; then
+            echo "ERROR: unable to restore MP_ROOT_A on source image ${loop}p5" >&2
+        fi
     fi
     [ -z "$loop" ] || losetup -d "$loop" 2>/dev/null || true
     rm -f -- "$rootfs_publish" "$boot_tar_publish" "$manifest_publish"
@@ -92,7 +113,7 @@ wait_for_partitions() {
     return 1
 }
 
-loop=$(losetup --find --show --partscan --read-only "$image")
+loop=$(losetup --find --show --partscan "$image")
 wait_for_partitions
 [ "$(blkid -s LABEL -o value "${loop}p1")" = MP_BOOT_A ] || {
     echo 'ERROR: image p1 is not MP_BOOT_A' >&2
@@ -145,18 +166,15 @@ rootfs_digest="$work/rootfs.sha256"
 rootfs_count="$work/rootfs.bytes"
 rootfs_bytes=$(blockdev --getsize64 "${loop}p5")
 
-# ext4's primary superblock begins at byte 1024 and s_volume_name is the
-# 16-byte field at superblock offset 0x78.  Blank it in the release artifact
-# so copying A's root into B can never create a second MP_ROOT_A label.  The
-# device handler applies its target label only after the artifact hash passes.
-ext4_volume_label_offset=$((1024 + 0x78))
-ext4_volume_label_size=16
-ext4_after_label_offset=$((ext4_volume_label_offset + ext4_volume_label_size))
-
-stream_label_neutral_rootfs() {
-    dd if="${loop}p5" bs=1 count="$ext4_volume_label_offset" status=none
-    dd if=/dev/zero bs=1 count="$ext4_volume_label_size" status=none
-    dd if="${loop}p5" bs=8M iflag=skip_bytes skip="$ext4_after_label_offset" status=progress
+# Build a label-neutral rootfs with the filesystem tool rather than editing
+# superblock bytes in the stream.  e2label keeps ext4 metadata checksums valid;
+# cleanup restores the source image on every normal failure or signal path.
+source_root_label_neutralized=1
+e2label "${loop}p5" ""
+sync -f "${loop}p5"
+[ -z "$(blkid -s LABEL -o value "${loop}p5" 2>/dev/null || true)" ] || {
+    echo 'ERROR: unable to clear source root label for slot-neutral payload' >&2
+    exit 1
 }
 
 # The only multi-gigabyte data path is this pipeline.  tee feeds the hasher
@@ -170,7 +188,7 @@ sha256sum < "$hash_fifo" | awk '{print $1}' > "$rootfs_digest" & hash_pid=$!
 wc -c < "$count_fifo" > "$rootfs_count" & count_pid=$!
 set +e
 set -o pipefail
-stream_label_neutral_rootfs | tee "$hash_fifo" "$count_fifo" | \
+dd if="${loop}p5" bs=8M status=progress | tee "$hash_fifo" "$count_fifo" | \
     xz --threads=0 --check=crc64 --lzma2=dict=64MiB --stdout > "$rootfs_tmp"
 pipeline_status=$?
 wait "$hash_pid"; hash_status=$?; hash_pid=""
@@ -188,6 +206,11 @@ actual_rootfs_bytes=$(tr -d '[:space:]' < "$rootfs_count")
 [[ "$rootfs_sha256" =~ ^[0-9a-f]{64}$ ]] || { echo 'ERROR: invalid rootfs digest' >&2; exit 1; }
 [ "$actual_rootfs_bytes" = "$rootfs_bytes" ] || {
     echo "ERROR: rootfs stream length $actual_rootfs_bytes does not match slot $rootfs_bytes" >&2
+    exit 1
+}
+restore_source_root_label
+[ "$(blkid -s LABEL -o value "${loop}p5")" = MP_ROOT_A ] || {
+    echo 'ERROR: unable to restore source root label after payload generation' >&2
     exit 1
 }
 

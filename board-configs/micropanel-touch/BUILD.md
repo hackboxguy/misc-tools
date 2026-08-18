@@ -58,6 +58,11 @@ to eleven characters; this label is deliberately within that limit. The Stage
 extra, renamed, wrong-variant, wrong-board, malformed, or hash-mismatched
 payload before it can arm tryboot.
 
+The generated root filesystem deliberately has no ext4 volume label, so it is
+safe to write to either inactive slot. The generator clears that label with
+`e2label` (preserving ext4 metadata checksums), streams the artifact, then
+restores `MP_ROOT_A` on the source image before it publishes the payload.
+
 It is safe to rerun `--payload` for the same version and payload directory:
 the completed triplet replaces the matching previous triplet. Wait for the
 successful `Created update payload` message before copying anything to USB.

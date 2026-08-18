@@ -13,7 +13,7 @@ payload_generator="$repo_root/board-configs/micropanel-touch/packages/make-ab-up
     echo "ERROR: run as root so the fixture can use loop partitions" >&2
     exit 1
 }
-for tool in truncate sfdisk losetup mkfs.vfat mkfs.ext4 mount umount mountpoint install sync dd tr xz tar sha256sum wc; do
+for tool in truncate sfdisk losetup mkfs.vfat mkfs.ext4 mount umount mountpoint install sync dd tr xz tar sha256sum wc blkid sleep e2fsck; do
     command -v "$tool" >/dev/null 2>&1 || {
         echo "ERROR: missing host tool: $tool" >&2
         exit 1
@@ -114,6 +114,28 @@ payload_prefix="$work/payload/micropanel-touch-fixture-1-luckfox-ctp"
 manifest="$payload_prefix.manifest"
 rootfs="$payload_prefix.rootfs.img.xz"
 boot_tar="$payload_prefix.boot.tar"
+failing_bin="$work/failing-bin"
+install -d "$failing_bin"
+printf '%s\n' '#!/bin/sh' 'exit 1' > "$failing_bin/xz"
+chmod 0755 "$failing_bin/xz"
+if PATH="$failing_bin:$PATH" "$payload_generator" --image="$image" --output-dir="$work/failed-payload" \
+    --version=fixture-failure --variant=luckfox-ctp --boards=pi4 >/dev/null 2>&1; then
+    echo 'ERROR: payload generator accepted a forced compression failure' >&2
+    exit 1
+fi
+source_loop=$(losetup --find --show --partscan --read-only "$image")
+retries=0
+while [ "$retries" -lt 20 ]; do
+    [ -b "${source_loop}p5" ] && break
+    sleep 1
+    retries=$((retries + 1))
+done
+[ "$(blkid -s LABEL -o value "${source_loop}p5")" = MP_ROOT_A ] || {
+    echo 'ERROR: failed payload generation did not restore source root label' >&2
+    exit 1
+}
+losetup -d "$source_loop"
+source_loop=""
 mkdir -p "$work/payload"
 printf '%s\n' 'obsolete payload artifact' > "$manifest"
 printf '%s\n' 'obsolete payload artifact' > "$rootfs"
@@ -132,10 +154,26 @@ boot_sha256=$(awk -F= '$1 == "boot_sha256" {print $2}' "$manifest")
 [[ "$boot_sha256" =~ ^[0-9a-f]{64}$ ]]
 [ "$(xz -dc "$rootfs" | sha256sum | awk '{print $1}')" = "$rootfs_sha256" ]
 [ "$(xz -dc "$rootfs" | wc -c | tr -d '[:space:]')" = "$rootfs_bytes" ]
-[ -z "$(xz -dc "$rootfs" | dd bs=1 skip=$((1024 + 0x78)) count=16 status=none | tr -d '\000')" ] || {
+neutral_rootfs="$work/neutral-rootfs.img"
+xz -dc "$rootfs" > "$neutral_rootfs"
+[ -z "$(dd if="$neutral_rootfs" bs=1 skip=$((1024 + 0x78)) count=16 status=none | tr -d '\000')" ] || {
     echo 'ERROR: payload rootfs retained its source-slot ext4 label' >&2
     exit 1
 }
+e2fsck -fn "$neutral_rootfs" >/dev/null
+source_loop=$(losetup --find --show --partscan --read-only "$image")
+retries=0
+while [ "$retries" -lt 20 ]; do
+    [ -b "${source_loop}p5" ] && break
+    sleep 1
+    retries=$((retries + 1))
+done
+[ "$(blkid -s LABEL -o value "${source_loop}p5")" = MP_ROOT_A ] || {
+    echo 'ERROR: payload generation did not restore source root label' >&2
+    exit 1
+}
+losetup -d "$source_loop"
+source_loop=""
 [ "$(sha256sum "$boot_tar" | awk '{print $1}')" = "$boot_sha256" ]
 tar -tf "$boot_tar" | grep -Fqx './cmdline.txt.template'
 if tar -tf "$boot_tar" | grep -Fqx './cmdline.txt'; then

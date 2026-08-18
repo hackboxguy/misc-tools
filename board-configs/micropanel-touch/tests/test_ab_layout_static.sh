@@ -56,6 +56,14 @@ grep -Fq 'mkfifo "$hash_fifo" "$count_fifo"' "$payload_generator"
 grep -Fq 'wait "$hash_pid"' "$payload_generator"
 grep -Fq 'PANEL_VARIANT=piscreen' "$repo_root/board-configs/micropanel-touch/packages/micropanel-touch-hook.sh"
 grep -Fqx 'DEFAULT_PANEL_VARIANT=piscreen' "$repo_root/board-configs/micropanel-touch/board.conf"
+base_app_hook=$(grep '^packages/micropanel-touch-hook.sh|' \
+    "$repo_root/board-configs/micropanel-touch/hooks.txt")
+luckfox_app_hook=$(grep '^packages/micropanel-touch-hook.sh|' \
+    "$repo_root/board-configs/micropanel-touch/hooks-luckfox-ctp.txt")
+[ "$base_app_hook" = "$luckfox_app_hook" ] || {
+    echo 'default and Luckfox hook lists pin different micropanel-touch revisions' >&2
+    exit 1
+}
 
 template=$(mktemp)
 trap 'rm -f "$template"' EXIT HUP INT TERM

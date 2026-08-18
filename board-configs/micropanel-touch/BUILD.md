@@ -4,17 +4,17 @@ From the `misc-tools` checkout, build the first Sprint 2.5 appliance slice
 with:
 
 ```sh
-APP_REVISION=07b261e645ef0f9498b9e2362c83eed1b2f5b034
 sudo ./build-image.sh --board=micropanel-touch --version=00.10 \
-  --app-revision="$APP_REVISION"
+  --app-ref=main
 ```
 
-Every MicroPanel Touch build requires an explicit full, lowercase application
-commit through `--app-revision`. The builder checks out that exact revision,
-records the resolved commit in the image manifest, and verifies it during the
-post-layout and payload checks. This prevents a release image from silently
-using an older hook pin after an application change. Obtain the value from the
-reviewed and pushed `micropanel-touch` commit; do not use a branch name.
+Every MicroPanel Touch build requires exactly one application source. Use
+`--app-ref=main` for the latest pushed main branch: the builder resolves it
+once to a full commit before preflight, then checks out, records, and verifies
+that immutable result during post-layout and payload checks. The build output
+and image manifest retain the resolved commit for traceability. For an exact
+rebuild, use `--app-revision=<full lowercase SHA>` instead. A build cannot
+silently reuse an old hook pin after an application change.
 
 ## A/B Stage 1 layout
 
@@ -24,7 +24,7 @@ explicit A/B option instead:
 
 ```sh
 sudo ./build-image.sh --board=micropanel-touch --variant=luckfox-ctp \
-  --layout=ab --version=00.13 --app-revision="$APP_REVISION"
+  --layout=ab --version=00.13 --app-ref=main
 ```
 
 The A/B artifact is fixed at 15,000 MiB, so flash it only to a nominal 16 GB
@@ -56,7 +56,7 @@ is read and is never materialized as a second uncompressed host file.
 ```sh
 sudo ./build-image.sh --board=micropanel-touch --variant=luckfox-ctp \
   --layout=ab --payload --payload-dir=/srv/micropanel-release/00.15 \
-  --version=00.15 --app-revision="$APP_REVISION"
+  --version=00.15 --app-ref=main
 ```
 
 This writes one matching `.rootfs.img.xz`, `.boot.tar`, and `.manifest` under

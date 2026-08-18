@@ -32,6 +32,8 @@
 #   --app-revision=SHA  Required full 40-character micropanel-touch commit
 #                       for MicroPanel Touch images; it is embedded and
 #                       verified in the resulting image before release
+#   --app-ref=REF       Resolve a MicroPanel Touch branch or tag (for example
+#                       main) to its current immutable commit before building
 #   --password=PASS     'pi' user password (default: DEFAULT_PASSWORD)
 #   --extend-size-mb=N  Image extension applied by sdm in the base stage
 #                       (default: EXTEND_SIZE_MB from board.conf; changing
@@ -97,7 +99,7 @@ stage_banner() { echo ""; echo "================================================
 BOARD="" VARIANT="" VERSION="" PASSWORD="" WORKSPACE=""
 ARG_BASEIMAGE="" ARG_IMAGE_URL="" ARG_START_FROM="" ARG_REPOBINS="" ARG_FLASH=""
 ARG_SOURCES_DIR="" ARG_OUTPUT_DIR="" ARG_EXTEND_SIZE="" ARG_BASE_PROFILE="" ARG_LAYOUT=""
-ARG_PAYLOAD_DIR="" ARG_APP_REVISION=""
+ARG_PAYLOAD_DIR="" ARG_APP_REVISION="" ARG_APP_REF=""
 SKIP_BASE=0 SKIP_KERNEL=0 SKIP_APPS=0
 FORCE_BASE=0 FORCE_KERNEL=0 FORCE_APPS=0
 DRY_RUN=0 OFFLINE=0 KEEP_BUILD_DEPS=0 DEBUG=0 LIST_BOARDS=0 BUILD_PAYLOAD=0
@@ -111,6 +113,7 @@ for arg in "$@"; do
         --layout=*)     ARG_LAYOUT="${arg#*=}" ;;
         --version=*)    VERSION="${arg#*=}" ;;
         --app-revision=*) ARG_APP_REVISION="${arg#*=}" ;;
+        --app-ref=*)    ARG_APP_REF="${arg#*=}" ;;
         --password=*)   PASSWORD="${arg#*=}" ;;
         --workspace=*)  WORKSPACE="${arg#*=}" ;;
         --sources-dir=*) ARG_SOURCES_DIR="${arg#*=}" ;;
@@ -181,6 +184,7 @@ SLOT_COMPATIBLE_BOARDS="pi4"
 # release builds.  Keeping it empty here means a forgotten release pin fails
 # before any cached or expensive stage begins.
 MICROPANEL_TOUCH_REVISION=""
+MICROPANEL_TOUCH_REF=""
 if [ $PROFILE_ONLY -eq 0 ]; then
     BOARD_DIR="$BOARD_CONFIGS_DIR/$BOARD"
     BOARD_CONF="$BOARD_DIR/board.conf"
@@ -253,6 +257,7 @@ fi
 [ -n "$ARG_EXTEND_SIZE" ] && EXTEND_SIZE_MB="$ARG_EXTEND_SIZE"
 [ -n "$ARG_IMAGE_URL" ] && IMAGE_URL_CFG="$ARG_IMAGE_URL"
 [ -n "$ARG_APP_REVISION" ] && MICROPANEL_TOUCH_REVISION="$ARG_APP_REVISION"
+[ -n "$ARG_APP_REF" ] && MICROPANEL_TOUCH_REF="$ARG_APP_REF"
 if [ -n "$ARG_LAYOUT" ]; then
     case "$ARG_LAYOUT" in
         single) AB_LAYOUT=0 ;;
@@ -297,8 +302,20 @@ if [ "$AB_LAYOUT" = "1" ]; then IMAGE_LAYOUT=ab; else IMAGE_LAYOUT=single; fi
     die "--layout=ab requires EXPAND_ROOT=0; first-boot root expansion would corrupt the A/B partition layout"
 [ "$BUILD_PAYLOAD" = "0" ] || [ "$AB_LAYOUT" = "1" ] || \
     die "--payload requires --layout=ab; single-slot images have no inactive update slot"
-[ "$BOARD" != "micropanel-touch" ] || [[ "$MICROPANEL_TOUCH_REVISION" =~ ^[0-9a-f]{40}$ ]] || \
-    die "MicroPanel Touch builds require --app-revision=<40-character lowercase micropanel-touch commit>"
+if [ "$BOARD" = "micropanel-touch" ]; then
+    [ -z "$MICROPANEL_TOUCH_REVISION" ] || [ -z "$MICROPANEL_TOUCH_REF" ] || \
+        die "use exactly one of --app-revision=<40-character lowercase micropanel-touch commit> or --app-ref=<branch-or-tag>"
+    if [ -n "$MICROPANEL_TOUCH_REVISION" ]; then
+        [[ "$MICROPANEL_TOUCH_REVISION" =~ ^[0-9a-f]{40}$ ]] || \
+            die "--app-revision must be a 40-character lowercase micropanel-touch commit"
+    elif [ -n "$MICROPANEL_TOUCH_REF" ]; then
+        [[ "$MICROPANEL_TOUCH_REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$ ]] && \
+            [[ "$MICROPANEL_TOUCH_REF" != *..* ]] && [[ "$MICROPANEL_TOUCH_REF" != *//* ]] || \
+            die "--app-ref must be a safe branch or tag name"
+    else
+        die "MicroPanel Touch builds require --app-revision=<40-character lowercase micropanel-touch commit> or --app-ref=<branch-or-tag>"
+    fi
+fi
 [ "$REQUIRE_PASSWORD" = "0" ] || [ -n "$PASSWORD" ] || \
     die "Board $BOARD requires an explicit --password=PASS for its development SSH account"
 
@@ -873,6 +890,21 @@ resolve_apps_input() {
     fi
 }
 
+# A moving branch is a convenience input only. Resolve it once to a full
+# commit before parsing hooks or computing the apps stamp, then use that
+# immutable value for checkout, image metadata, and post-build verification.
+resolve_micropanel_touch_revision() {
+    [ "$BOARD" = "micropanel-touch" ] || return 0
+    [ -n "$MICROPANEL_TOUCH_REVISION" ] && return 0
+    [ -n "$MICROPANEL_TOUCH_REF" ] || die "MicroPanel Touch application revision is unavailable"
+    local resolved
+    resolved=$(git_remote_rev https://github.com/hackboxguy/micropanel-touch.git "$MICROPANEL_TOUCH_REF")
+    [[ "$resolved" =~ ^[0-9a-f]{40}$ ]] || \
+        die "unable to resolve --app-ref=$MICROPANEL_TOUCH_REF to a full micropanel-touch commit"
+    MICROPANEL_TOUCH_REVISION="$resolved"
+    info "resolved micropanel-touch ref=$MICROPANEL_TOUCH_REF revision=$MICROPANEL_TOUCH_REVISION"
+}
+
 run_stage_apps() {
     resolve_apps_input
     if [ $SKIP_APPS -eq 1 ]; then
@@ -987,7 +1019,9 @@ show_plan() {
     echo "  board:     $BOARD${VARIANT:+ ($VARIANT)}"
     echo "  layout:    $IMAGE_LAYOUT"
     echo "  version:   $VERSION"
-    [ "$BOARD" != "micropanel-touch" ] || echo "  app rev:   $MICROPANEL_TOUCH_REVISION"
+    if [ "$BOARD" = "micropanel-touch" ]; then
+        echo "  app rev:   $MICROPANEL_TOUCH_REVISION${MICROPANEL_TOUCH_REF:+ (from $MICROPANEL_TOUCH_REF)}"
+    fi
     echo "  workspace: $WORKSPACE"
     echo "  vanilla:   $VANILLA_XZ"
     echo "  repobins:  $REPOBINS"
@@ -1019,9 +1053,12 @@ show_plan() {
 main() {
     log "misc-tools unified image builder"
     info "board=$BOARD${VARIANT:+ variant=$VARIANT} layout=$IMAGE_LAYOUT version=$VERSION workspace=$WORKSPACE"
-    [ "$BOARD" != "micropanel-touch" ] || info "micropanel-touch revision=$MICROPANEL_TOUCH_REVISION"
 
     setup_git_credentials   # one-shot GIT_USERNAME/GIT_TOKEN, if provided
+    resolve_micropanel_touch_revision
+    if [ "$BOARD" = "micropanel-touch" ]; then
+        info "micropanel-touch revision=$MICROPANEL_TOUCH_REVISION${MICROPANEL_TOUCH_REF:+ (from $MICROPANEL_TOUCH_REF)}"
+    fi
     preflight
     if [ $DRY_RUN -eq 1 ]; then
         show_plan

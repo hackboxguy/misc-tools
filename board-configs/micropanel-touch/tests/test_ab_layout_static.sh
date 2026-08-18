@@ -50,7 +50,10 @@ grep -Fq 'for tool in sfdisk fdisk mkfs.ext4 mkfs.vfat e2fsck resize2fs e2label 
 grep -Fq "bash \"\$ab_static_test\"" "$builder"
 grep -Fq -- '--payload requires --layout=ab' "$builder"
 grep -Fq -- '--app-revision=SHA' "$builder"
-grep -Fq 'MicroPanel Touch builds require --app-revision=<40-character lowercase micropanel-touch commit>' "$builder"
+grep -Fq -- '--app-ref=REF' "$builder"
+grep -Fq 'resolve_micropanel_touch_revision()' "$builder"
+grep -Fq 'resolved=$(git_remote_rev https://github.com/hackboxguy/micropanel-touch.git "$MICROPANEL_TOUCH_REF")' "$builder"
+grep -Fq 'MicroPanel Touch builds require --app-revision=<40-character lowercase micropanel-touch commit> or --app-ref=<branch-or-tag>' "$builder"
 grep -Fq 'MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" "$PAYLOAD_IMAGE_VERIFIER" "$FINAL_IMG"' "$builder"
 grep -Fq 'MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" \' "$builder"
 grep -Fq 'make-ab-update-payload.sh' "$builder"
@@ -89,7 +92,12 @@ grep -Fq 'verify_installed_app_revision "$root_mount"' "$finalizer"
 missing_revision_output=$("$builder" --board=micropanel-touch --variant=luckfox-ctp \
     --layout=ab --version=fixture --dry-run 2>&1 || true)
 printf '%s\n' "$missing_revision_output" | \
-    grep -Fq 'MicroPanel Touch builds require --app-revision=<40-character lowercase micropanel-touch commit>'
+    grep -Fq 'MicroPanel Touch builds require --app-revision=<40-character lowercase micropanel-touch commit> or --app-ref=<branch-or-tag>'
+conflicting_app_source_output=$("$builder" --board=micropanel-touch --variant=luckfox-ctp \
+    --layout=ab --version=fixture --dry-run \
+    --app-revision=0123456789012345678901234567890123456789 --app-ref=main 2>&1 || true)
+printf '%s\n' "$conflicting_app_source_output" | \
+    grep -Fq 'use exactly one of --app-revision=<40-character lowercase micropanel-touch commit> or --app-ref=<branch-or-tag>'
 
 template=$(mktemp)
 trap 'rm -f "$template"' EXIT HUP INT TERM

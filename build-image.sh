@@ -921,7 +921,7 @@ run_stage_apps() {
     local extra=()
     [ $KEEP_BUILD_DEPS -eq 1 ] && extra+=(--keep-build-deps)
     [ $DEBUG -eq 1 ] && extra+=(--debug)
-    "$IMAGER" \
+    MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" "$IMAGER" \
         --mode=incremental \
         --baseimage="$APPS_INPUT" \
         --output="$work" \

@@ -173,6 +173,32 @@ with malformed bundles) and
 (loopback A/B slots, the pipe path, and real FAT32/exFAT USB discovery
 including the zero-bundle and two-bundle refusals).
 
+#### Stage 2b bench evidence — complete, 2026-08-19
+
+A `00.25` A/B card accepted the published `00.26`
+`micropanel-touch-luckfox-ctp.mpupdate` as the only file on an **unlabelled**
+232.9 GB stick, in both **FAT32** and **exFAT**, in both directions, each time
+committing after the 30-second candidate health window and surviving a physical
+power-cycle. The app revision was `86dafcadd7b82d02072251d2ba3a8ef4b7451e2c`
+and the bundle's ed25519 signature verified against the public key baked into
+the running image.
+
+All four refusal classes were exercised and stayed distinct: no media
+(`failed-source`), media without a bundle and two bundles (`failed-payload`,
+refusing rather than choosing), an already-installed version (`failed-version`,
+decided after ~234 bytes of a 1.67 GB file), and a bundle with one changed
+decompressed byte (`failed-integrity` after the full 5 GiB write, before
+`e2label`, boot files, arm or reboot). Both power cuts passed: mid-write left
+the target dirty and **unlabelled** and returned unattended to the committed
+slot, and a cut after arm but before commit recorded `state=fallback`.
+
+Two bench notes. The fixture's USB device reports `RM=0 HOTPLUG=0`, which is
+why discovery keys on USB transport rather than the removable flag. And the
+privileged broker's `PrivateTmp=yes` puts the handler's source mount in a
+private mount namespace, so an SSH-side `mountpoint` check on
+`/run/micropanel-touch-update/source` is meaningless — read
+`/proc/<handler-pid>/mounts` instead.
+
 #### Latest Stage 2 bench evidence — complete, 2026-08-18
 
 `misc-tools` commit `bde05af` generated the checksum-safe Luckfox CTP

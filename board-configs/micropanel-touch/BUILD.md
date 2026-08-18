@@ -47,34 +47,99 @@ The A/B build uses a separate `out/micropanel-touch-luckfox-ctp-ab/`
 directory and an `-ab-` filename infix. This prevents it being mistaken for,
 or overwriting, a same-version single-slot artifact.
 
-### Stage 2 payload output
+### Stage 2b update bundle output
 
-Add `--payload` to derive the unsigned, slot-neutral update artifacts from
-the same completed A/B image. The root filesystem is compressed only while it
-is read and is never materialized as a second uncompressed host file.
+Add `--payload` to derive the signed, slot-neutral update bundle from the same
+completed A/B image. The root filesystem is compressed only while it is read
+and is never materialized as a second uncompressed host file.
 
 ```sh
 sudo ./build-image.sh --board=micropanel-touch --variant=luckfox-ctp \
-  --layout=ab --payload --payload-dir=/srv/micropanel-release/00.15 \
-  --version=00.15 --app-ref=main
+  --layout=ab --payload --payload-dir=/srv/micropanel-release/00.25 \
+  --version=00.25 --app-ref=main
 ```
 
-This writes one matching `.rootfs.img.xz`, `.boot.tar`, and `.manifest` under
-the chosen payload directory. Copy all three, without renaming them, to the
-root of one FAT32 USB filesystem labelled `MP_UPDATE`. FAT32 labels are limited
-to eleven characters; this label is deliberately within that limit. The Stage
-2 UI mounts only that labelled filesystem read-only; it rejects a missing,
-extra, renamed, wrong-variant, wrong-board, malformed, or hash-mismatched
-payload before it can arm tryboot.
+This writes exactly **two** files into the chosen payload directory:
+
+```
+micropanel-touch-<variant>.mpupdate    the update bundle
+micropanel-touch-<variant>.manifest    a standalone copy of its manifest
+```
+
+Both names are deliberately **version-less**: the release version lives inside
+the manifest, so the Stage 4 `releases/latest/download/` URLs are stable and a
+stick never carries two competing names. Rerunning `--payload` for the same
+payload directory replaces both files atomically; wait for the successful
+`Created update payload` message before copying anything.
+
+**The complete end-user instruction is one sentence:** *copy the
+`micropanel-touch-<variant>.mpupdate` file onto a USB stick, plug it into the
+panel, and tap System → Software Update → Check USB stick.* No formatting, no
+volume label, no partitioning, and no second file. The panel accepts any
+USB-transport FAT32 or exFAT filesystem — including the exFAT that Windows
+gives sticks larger than 32 GB — and requires exactly one `*.mpupdate` file
+across all attached USB media. It refuses zero bundles and refuses two.
+
+The bundle is an uncompressed **ustar** archive whose members appear in one
+fixed order, which is what lets the device read it in a single pass from a file
+or a pipe:
+
+| # | Member | Purpose |
+|---|---|---|
+| 1 | `manifest` | `SettingsFile` grammar, `format=2`; first so a wrong variant, unsupported board, or already-installed version aborts after a few kilobytes |
+| 2 | `manifest.sig` | ed25519 signature over member 1. Present in every published bundle from the first `format=2` release; the device accepts and ignores it until Stage 4 turns verification on |
+| 3 | `boot.tar` | `os_prefix` tree plus the slot-neutral `cmdline.txt.template`; staged root-only and hash-checked before use |
+| 4 | `rootfs.img.xz` | last, so the multi-gigabyte tail streams straight into the inactive slot |
+
+The former `format=1` triplet (`.rootfs.img.xz`, `.boot.tar`, `.manifest` on a
+FAT32 stick labelled `MP_UPDATE`) is **retired**. It is now a build
+intermediate only and the device-side reader rejects `format=1`. This is a
+deliberate prototype-phase break: an `MP_UPDATE` stick prepared for an earlier
+release will not be recognized by a Stage 2b image.
 
 The generated root filesystem deliberately has no ext4 volume label, so it is
 safe to write to either inactive slot. The generator clears that label with
 `e2label` (preserving ext4 metadata checksums), streams the artifact, then
-restores `MP_ROOT_A` on the source image before it publishes the payload.
+restores `MP_ROOT_A` on the source image before it publishes the bundle.
 
-It is safe to rerun `--payload` for the same version and payload directory:
-the completed triplet replaces the matching previous triplet. Wait for the
-successful `Created update payload` message before copying anything to USB.
+### Release signing key custody
+
+Stage 2b signs on the build side even though the device does not yet verify.
+That ordering is the point: when Stage 4 enables device-side verification,
+every release published since Stage 2b is already signed, so no migration
+release is needed — and the §11 CM4 secure-boot path requires that a signing
+process exist and be exercised long before any OTP fuse is burned.
+
+The keypair lives **outside every git checkout**, by default at:
+
+```
+/etc/micropanel-touch/release-signing/ed25519-release.key      root, 0600
+/etc/micropanel-touch/release-signing/ed25519-release.key.pub  root, 0644
+```
+
+`build-image.sh` creates it on first use and prints a custody notice;
+`--signing-key=FILE` selects a different location. The public half is baked
+into every A/B image at `/usr/lib/micropanel-touch/update-signing-key.pub`, so:
+
+- **back the private key up offline before publishing anything with it.**
+  Losing it means no already-flashed device will accept a future signed
+  release, and recovery is a reflash;
+- **changing the key changes the image contract.** Devices flashed with an
+  older public key will reject the new key's releases once Stage 4 lands.
+
+`board-configs/micropanel-touch/packages/micropanel-touch-release-key.sh` is
+the helper behind all of this (`ensure`, `key-path`, `public-path`, `sign`,
+`verify`) and can be used directly to verify a published manifest.
+
+### Reserved Stage 4 OTA location
+
+Every A/B image also ships a root-owned, currently unused
+`/usr/lib/micropanel-touch/update-source.conf` holding the version-less
+`MANIFEST_URL` and `BUNDLE_URL` for this variant. It is rendered from
+`MICROPANEL_TOUCH_RELEASE_URL_TEMPLATE` in `board.conf`, which is also the one
+place that names the application/release repository — the builder resolves
+`--app-ref` against it and both hook lists expand it. Enabling OTA therefore
+needs no new image contract and no second copy of the repository URL.
 
 An update streams directly into the inactive root partition, then reboots into
 that candidate once. Do not remove power while the display says it is writing.
@@ -85,6 +150,13 @@ one-shot candidate is abandoned and the previously committed slot returns.
 Every published payload must first complete a Pi 4 + Luckfox CTP bench boot
 acceptance.
 
+**Stream-stall policy (decision, 2026-08-18).** The rootfs write is the only
+phase with no natural upper bound, so it detects its own stall: if the target
+device has accepted no new bytes for `MICROPANEL_UPDATE_STALL_SECONDS`
+(default 300) the handler aborts with `failed-stall` before anything is armed.
+Every other phase remains covered by the existing 30-minute broker ceiling and
+the systemd service-stop backstop; no second timer was added for them.
+
 The static A/B contract check runs automatically during an A/B build's
 preflight. The finalizer/verifier integration fixture remains a manual
 pre-flash check and uses only a temporary loopback image:
@@ -93,6 +165,13 @@ pre-flash check and uses only a temporary loopback image:
 board-configs/micropanel-touch/tests/test_ab_layout_static.sh
 sudo board-configs/micropanel-touch/tests/test_ab_layout_integration.sh
 ```
+
+The application repository carries the matching device-side checks:
+`ctest -R update-bundle-reader` (no root; drives the real reader through a pipe
+with malformed bundles) and
+`sudo tests/test_system_update_handler_integration.sh handlers/micropanel-touch-system-update`
+(loopback A/B slots, the pipe path, and real FAT32/exFAT USB discovery
+including the zero-bundle and two-bundle refusals).
 
 #### Latest Stage 2 bench evidence — complete, 2026-08-18
 

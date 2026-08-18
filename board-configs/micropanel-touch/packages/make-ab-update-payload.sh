@@ -1,8 +1,21 @@
 #!/bin/bash
-# Build the unsigned, slot-neutral Stage 2 update payload from a completed
-# MicroPanel Touch A/B image.  This is host-side only: the device-side updater
-# streams rootfs.img.xz directly to its inactive slot and renders cmdline.txt
-# from the template carried in boot.tar.
+# Build the slot-neutral format=2 update bundle from a completed MicroPanel
+# Touch A/B image.  This is host-side only: the device-side updater streams the
+# bundle's rootfs member straight into its inactive slot and renders
+# cmdline.txt from the template carried in the boot member.
+#
+# Published assets (deliberately version-less so the Stage 4
+# `releases/latest/download/` URLs are stable; the real version lives inside
+# the manifest):
+#
+#   micropanel-touch-<variant>.mpupdate   outer ustar bundle, fixed order:
+#                                           1 manifest
+#                                           2 manifest.sig
+#                                           3 boot.tar
+#                                           4 rootfs.img.xz   (last, streamed)
+#   micropanel-touch-<variant>.manifest   standalone copy for cheap checks
+#
+# The former format=1 triplet is now a build intermediate only.
 set -euo pipefail
 
 export LC_ALL=C
@@ -12,11 +25,15 @@ output_dir=""
 version=""
 variant=""
 boards=""
+signing_key=""
+
+script_dir=$(cd "$(dirname "$0")" && pwd)
+release_key_tool=${MICROPANEL_RELEASE_KEY_TOOL:-$script_dir/micropanel-touch-release-key.sh}
 
 usage() {
     cat >&2 <<'EOF'
 Usage: make-ab-update-payload.sh --image FILE --output-dir DIR --version VER \
-       --variant NAME --boards LIST
+       --variant NAME --boards LIST [--signing-key=FILE]
 EOF
     exit 2
 }
@@ -28,6 +45,7 @@ for argument in "$@"; do
         --version=*) version=${argument#*=} ;;
         --variant=*) variant=${argument#*=} ;;
         --boards=*) boards=${argument#*=} ;;
+        --signing-key=*) signing_key=${argument#*=} ;;
         --help|-h) usage ;;
         *) echo "ERROR: unknown option: $argument" >&2; usage ;;
     esac
@@ -46,9 +64,13 @@ safe_boards() {
 safe_token "$version" || { echo 'ERROR: --version must be a safe release token' >&2; exit 1; }
 safe_token "$variant" || { echo 'ERROR: --variant must be a safe release token' >&2; exit 1; }
 safe_boards "$boards" || { echo 'ERROR: --boards must be a comma-separated board allow-list' >&2; exit 1; }
+[ -x "$release_key_tool" ] || {
+    echo "ERROR: release signing helper is unavailable: $release_key_tool" >&2
+    exit 1
+}
 
 for tool in losetup mount umount mountpoint mktemp mkfifo dd tee sha256sum xz tar sed awk stat install mv rm sync \
-            blkid blockdev wc tr cp mkdir sleep e2label; do
+            blkid blockdev wc tr cp mkdir sleep e2label openssl; do
     command -v "$tool" >/dev/null 2>&1 || {
         echo "ERROR: required host tool is missing: $tool" >&2
         exit 1
@@ -58,8 +80,7 @@ done
 loop=""
 boot_mount=""
 work=""
-rootfs_publish=""
-boot_tar_publish=""
+bundle_publish=""
 manifest_publish=""
 hash_fifo=""
 count_fifo=""
@@ -84,6 +105,9 @@ restore_source_root_label() {
 
 cleanup() {
     local status=$?
+    # V5-01: the signal traps otherwise re-enter this function through EXIT.
+    # Disarm them first so the unmount and label restore run exactly once.
+    trap - EXIT HUP INT TERM
     [ -z "$hash_pid" ] || wait "$hash_pid" 2>/dev/null || true
     [ -z "$count_pid" ] || wait "$count_pid" 2>/dev/null || true
     if [ -n "$boot_mount" ] && mountpoint -q "$boot_mount"; then
@@ -95,7 +119,7 @@ cleanup() {
         fi
     fi
     [ -z "$loop" ] || losetup -d "$loop" 2>/dev/null || true
-    rm -f -- "$rootfs_publish" "$boot_tar_publish" "$manifest_publish"
+    rm -f -- "$bundle_publish" "$manifest_publish"
     rm -f -- "$hash_fifo" "$count_fifo"
     [ -z "$work" ] || rm -rf "$work"
     exit "$status"
@@ -136,7 +160,7 @@ esac
 
 work=$(mktemp -d)
 boot_mount="$work/boot-mounted"
-install -d "$boot_mount" "$work/boot-tree"
+install -d "$boot_mount" "$work/boot-tree" "$work/bundle"
 mount -o ro "${loop}p1" "$boot_mount"
 [ -d "$boot_mount/A" ] || { echo 'ERROR: A/B image has no A boot tree' >&2; exit 1; }
 [ -f "$boot_mount/A/cmdline.txt" ] || { echo 'ERROR: A boot tree has no cmdline.txt' >&2; exit 1; }
@@ -159,19 +183,20 @@ grep -Fqx "root=LABEL=@MICROPANEL_SLOT@" <(tr ' ' '\n' < "$work/boot-tree/cmdlin
     exit 1
 }
 
-prefix="micropanel-touch-${version}-${variant}"
+# Published names carry no version: the manifest is the authority on which
+# release this is, and stable names give Stage 4 a stable download URL.
+asset_prefix="micropanel-touch-${variant}"
 mkdir -p "$output_dir"
-rootfs="$output_dir/${prefix}.rootfs.img.xz"
-boot_tar="$output_dir/${prefix}.boot.tar"
-manifest="$output_dir/${prefix}.manifest"
-for destination in "$rootfs" "$boot_tar" "$manifest"; do
+bundle="$output_dir/${asset_prefix}.mpupdate"
+manifest="$output_dir/${asset_prefix}.manifest"
+for destination in "$bundle" "$manifest"; do
     [ ! -d "$destination" ] || {
         echo "ERROR: payload destination is a directory: $destination" >&2
         exit 1
     }
 done
 
-rootfs_tmp="$work/rootfs.img.xz"
+rootfs_tmp="$work/bundle/rootfs.img.xz"
 rootfs_digest="$work/rootfs.sha256"
 rootfs_count="$work/rootfs.bytes"
 rootfs_bytes=$(blockdev --getsize64 "${loop}p5")
@@ -225,36 +250,63 @@ restore_source_root_label
 }
 
 tar --format=posix --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 \
-    -C "$work/boot-tree" -cf "$work/boot.tar" .
-boot_sha256=$(sha256sum "$work/boot.tar" | awk '{print $1}')
+    -C "$work/boot-tree" -cf "$work/bundle/boot.tar" .
+boot_sha256=$(sha256sum "$work/bundle/boot.tar" | awk '{print $1}')
 [[ "$boot_sha256" =~ ^[0-9a-f]{64}$ ]] || { echo 'ERROR: invalid boot archive digest' >&2; exit 1; }
 
-# Rebuilding an existing release version is intentional. Stage each artifact
-# beside its destination, then publish only after the complete replacement
-# triplet has been generated and checked. Publishing the manifest last makes a
-# partially interrupted publish fail closed at the device-side hash checks.
-rootfs_publish=$(mktemp "$output_dir/.${prefix}.rootfs.img.xz.XXXXXX")
-boot_tar_publish=$(mktemp "$output_dir/.${prefix}.boot.tar.XXXXXX")
-manifest_publish=$(mktemp "$output_dir/.${prefix}.manifest.XXXXXX")
-install -m0644 "$rootfs_tmp" "$rootfs_publish"
-install -m0644 "$work/boot.tar" "$boot_tar_publish"
-cat > "$work/manifest" <<EOF
+cat > "$work/bundle/manifest" <<EOF
 version=$version
 variant=$variant
 boards=$boards
 rootfs_sha256=$rootfs_sha256
 rootfs_bytes=$rootfs_bytes
 boot_sha256=$boot_sha256
-format=1
+format=2
 EOF
-install -m0644 "$work/manifest" "$manifest_publish"
-sync "$rootfs_publish" "$boot_tar_publish" "$manifest_publish"
-mv -f -- "$rootfs_publish" "$rootfs"
-rootfs_publish=""
-mv -f -- "$boot_tar_publish" "$boot_tar"
-boot_tar_publish=""
+
+# Sign from the first format=2 release so Stage 4 can switch verification on
+# without needing a migration release. The device currently accepts and ignores
+# this member; it is never optional on the build side.
+[ -n "$signing_key" ] || signing_key=$("$release_key_tool" key-path)
+export MICROPANEL_RELEASE_KEY="$signing_key"
+"$release_key_tool" ensure
+"$release_key_tool" sign "$work/bundle/manifest" "$work/bundle/manifest.sig"
+"$release_key_tool" verify "$work/bundle/manifest" "$work/bundle/manifest.sig" || {
+    echo 'ERROR: freshly written manifest signature does not verify' >&2
+    exit 1
+}
+
+# ustar keeps every member header a single fixed 512-byte block, which is what
+# lets the device reader be a straightforward single pass over a pipe. Its
+# 8 GiB per-member ceiling is far above any slot artifact, but check it rather
+# than emit a silently truncated size field.
+for member in manifest manifest.sig boot.tar rootfs.img.xz; do
+    chmod 0644 "$work/bundle/$member"
+    [ "$(stat -c %s "$work/bundle/$member")" -lt 8589934592 ] || {
+        echo "ERROR: bundle member exceeds the ustar size limit: $member" >&2
+        exit 1
+    }
+done
+# Member order is part of the format: manifest first so a wrong or already
+# installed release aborts after kilobytes, rootfs last so the multi-gigabyte
+# tail streams straight into the inactive slot.
+tar --format=ustar --owner=0 --group=0 --numeric-owner --mtime=@0 \
+    -C "$work/bundle" -cf "$work/bundle.mpupdate" \
+    manifest manifest.sig boot.tar rootfs.img.xz
+
+# Rebuilding a release is intentional. Stage each asset beside its destination,
+# then publish only after the complete replacement has been generated and
+# checked. Publishing the standalone manifest last makes a partially
+# interrupted publish fail closed for a future "check for updates" reader.
+bundle_publish=$(mktemp "$output_dir/.${asset_prefix}.mpupdate.XXXXXX")
+manifest_publish=$(mktemp "$output_dir/.${asset_prefix}.manifest.XXXXXX")
+install -m0644 "$work/bundle.mpupdate" "$bundle_publish"
+install -m0644 "$work/bundle/manifest" "$manifest_publish"
+sync "$bundle_publish" "$manifest_publish"
+mv -f -- "$bundle_publish" "$bundle"
+bundle_publish=""
 mv -f -- "$manifest_publish" "$manifest"
 manifest_publish=""
-sync "$rootfs" "$boot_tar" "$manifest"
+sync "$bundle" "$manifest"
 
-echo "Created update payload: $manifest"
+echo "Created update payload: $bundle"

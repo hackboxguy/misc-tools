@@ -63,9 +63,12 @@
 #   --dry-run           Preflight checks + build plan only, change nothing
 #   --offline           No downloads/clones/fetches; fail if anything is missing
 #   --flash=/dev/sdX    Write the final image to a block device (asks first)
-#   --payload           Create the unsigned Stage 2 update payload beside an
-#                       A/B image (rootfs.img.xz, boot.tar, manifest)
+#   --payload           Create the signed Stage 2b `.mpupdate` update bundle
+#                       beside an A/B image (bundle + standalone manifest)
 #   --payload-dir=DIR   Directory for --payload (default: <output>/payloads)
+#   --signing-key=FILE  ed25519 release signing key for --payload (default:
+#                       /etc/micropanel-touch/release-signing/ed25519-release.key,
+#                       created on first use)
 #   --keep-build-deps   Pass through to imager (skip build-dep purge)
 #   --debug             Pass --debug to imager (keep mounted on error)
 #   --list-boards       List available board configs and exit
@@ -99,7 +102,7 @@ stage_banner() { echo ""; echo "================================================
 BOARD="" VARIANT="" VERSION="" PASSWORD="" WORKSPACE=""
 ARG_BASEIMAGE="" ARG_IMAGE_URL="" ARG_START_FROM="" ARG_REPOBINS="" ARG_FLASH=""
 ARG_SOURCES_DIR="" ARG_OUTPUT_DIR="" ARG_EXTEND_SIZE="" ARG_BASE_PROFILE="" ARG_LAYOUT=""
-ARG_PAYLOAD_DIR="" ARG_APP_REVISION="" ARG_APP_REF=""
+ARG_PAYLOAD_DIR="" ARG_APP_REVISION="" ARG_APP_REF="" ARG_SIGNING_KEY=""
 SKIP_BASE=0 SKIP_KERNEL=0 SKIP_APPS=0
 FORCE_BASE=0 FORCE_KERNEL=0 FORCE_APPS=0
 DRY_RUN=0 OFFLINE=0 KEEP_BUILD_DEPS=0 DEBUG=0 LIST_BOARDS=0 BUILD_PAYLOAD=0
@@ -120,6 +123,7 @@ for arg in "$@"; do
         --output-dir=*)  ARG_OUTPUT_DIR="${arg#*=}" ;;
         --payload)       BUILD_PAYLOAD=1 ;;
         --payload-dir=*) ARG_PAYLOAD_DIR="${arg#*=}" ;;
+        --signing-key=*) ARG_SIGNING_KEY="${arg#*=}" ;;
         --extend-size-mb=*) ARG_EXTEND_SIZE="${arg#*=}" ;;
         --base-profile=*)   ARG_BASE_PROFILE="${arg#*=}" ;;
         --baseimage=*)  ARG_BASEIMAGE="${arg#*=}" ;;
@@ -403,10 +407,19 @@ fi
 # variant.  MicroPanel Touch's base PiScreen image is `piscreen`, while an
 # explicit --variant continues to name its own payload/manifest variant.
 PAYLOAD_VARIANT="${VARIANT:-${DEFAULT_PANEL_VARIANT:-default}}"
-PAYLOAD_PREFIX="micropanel-touch-${VERSION}-${PAYLOAD_VARIANT}"
+# Stage 2b publishes version-less asset names so the Stage 4
+# releases/latest/download/ URLs are stable; the version lives in the manifest.
+PAYLOAD_PREFIX="micropanel-touch-${PAYLOAD_VARIANT}"
+PAYLOAD_BUNDLE="$PAYLOAD_DIR/$PAYLOAD_PREFIX.mpupdate"
 PAYLOAD_MANIFEST="$PAYLOAD_DIR/$PAYLOAD_PREFIX.manifest"
 PAYLOAD_GENERATOR="$BOARD_DIR/packages/make-ab-update-payload.sh"
 PAYLOAD_IMAGE_VERIFIER="$BOARD_DIR/packages/verify-ab-image-layout.sh"
+RELEASE_KEY_TOOL="$BOARD_DIR/packages/micropanel-touch-release-key.sh"
+RELEASE_SIGNING_KEY="${ARG_SIGNING_KEY:-}"
+if [ -z "$RELEASE_SIGNING_KEY" ] && [ -x "$RELEASE_KEY_TOOL" ]; then
+    RELEASE_SIGNING_KEY="$("$RELEASE_KEY_TOOL" key-path)"
+fi
+RELEASE_SIGNING_PUBLIC_KEY="${RELEASE_SIGNING_KEY:+$RELEASE_SIGNING_KEY.pub}"
 
 # ------------------------------------------------------------------------------
 # Hook-list parsing (for preflight + stamps)
@@ -617,10 +630,25 @@ preflight() {
         if [ "$BUILD_PAYLOAD" = "1" ]; then
             [ -x "$PAYLOAD_GENERATOR" ] && pf_ok "A/B payload generator: ${PAYLOAD_GENERATOR#"$SCRIPT_DIR"/}" \
                 || pf_fail "A/B payload generator missing or not executable: $PAYLOAD_GENERATOR"
-            for tool in tar xz tee sha256sum; do
+            for tool in tar xz tee sha256sum openssl; do
                 command -v "$tool" >/dev/null 2>&1 && pf_ok "A/B payload tool: $tool" \
                     || pf_fail "A/B payload tool not found: $tool"
             done
+        fi
+        # The release public key is baked into every A/B image so Stage 4 can
+        # switch verification on without a migration release. Create the
+        # keypair now if it does not exist yet, whether or not this run also
+        # publishes a payload.
+        if [ -x "$RELEASE_KEY_TOOL" ] && [ -n "$RELEASE_SIGNING_KEY" ]; then
+            if [ "$DRY_RUN" = "1" ] && [ ! -f "$RELEASE_SIGNING_PUBLIC_KEY" ]; then
+                pf_warn "release signing key absent; a real build would create $RELEASE_SIGNING_KEY"
+            elif MICROPANEL_RELEASE_KEY="$RELEASE_SIGNING_KEY" "$RELEASE_KEY_TOOL" ensure; then
+                pf_ok "release signing key: $RELEASE_SIGNING_KEY"
+            else
+                pf_fail "unable to prepare the release signing key: $RELEASE_SIGNING_KEY"
+            fi
+        else
+            pf_fail "release signing helper is unavailable: $RELEASE_KEY_TOOL"
         fi
     fi
 
@@ -898,7 +926,9 @@ resolve_micropanel_touch_revision() {
     [ -n "$MICROPANEL_TOUCH_REVISION" ] && return 0
     [ -n "$MICROPANEL_TOUCH_REF" ] || die "MicroPanel Touch application revision is unavailable"
     local resolved
-    resolved=$(git_remote_rev https://github.com/hackboxguy/micropanel-touch.git "$MICROPANEL_TOUCH_REF")
+    [ -n "${MICROPANEL_TOUCH_APP_REPO:-}" ] || \
+        die "board config must define MICROPANEL_TOUCH_APP_REPO for MicroPanel Touch builds"
+    resolved=$(git_remote_rev "$MICROPANEL_TOUCH_APP_REPO" "$MICROPANEL_TOUCH_REF")
     [[ "$resolved" =~ ^[0-9a-f]{40}$ ]] || \
         die "unable to resolve --app-ref=$MICROPANEL_TOUCH_REF to a full micropanel-touch commit"
     MICROPANEL_TOUCH_REVISION="$resolved"
@@ -957,6 +987,9 @@ run_post_image_hook() {
         AB_ROOT_PARTITION_MB="$AB_ROOT_PARTITION_MB" \
         AB_FACTORY_PARTITION_MB="$AB_FACTORY_PARTITION_MB" \
         SLOT_COMPATIBLE_BOARDS="$SLOT_COMPATIBLE_BOARDS" \
+        IMAGE_VERSION="$VERSION" \
+        UPDATE_SIGNING_PUBLIC_KEY="$RELEASE_SIGNING_PUBLIC_KEY" \
+        UPDATE_RELEASE_URL_TEMPLATE="${MICROPANEL_TOUCH_RELEASE_URL_TEMPLATE:-}" \
         bash "$POST_IMAGE_HOOK"
 }
 
@@ -968,17 +1001,18 @@ run_payload() {
     [ -f "$FINAL_IMG" ] || die "Cannot create payload; final image is missing: $FINAL_IMG"
     [ -x "$PAYLOAD_GENERATOR" ] || die "A/B payload generator is unavailable: $PAYLOAD_GENERATOR"
     [ -x "$PAYLOAD_IMAGE_VERIFIER" ] || die "A/B image verifier is unavailable: $PAYLOAD_IMAGE_VERIFIER"
-    stage_banner "Stage 5: A/B update payload"
+    stage_banner "Stage 5: A/B update bundle"
     mkdir -p "$PAYLOAD_DIR"
-    if [ -e "$PAYLOAD_MANIFEST" ]; then
-        info "Replacing existing payload triplet: $PAYLOAD_PREFIX"
+    if [ -e "$PAYLOAD_BUNDLE" ]; then
+        info "Replacing existing update bundle: $PAYLOAD_PREFIX.mpupdate"
     fi
     "$PAYLOAD_GENERATOR" \
         --image="$FINAL_IMG" \
         --output-dir="$PAYLOAD_DIR" \
         --version="$VERSION" \
         --variant="$PAYLOAD_VARIANT" \
-        --boards="$SLOT_COMPATIBLE_BOARDS"
+        --boards="$SLOT_COMPATIBLE_BOARDS" \
+        --signing-key="$RELEASE_SIGNING_KEY"
     info "Verifying source A/B image after payload generation..."
     MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" "$PAYLOAD_IMAGE_VERIFIER" "$FINAL_IMG"
     own_by_user "$PAYLOAD_DIR"
@@ -1041,7 +1075,7 @@ show_plan() {
     resolve_apps_input
     plan_stage "apps" "$SKIP_APPS" "$FORCE_APPS" "$OUT_DIR/.stamp" "$(apps_hash)" "$FINAL_IMG"
     if [ "$BUILD_PAYLOAD" = "1" ]; then
-        printf "  %-8s %-18s -> %s\n" "payload" "RUN" "$PAYLOAD_MANIFEST"
+        printf "  %-8s %-18s -> %s\n" "payload" "RUN" "$PAYLOAD_BUNDLE"
     fi
     echo ""
     info "Dry run complete - nothing was changed"
@@ -1085,7 +1119,7 @@ main() {
     stage_banner "Build complete"
     echo "  Final image: $FINAL_IMG"
     [ -f "$FINAL_IMG" ] && echo "  Size:        $(du -h "$FINAL_IMG" | cut -f1)"
-    [ "$BUILD_PAYLOAD" = "0" ] || echo "  Payload:     $PAYLOAD_MANIFEST"
+    [ "$BUILD_PAYLOAD" = "0" ] || echo "  Payload:     $PAYLOAD_BUNDLE"
     echo ""
     echo "  Write to SD card:"
     echo "    sudo dd if=$FINAL_IMG of=/dev/sdX bs=8M status=progress conv=fsync"

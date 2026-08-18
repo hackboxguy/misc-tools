@@ -42,9 +42,11 @@ older data volume.
   runtime copies of the durable state above.
 - `/run/micropanel-touch/` and the broker socket; it is recreated with its
   service on every boot.
-- `/run/micropanel-touch-ui/first-frame-ready` and the private USB source
-  mount used by a Stage 2 update; both are per-boot evidence/scratch state,
-  never payload staging or durable update state.
+- `/run/micropanel-touch-ui/first-frame-ready`, the private USB source mount
+  used by a system update, and the bounded manifest/signature/`boot.tar`
+  members a Stage 2b bundle stages under `/run/micropanel-touch-update/private`;
+  all are per-boot evidence/scratch state. The multi-gigabyte rootfs member is
+  never among them: it streams straight to the inactive slot.
 - System journal (journald is restarted before journal flush after durable
   machine-ID restoration so current-boot lookup works), package-manager state,
   cloud-init state, temporary files, NetworkManager DHCP lease database,

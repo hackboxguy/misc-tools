@@ -51,6 +51,9 @@ boot_remounted_rw=0
 temporary_path=""
 restore_boot_state() {
     local status=$?
+    # V5-01: the signal traps otherwise re-enter this function through EXIT.
+    # Disarm them first so the remount and temp-file removal run exactly once.
+    trap - EXIT HUP INT TERM
     if [ -n "$temporary_path" ]; then
         rm -f "$temporary_path" || true
     fi

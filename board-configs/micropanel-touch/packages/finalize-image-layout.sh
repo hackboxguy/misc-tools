@@ -17,6 +17,9 @@ ab_root_partition_mb=${AB_ROOT_PARTITION_MB:-5120}
 ab_factory_partition_mb=${AB_FACTORY_PARTITION_MB:-2048}
 slot_compatible_boards=${SLOT_COMPATIBLE_BOARDS:-pi4}
 expected_micropanel_touch_revision=${MICROPANEL_TOUCH_REVISION:-}
+image_version=${IMAGE_VERSION:-}
+update_signing_public_key=${UPDATE_SIGNING_PUBLIC_KEY:-}
+update_release_url_template=${UPDATE_RELEASE_URL_TEMPLATE:-}
 
 script_dir=$(cd "$(dirname "$0")" && pwd)
 data_skeleton_script=${DATA_SKELETON_SCRIPT:-$script_dir/micropanel-touch-data-skeleton.sh}
@@ -223,10 +226,48 @@ append_ab_manifest() { # $1=root mount
         echo "ERROR: required MicroPanel Touch image manifest is missing: $manifest" >&2
         exit 1
     }
+    # Stage 2b needs the running release version on the device: it is what the
+    # updater compares a bundle manifest against for its manifest-first
+    # already-up-to-date abort.
+    [[ "$image_version" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || {
+        echo "ERROR: IMAGE_VERSION must be a safe release token for an A/B image" >&2
+        exit 1
+    }
     temporary="$manifest.micropanel-touch"
-    grep -vE '^(IMAGE_LAYOUT|SLOT_COMPATIBLE_BOARDS)=' "$manifest" > "$temporary" || true
-    printf 'IMAGE_LAYOUT=ab\nSLOT_COMPATIBLE_BOARDS=%s\n' "$slot_compatible_boards" >> "$temporary"
+    grep -vE '^(IMAGE_LAYOUT|SLOT_COMPATIBLE_BOARDS|IMAGE_VERSION)=' "$manifest" > "$temporary" || true
+    printf 'IMAGE_LAYOUT=ab\nSLOT_COMPATIBLE_BOARDS=%s\nIMAGE_VERSION=%s\n' \
+        "$slot_compatible_boards" "$image_version" >> "$temporary"
     mv "$temporary" "$manifest"
+}
+
+# Stage 2b OTA-forward groundwork. Neither file is read by the current updater;
+# both exist now so Stage 4 turns verification and OTA on without a new image
+# contract or a migration release.
+install_update_source_config() { # $1=root mount
+    local root=$1 variant manifest asset_manifest asset_bundle
+    manifest="$root/opt/micropanel-touch/share/micropanel-touch/image-manifest.env"
+    variant=$(awk -F= '$1 == "PANEL_VARIANT" { print $2; exit }' "$manifest" 2>/dev/null || true)
+    [ -n "$variant" ] || { echo 'ERROR: image manifest has no PANEL_VARIANT' >&2; exit 1; }
+    [ -f "$update_signing_public_key" ] || {
+        echo "ERROR: release signing public key is unavailable: ${update_signing_public_key:-<unset>}" >&2
+        exit 1
+    }
+    # Pinned in the image, root-owned, never client-supplied. Stage 4 verifies
+    # every manifest against this key before offering or applying an update.
+    install -D -m0644 -o root -g root "$update_signing_public_key" \
+        "$root/usr/lib/micropanel-touch/update-signing-key.pub"
+    asset_manifest="micropanel-touch-${variant}.manifest"
+    asset_bundle="micropanel-touch-${variant}.mpupdate"
+    install -d -m0755 "$root/usr/lib/micropanel-touch"
+    cat > "$root/usr/lib/micropanel-touch/update-source.conf" <<EOF
+# Reserved Stage 4 OTA source. Root-owned and unused by the Stage 2b updater;
+# it exists now so enabling OTA needs no new image contract. The URLs are
+# deliberately version-less: the release version lives inside the manifest.
+MANIFEST_URL=${update_release_url_template//@ASSET@/$asset_manifest}
+BUNDLE_URL=${update_release_url_template//@ASSET@/$asset_bundle}
+EOF
+    chmod 0644 "$root/usr/lib/micropanel-touch/update-source.conf"
+    chown root:root "$root/usr/lib/micropanel-touch/update-source.conf"
 }
 
 verify_installed_app_revision() { # $1=root mount
@@ -467,6 +508,7 @@ EOF
     replace_ab_fstab "$root_mount"
     write_watchdog_config "$root_mount"
     append_ab_manifest "$root_mount"
+    install_update_source_config "$root_mount"
     verify_installed_app_revision "$root_mount"
 
     sync

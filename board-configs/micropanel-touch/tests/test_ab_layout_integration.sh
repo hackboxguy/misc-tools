@@ -8,6 +8,7 @@ repo_root=$(cd "$(dirname "$0")/../../.." && pwd)
 finalizer="$repo_root/board-configs/micropanel-touch/packages/finalize-image-layout.sh"
 verifier="$repo_root/board-configs/micropanel-touch/packages/verify-ab-image-layout.sh"
 payload_generator="$repo_root/board-configs/micropanel-touch/packages/make-ab-update-payload.sh"
+release_key_tool="$repo_root/board-configs/micropanel-touch/packages/micropanel-touch-release-key.sh"
 
 [ "$(id -u)" -eq 0 ] || {
     echo "ERROR: run as root so the fixture can use loop partitions" >&2
@@ -106,26 +107,38 @@ source_loop=""
 # DATA_PARTITION_MB intentionally remains unset: it has no meaning when p8
 # is the A/B layout's remainder and this verifies that it is not a hidden
 # requirement of the finalizer API.
+# A disposable release key: the real one lives outside every checkout.
+release_key="$work/release-signing/ed25519-release.key"
+MICROPANEL_RELEASE_KEY="$release_key" "$release_key_tool" ensure 2>/dev/null
+
 env -u DATA_PARTITION_MB MICROPANEL_TOUCH_REVISION="$fixture_app_revision" \
     IMAGE_PATH="$image" AB_LAYOUT=1 AB_IMAGE_SIZE_MB=384 \
     AB_BOOT_PARTITION_MB=32 AB_ROOT_PARTITION_MB=96 AB_FACTORY_PARTITION_MB=32 \
-    SLOT_COMPATIBLE_BOARDS=pi4 \
+    SLOT_COMPATIBLE_BOARDS=pi4 IMAGE_VERSION=fixture-running \
+    UPDATE_SIGNING_PUBLIC_KEY="$release_key.pub" \
+    UPDATE_RELEASE_URL_TEMPLATE='https://example.invalid/releases/latest/download/@ASSET@' \
     "$finalizer"
 
 MICROPANEL_TOUCH_REVISION="$fixture_app_revision" "$verifier" "$image"
-payload_prefix="$work/payload/micropanel-touch-fixture-1-luckfox-ctp"
-manifest="$payload_prefix.manifest"
-rootfs="$payload_prefix.rootfs.img.xz"
-boot_tar="$payload_prefix.boot.tar"
+# Stage 2b publishes exactly two version-less assets: the bundle and a
+# standalone copy of its manifest.
+asset_prefix="$work/payload/micropanel-touch-luckfox-ctp"
+bundle="$asset_prefix.mpupdate"
+manifest="$asset_prefix.manifest"
 failing_bin="$work/failing-bin"
 install -d "$failing_bin"
 printf '%s\n' '#!/bin/sh' 'exit 1' > "$failing_bin/xz"
 chmod 0755 "$failing_bin/xz"
 if PATH="$failing_bin:$PATH" "$payload_generator" --image="$image" --output-dir="$work/failed-payload" \
-    --version=fixture-failure --variant=luckfox-ctp --boards=pi4 >/dev/null 2>&1; then
+    --version=fixture-failure --variant=luckfox-ctp --boards=pi4 \
+    --signing-key="$release_key" >/dev/null 2>&1; then
     echo 'ERROR: payload generator accepted a forced compression failure' >&2
     exit 1
 fi
+[ ! -e "$work/failed-payload/micropanel-touch-luckfox-ctp.mpupdate" ] || {
+    echo 'ERROR: a failed payload generation published a bundle' >&2
+    exit 1
+}
 source_loop=$(losetup --find --show --partscan --read-only "$image")
 retries=0
 while [ "$retries" -lt 20 ]; do
@@ -141,15 +154,47 @@ losetup -d "$source_loop"
 source_loop=""
 mkdir -p "$work/payload"
 printf '%s\n' 'obsolete payload artifact' > "$manifest"
-printf '%s\n' 'obsolete payload artifact' > "$rootfs"
-printf '%s\n' 'obsolete payload artifact' > "$boot_tar"
+printf '%s\n' 'obsolete payload artifact' > "$bundle"
 "$payload_generator" --image="$image" --output-dir="$work/payload" \
-    --version=fixture-1 --variant=luckfox-ctp --boards=pi4
-[ -f "$manifest" ] && [ -f "$rootfs" ] && [ -f "$boot_tar" ]
+    --version=fixture-1 --variant=luckfox-ctp --boards=pi4 --signing-key="$release_key"
+[ -f "$bundle" ] && [ -f "$manifest" ]
+# The retired format=1 triplet must not reappear beside the published assets.
+[ "$(find "$work/payload" -maxdepth 1 -type f | wc -l)" -eq 2 ] || {
+    echo 'ERROR: the payload directory holds more than the two published assets' >&2
+    ls -1 "$work/payload" >&2
+    exit 1
+}
+
 grep -Fqx 'version=fixture-1' "$manifest"
 grep -Fqx 'variant=luckfox-ctp' "$manifest"
 grep -Fqx 'boards=pi4' "$manifest"
-grep -Fqx 'format=1' "$manifest"
+grep -Fqx 'format=2' "$manifest"
+
+# Member order is the format. The device reader is single-pass, so a bundle
+# whose members moved would abort rather than install.
+bundle_members=$(tar -tf "$bundle" | tr '\n' ' ')
+[ "$bundle_members" = 'manifest manifest.sig boot.tar rootfs.img.xz ' ] || {
+    echo "ERROR: bundle member order is $bundle_members" >&2
+    exit 1
+}
+# ustar keeps every header one fixed 512-byte block, which is what makes the
+# device-side reader a straightforward single pass over a pipe.
+[ "$(dd if="$bundle" bs=1 skip=257 count=5 status=none)" = ustar ] || {
+    echo 'ERROR: bundle is not a ustar archive' >&2
+    exit 1
+}
+
+install -d "$work/unbundled"
+tar -xf "$bundle" -C "$work/unbundled"
+cmp "$work/unbundled/manifest" "$manifest"
+MICROPANEL_RELEASE_KEY="$release_key" "$release_key_tool" \
+    verify "$work/unbundled/manifest" "$work/unbundled/manifest.sig" || {
+    echo 'ERROR: the published bundle signature does not verify' >&2
+    exit 1
+}
+boot_tar="$work/unbundled/boot.tar"
+rootfs="$work/unbundled/rootfs.img.xz"
+
 rootfs_sha256=$(awk -F= '$1 == "rootfs_sha256" {print $2}' "$manifest")
 rootfs_bytes=$(awk -F= '$1 == "rootfs_bytes" {print $2}' "$manifest")
 boot_sha256=$(awk -F= '$1 == "boot_sha256" {print $2}' "$manifest")
@@ -193,7 +238,7 @@ sync -f "${source_loop}p5"
 losetup -d "$source_loop"
 source_loop=""
 "$payload_generator" --image="$image" --output-dir="$work/recovered-payload" \
-    --version=fixture-recovery --variant=luckfox-ctp --boards=pi4
+    --version=fixture-recovery --variant=luckfox-ctp --boards=pi4 --signing-key="$release_key"
 source_loop=$(losetup --find --show --partscan --read-only "$image")
 retries=0
 while [ "$retries" -lt 20 ]; do

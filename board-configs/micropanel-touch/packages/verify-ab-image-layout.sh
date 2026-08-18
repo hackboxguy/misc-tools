@@ -152,6 +152,20 @@ require grep -Fq 'SLOT_COMPATIBLE_BOARDS=pi4' \
     "$root_a_mount/opt/micropanel-touch/share/micropanel-touch/image-manifest.env"
 require grep -Eq '^PANEL_VARIANT=[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' \
     "$root_a_mount/opt/micropanel-touch/share/micropanel-touch/image-manifest.env"
+# Stage 2b: the running release version is part of the on-device contract; the
+# updater refuses to run without it and uses it for its already-up-to-date
+# abort before any large member is read.
+require grep -Eq '^IMAGE_VERSION=[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' \
+    "$root_a_mount/opt/micropanel-touch/share/micropanel-touch/image-manifest.env"
+# Stage 4 groundwork shipped now: the pinned release public key and the
+# reserved, root-owned OTA URL template.
+require grep -Fq 'BEGIN PUBLIC KEY' "$root_a_mount/usr/lib/micropanel-touch/update-signing-key.pub"
+require test "$(stat -c '%u:%g:%a' "$root_a_mount/usr/lib/micropanel-touch/update-signing-key.pub")" = '0:0:644'
+require grep -Eq '^BUNDLE_URL=https://[^[:space:]]+\.mpupdate$' \
+    "$root_a_mount/usr/lib/micropanel-touch/update-source.conf"
+require grep -Eq '^MANIFEST_URL=https://[^[:space:]]+\.manifest$' \
+    "$root_a_mount/usr/lib/micropanel-touch/update-source.conf"
+require test "$(stat -c '%u:%g:%a' "$root_a_mount/usr/lib/micropanel-touch/update-source.conf")" = '0:0:644'
 if [ -n "$expected_micropanel_touch_revision" ]; then
     require grep -Fqx "MICROPANEL_TOUCH_REVISION=$expected_micropanel_touch_revision" \
         "$root_a_mount/opt/micropanel-touch/share/micropanel-touch/image-manifest.env"

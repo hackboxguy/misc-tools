@@ -85,15 +85,27 @@ board-configs/micropanel-touch/tests/test_ab_layout_static.sh
 sudo board-configs/micropanel-touch/tests/test_ab_layout_integration.sh
 ```
 
-#### Latest Stage 2 bench evidence — 2026-08-18
+#### Latest Stage 2 bench evidence — complete, 2026-08-18
 
-`misc-tools` commit `bde05af` generated the `00.21` Luckfox CTP payload used
-for the checksum-safe acceptance run. A `00.20` A/B card on slot A first
-survived a power cut at approximately 35% of its write, returning to A without
-arming B. A fresh retry then booted and committed `00.21` on B; a physical
-power-cycle remained on B. The USB artifact's full decompressed SHA-256
-matched its manifest and its ext4 volume-label field was blank. The device
-post-write `e2fsck` and relabel sequence therefore completed successfully.
+`misc-tools` commit `bde05af` generated the checksum-safe Luckfox CTP
+payloads used for the Pi 4 bench acceptance. A `00.20` A/B card on A first
+survived a power cut at approximately 35% of the `00.21` write, returning to A
+without arming B. A fresh retry verified the full decompressed SHA-256,
+completed device-side `e2fsck` plus relabel, booted and committed `00.21` on
+B, and remained on B through a physical power-cycle. The committed B system
+then updated and committed `00.22` on A, which also survived a physical
+power-cycle.
+
+The final negative-path tests used `00.22`. A valid-XZ rootfs with a changed
+decompressed byte, while leaving the matching manifest and boot archive
+unchanged, was refused as `failed-integrity` before selector arm or reboot;
+normal A and one-shot B selectors remained intact. After restoring the valid
+rootfs, B booted once as a candidate and power was cut after its first UI frame
+but before the 30-second commit window. Ten seconds later the Pi booted A with
+durable `state=fallback` for B, proving attended fallback recovery. HMI and
+broker were active with no failed units. This completes Stage 2 hardware
+acceptance for Pi 4 + Luckfox CTP; every published payload still requires a
+bench boot test before release.
 
 No extra runtime package is needed for `blkid`: it is already installed at
 `/usr/sbin/blkid` (with `e2fsck` and `e2label`) and the root updater explicitly

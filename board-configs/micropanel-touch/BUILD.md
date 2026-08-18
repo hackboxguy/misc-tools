@@ -122,6 +122,23 @@ target mid-write in both directions and ended on committed A with candidate A;
 this supersedes the earlier `fallback` snapshot as the live bench state while
 retaining that snapshot as evidence for the deliberate power-cut case.
 
+#### V4-hardened regression — normal update and power-cycle passed, 2026-08-18
+
+A freshly flashed `00.23` card was built through `--app-ref=main`, which
+resolved to `micropanel-touch` `07b261e645ef0f9498b9e2362c83eed1b2f5b034` and
+was recorded in the installed manifest. The matching `00.24` USB payload
+updated A→B, committed after the 30-second candidate health interval, and
+remained committed on B through a physical power-cycle. The Pi verified the
+V4 explicit failure-class handler, updater lock, and zero-HMI-restart commit
+policy in the installed image, with HMI/broker active and no failed units.
+
+This validates the V4 normal hardware path. The earlier Stage 2 negative and
+recovery acceptance remains valid evidence; rerun its mid-write interruption,
+corrupt-rootfs refusal, and post-arm/pre-commit fallback smoke cases on a new
+version pair before claiming those V4 changes are fully hardware revalidated.
+The `00.23`/`00.24` identifiers were reissued bench artifacts after the old
+hook pin was discovered; do not reuse those version numbers again.
+
 No extra runtime package is needed for `blkid`: it is already installed at
 `/usr/sbin/blkid` (with `e2fsck` and `e2label`) and the root updater explicitly
 adds `/usr/sbin` to `PATH`. An unprivileged interactive shell may not include

@@ -8,4 +8,5 @@ libssl3
 dnsmasq
 network-manager
 polkitd
+util-linux
 xz-utils

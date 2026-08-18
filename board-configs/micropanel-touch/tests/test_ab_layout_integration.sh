@@ -13,7 +13,7 @@ payload_generator="$repo_root/board-configs/micropanel-touch/packages/make-ab-up
     echo "ERROR: run as root so the fixture can use loop partitions" >&2
     exit 1
 }
-for tool in truncate sfdisk losetup mkfs.vfat mkfs.ext4 mount umount mountpoint install sync dd tr xz tar sha256sum wc blkid sleep e2fsck; do
+for tool in truncate sfdisk losetup mkfs.vfat mkfs.ext4 mount umount mountpoint install sync dd tr xz tar sha256sum wc blkid sleep e2fsck e2label; do
     command -v "$tool" >/dev/null 2>&1 || {
         echo "ERROR: missing host tool: $tool" >&2
         exit 1
@@ -174,6 +174,37 @@ done
 }
 losetup -d "$source_loop"
 source_loop=""
+"$verifier" "$image"
+
+# Simulate the source-image state left by a host kill while its label was
+# neutralized. The next payload invocation must self-heal p5 before it exits.
+source_loop=$(losetup --find --show --partscan "$image")
+retries=0
+while [ "$retries" -lt 20 ]; do
+    [ -b "${source_loop}p5" ] && break
+    sleep 1
+    retries=$((retries + 1))
+done
+e2label "${source_loop}p5" ""
+sync -f "${source_loop}p5"
+losetup -d "$source_loop"
+source_loop=""
+"$payload_generator" --image="$image" --output-dir="$work/recovered-payload" \
+    --version=fixture-recovery --variant=luckfox-ctp --boards=pi4
+source_loop=$(losetup --find --show --partscan --read-only "$image")
+retries=0
+while [ "$retries" -lt 20 ]; do
+    [ -b "${source_loop}p5" ] && break
+    sleep 1
+    retries=$((retries + 1))
+done
+[ "$(blkid -s LABEL -o value "${source_loop}p5")" = MP_ROOT_A ] || {
+    echo 'ERROR: recovery payload generation did not repair source root label' >&2
+    exit 1
+}
+losetup -d "$source_loop"
+source_loop=""
+"$verifier" "$image"
 [ "$(sha256sum "$boot_tar" | awk '{print $1}')" = "$boot_sha256" ]
 tar -tf "$boot_tar" | grep -Fqx './cmdline.txt.template'
 if tar -tf "$boot_tar" | grep -Fqx './cmdline.txt'; then

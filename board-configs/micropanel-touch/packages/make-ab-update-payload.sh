@@ -119,10 +119,20 @@ wait_for_partitions
     echo 'ERROR: image p1 is not MP_BOOT_A' >&2
     exit 1
 }
-[ "$(blkid -s LABEL -o value "${loop}p5")" = MP_ROOT_A ] || {
-    echo 'ERROR: image p5 is not MP_ROOT_A' >&2
-    exit 1
-}
+source_root_label=$(blkid -s LABEL -o value "${loop}p5" 2>/dev/null || true)
+case "$source_root_label" in
+    MP_ROOT_A) ;;
+    '')
+        # A preceding generator killed by SIGKILL or host power loss can leave
+        # p5 label-neutral. Treat that exact state as recoverable and reassert
+        # the authored source label before this invocation returns.
+        echo 'INFO: source p5 is label-neutral; this run will restore MP_ROOT_A' >&2
+        ;;
+    *)
+        echo 'ERROR: image p5 is not MP_ROOT_A or label-neutral' >&2
+        exit 1
+        ;;
+esac
 
 work=$(mktemp -d)
 boot_mount="$work/boot-mounted"

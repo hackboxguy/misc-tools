@@ -378,6 +378,7 @@ PAYLOAD_VARIANT="${VARIANT:-${DEFAULT_PANEL_VARIANT:-default}}"
 PAYLOAD_PREFIX="micropanel-touch-${VERSION}-${PAYLOAD_VARIANT}"
 PAYLOAD_MANIFEST="$PAYLOAD_DIR/$PAYLOAD_PREFIX.manifest"
 PAYLOAD_GENERATOR="$BOARD_DIR/packages/make-ab-update-payload.sh"
+PAYLOAD_IMAGE_VERIFIER="$BOARD_DIR/packages/verify-ab-image-layout.sh"
 
 # ------------------------------------------------------------------------------
 # Hook-list parsing (for preflight + stamps)
@@ -922,6 +923,7 @@ run_payload() {
     [ "$BUILD_PAYLOAD" = "1" ] || return 0
     [ -f "$FINAL_IMG" ] || die "Cannot create payload; final image is missing: $FINAL_IMG"
     [ -x "$PAYLOAD_GENERATOR" ] || die "A/B payload generator is unavailable: $PAYLOAD_GENERATOR"
+    [ -x "$PAYLOAD_IMAGE_VERIFIER" ] || die "A/B image verifier is unavailable: $PAYLOAD_IMAGE_VERIFIER"
     stage_banner "Stage 5: A/B update payload"
     mkdir -p "$PAYLOAD_DIR"
     if [ -e "$PAYLOAD_MANIFEST" ]; then
@@ -933,6 +935,8 @@ run_payload() {
         --version="$VERSION" \
         --variant="$PAYLOAD_VARIANT" \
         --boards="$SLOT_COMPATIBLE_BOARDS"
+    info "Verifying source A/B image after payload generation..."
+    "$PAYLOAD_IMAGE_VERIFIER" "$FINAL_IMG"
     own_by_user "$PAYLOAD_DIR"
 }
 

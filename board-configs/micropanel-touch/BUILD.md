@@ -107,6 +107,12 @@ broker were active with no failed units. This completes Stage 2 hardware
 acceptance for Pi 4 + Luckfox CTP; every published payload still requires a
 bench boot test before release.
 
+An independent post-acceptance revalidation performed two more committed
+same-version `00.22` transitions (A→B and B→A). It rechecked the neutral-label
+target mid-write in both directions and ended on committed A with candidate A;
+this supersedes the earlier `fallback` snapshot as the live bench state while
+retaining that snapshot as evidence for the deliberate power-cut case.
+
 No extra runtime package is needed for `blkid`: it is already installed at
 `/usr/sbin/blkid` (with `e2fsck` and `e2label`) and the root updater explicitly
 adds `/usr/sbin` to `PATH`. An unprivileged interactive shell may not include

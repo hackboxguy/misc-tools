@@ -951,7 +951,10 @@ run_stage_apps() {
     local extra=()
     [ $KEEP_BUILD_DEPS -eq 1 ] && extra+=(--keep-build-deps)
     [ $DEBUG -eq 1 ] && extra+=(--debug)
-    MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" "$IMAGER" \
+    # The imager parses the same hook list in its own process, so every ${VAR}
+    # a hook list references has to reach it too, not just this shell.
+    MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" \
+    MICROPANEL_TOUCH_APP_REPO="${MICROPANEL_TOUCH_APP_REPO:-}" "$IMAGER" \
         --mode=incremental \
         --baseimage="$APPS_INPUT" \
         --output="$work" \
@@ -964,6 +967,8 @@ run_stage_apps() {
         --version="$VERSION" \
         "${extra[@]}"
     mkdir -p "$OUT_DIR"
+    [ -f "$work/$(basename "$APPS_INPUT")" ] || \
+        die "apps stage produced no image; see the imager output above"
     mv "$work/$(basename "$APPS_INPUT")" "$FINAL_IMG"
     rm -rf "$work"
     run_post_image_hook

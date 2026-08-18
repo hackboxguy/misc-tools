@@ -27,12 +27,16 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 log() { echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1"; }
+# Diagnostics go to stderr. error() is reachable from inside a command
+# substitution (hook-list variable expansion), where anything written to stdout
+# would be captured into the caller's variable and never seen; that turned an
+# undefined-variable typo into a silent mid-build exit once.
 error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    echo -e "${RED}[ERROR]${NC} $1" >&2
     ERROR_OCCURRED=1  # Set flag for cleanup trap
     exit 1
 }
-warn() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
+warn() { echo -e "${YELLOW}[WARNING]${NC} $1" >&2; }
 info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 debug_log() { [ "$DEBUG_MODE" = true ] && echo -e "${YELLOW}[DEBUG]${NC} $1" || true; }
 
@@ -951,6 +955,9 @@ cleanup() {
         rm "${WORK_DIR}/loop_device"
     fi
     log "Done"
+    # Without this the trap's own last command decides the exit status, so a
+    # failed build reported success to its caller.
+    exit "$exit_code"
 }
 
 error_on_debug_exit() {

@@ -56,10 +56,36 @@ grep -Fq -- '--app-ref=REF' "$builder"
 grep -Fq 'resolve_micropanel_touch_revision()' "$builder"
 grep -Fq 'resolved=$(git_remote_rev "$MICROPANEL_TOUCH_APP_REPO" "$MICROPANEL_TOUCH_REF")' "$builder"
 grep -Fq 'MicroPanel Touch builds require --app-revision=<40-character lowercase micropanel-touch commit> or --app-ref=<branch-or-tag>' "$builder"
-grep -Fq 'MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" "$IMAGER"' "$builder"
+grep -Fq 'MICROPANEL_TOUCH_APP_REPO="${MICROPANEL_TOUCH_APP_REPO:-}" "$IMAGER"' "$builder"
 grep -Fq 'MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" "$PAYLOAD_IMAGE_VERIFIER" "$FINAL_IMG"' "$builder"
 grep -Fq 'MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" \' "$builder"
 grep -Fq 'make-ab-update-payload.sh' "$builder"
+
+
+# The imager parses the hook list in its own process, so every ${VAR} a hook
+# list references must be handed to it explicitly. A missing one used to fail
+# silently: the imager raised its error inside a command substitution, which
+# captured the message, and its cleanup trap then returned success.
+imager_invocation=$(awk '
+    { window[NR % 8] = $0 }
+    /"\$IMAGER" \\$/ {
+        for (i = NR - 7; i <= NR; ++i) if (i > 0) print window[i % 8]
+    }' "$builder")
+[ -n "$imager_invocation" ] || { echo 'no imager invocation found in the builder' >&2; exit 1; }
+for hook_list in "$repo_root/board-configs/micropanel-touch/hooks.txt" \
+                 "$repo_root/board-configs/micropanel-touch/hooks-luckfox-ctp.txt"; do
+    hook_variables=$(sed -n 's/.*${\([A-Za-z_][A-Za-z0-9_]*\)}.*/\1/p' "$hook_list" | sort -u)
+    for hook_variable in $hook_variables; do
+        printf '%s\n' "$imager_invocation" | grep -Fq "$hook_variable=" || {
+            echo "hook list uses \${$hook_variable} but the builder does not pass it to the imager: $hook_list" >&2
+            exit 1
+        }
+    done
+done
+# ...and the imager must report and propagate its own failures.
+grep -Fq 'exit "$exit_code"' "$repo_root/custom-pi-imager/custom-pi-imager.sh"
+grep -Fq '[ERROR]${NC} $1" >&2' "$repo_root/custom-pi-imager/custom-pi-imager.sh"
+grep -Fq 'apps stage produced no image' "$builder"
 
 # V5-05: exactly one place names the application/release repository, and it is
 # also where the reserved Stage 4 OTA URL template lives.

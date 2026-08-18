@@ -16,6 +16,7 @@ ab_boot_partition_mb=${AB_BOOT_PARTITION_MB:-256}
 ab_root_partition_mb=${AB_ROOT_PARTITION_MB:-5120}
 ab_factory_partition_mb=${AB_FACTORY_PARTITION_MB:-2048}
 slot_compatible_boards=${SLOT_COMPATIBLE_BOARDS:-pi4}
+expected_micropanel_touch_revision=${MICROPANEL_TOUCH_REVISION:-}
 
 script_dir=$(cd "$(dirname "$0")" && pwd)
 data_skeleton_script=${DATA_SKELETON_SCRIPT:-$script_dir/micropanel-touch-data-skeleton.sh}
@@ -226,6 +227,16 @@ append_ab_manifest() { # $1=root mount
     grep -vE '^(IMAGE_LAYOUT|SLOT_COMPATIBLE_BOARDS)=' "$manifest" > "$temporary" || true
     printf 'IMAGE_LAYOUT=ab\nSLOT_COMPATIBLE_BOARDS=%s\n' "$slot_compatible_boards" >> "$temporary"
     mv "$temporary" "$manifest"
+}
+
+verify_installed_app_revision() { # $1=root mount
+    local manifest="$1/opt/micropanel-touch/share/micropanel-touch/image-manifest.env" actual_revision
+    [ -n "$expected_micropanel_touch_revision" ] || return 0
+    actual_revision=$(awk -F= '$1 == "MICROPANEL_TOUCH_REVISION" { print $2; exit }' "$manifest" 2>/dev/null || true)
+    [ "$actual_revision" = "$expected_micropanel_touch_revision" ] || {
+        echo "ERROR: installed MicroPanel Touch revision ${actual_revision:-missing} does not match requested $expected_micropanel_touch_revision" >&2
+        exit 1
+    }
 }
 
 safe_e2fsck() { # $1=device
@@ -456,6 +467,7 @@ EOF
     replace_ab_fstab "$root_mount"
     write_watchdog_config "$root_mount"
     append_ab_manifest "$root_mount"
+    verify_installed_app_revision "$root_mount"
 
     sync
     unmount_if_mounted "$data_mount"

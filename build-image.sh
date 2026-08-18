@@ -29,6 +29,9 @@
 #   --layout=MODE       Image layout: single (default) or ab; the A/B mode
 #                       needs a 16 GB or larger card
 #   --version=VER       Image version string (default: DEFAULT_VERSION)
+#   --app-revision=SHA  Required full 40-character micropanel-touch commit
+#                       for MicroPanel Touch images; it is embedded and
+#                       verified in the resulting image before release
 #   --password=PASS     'pi' user password (default: DEFAULT_PASSWORD)
 #   --extend-size-mb=N  Image extension applied by sdm in the base stage
 #                       (default: EXTEND_SIZE_MB from board.conf; changing
@@ -94,7 +97,7 @@ stage_banner() { echo ""; echo "================================================
 BOARD="" VARIANT="" VERSION="" PASSWORD="" WORKSPACE=""
 ARG_BASEIMAGE="" ARG_IMAGE_URL="" ARG_START_FROM="" ARG_REPOBINS="" ARG_FLASH=""
 ARG_SOURCES_DIR="" ARG_OUTPUT_DIR="" ARG_EXTEND_SIZE="" ARG_BASE_PROFILE="" ARG_LAYOUT=""
-ARG_PAYLOAD_DIR=""
+ARG_PAYLOAD_DIR="" ARG_APP_REVISION=""
 SKIP_BASE=0 SKIP_KERNEL=0 SKIP_APPS=0
 FORCE_BASE=0 FORCE_KERNEL=0 FORCE_APPS=0
 DRY_RUN=0 OFFLINE=0 KEEP_BUILD_DEPS=0 DEBUG=0 LIST_BOARDS=0 BUILD_PAYLOAD=0
@@ -107,6 +110,7 @@ for arg in "$@"; do
         --variant=*)    VARIANT="${arg#*=}" ;;
         --layout=*)     ARG_LAYOUT="${arg#*=}" ;;
         --version=*)    VERSION="${arg#*=}" ;;
+        --app-revision=*) ARG_APP_REVISION="${arg#*=}" ;;
         --password=*)   PASSWORD="${arg#*=}" ;;
         --workspace=*)  WORKSPACE="${arg#*=}" ;;
         --sources-dir=*) ARG_SOURCES_DIR="${arg#*=}" ;;
@@ -173,6 +177,10 @@ DATA_PARTITION_MB=0 POST_IMAGE_HOOK=""
 AB_LAYOUT=0 AB_IMAGE_SIZE_MB=15000 AB_BOOT_PARTITION_MB=256
 AB_ROOT_PARTITION_MB=5120 AB_FACTORY_PARTITION_MB=2048
 SLOT_COMPATIBLE_BOARDS="pi4"
+# This is deliberately supplied on the command line for MicroPanel Touch
+# release builds.  Keeping it empty here means a forgotten release pin fails
+# before any cached or expensive stage begins.
+MICROPANEL_TOUCH_REVISION=""
 if [ $PROFILE_ONLY -eq 0 ]; then
     BOARD_DIR="$BOARD_CONFIGS_DIR/$BOARD"
     BOARD_CONF="$BOARD_DIR/board.conf"
@@ -244,6 +252,7 @@ fi
 
 [ -n "$ARG_EXTEND_SIZE" ] && EXTEND_SIZE_MB="$ARG_EXTEND_SIZE"
 [ -n "$ARG_IMAGE_URL" ] && IMAGE_URL_CFG="$ARG_IMAGE_URL"
+[ -n "$ARG_APP_REVISION" ] && MICROPANEL_TOUCH_REVISION="$ARG_APP_REVISION"
 if [ -n "$ARG_LAYOUT" ]; then
     case "$ARG_LAYOUT" in
         single) AB_LAYOUT=0 ;;
@@ -288,6 +297,8 @@ if [ "$AB_LAYOUT" = "1" ]; then IMAGE_LAYOUT=ab; else IMAGE_LAYOUT=single; fi
     die "--layout=ab requires EXPAND_ROOT=0; first-boot root expansion would corrupt the A/B partition layout"
 [ "$BUILD_PAYLOAD" = "0" ] || [ "$AB_LAYOUT" = "1" ] || \
     die "--payload requires --layout=ab; single-slot images have no inactive update slot"
+[ "$BOARD" != "micropanel-touch" ] || [[ "$MICROPANEL_TOUCH_REVISION" =~ ^[0-9a-f]{40}$ ]] || \
+    die "MicroPanel Touch builds require --app-revision=<40-character lowercase micropanel-touch commit>"
 [ "$REQUIRE_PASSWORD" = "0" ] || [ -n "$PASSWORD" ] || \
     die "Board $BOARD requires an explicit --password=PASS for its development SSH account"
 
@@ -906,7 +917,8 @@ run_post_image_hook() {
     [ "$POST_IMAGE_HOOK" = "none" ] || [ -z "$POST_IMAGE_HOOK" ] && return 0
     [ -f "$POST_IMAGE_HOOK" ] || die "Post-image hook missing: $POST_IMAGE_HOOK"
     stage_banner "Stage 4: Post-image layout"
-    IMAGE_PATH="$FINAL_IMG" BOARD="$BOARD" BOARD_DIR="$BOARD_DIR" \
+    MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" \
+        IMAGE_PATH="$FINAL_IMG" BOARD="$BOARD" BOARD_DIR="$BOARD_DIR" \
         DATA_PARTITION_MB="$DATA_PARTITION_MB" AB_LAYOUT="$AB_LAYOUT" \
         AB_IMAGE_SIZE_MB="$AB_IMAGE_SIZE_MB" \
         AB_BOOT_PARTITION_MB="$AB_BOOT_PARTITION_MB" \
@@ -936,7 +948,7 @@ run_payload() {
         --variant="$PAYLOAD_VARIANT" \
         --boards="$SLOT_COMPATIBLE_BOARDS"
     info "Verifying source A/B image after payload generation..."
-    "$PAYLOAD_IMAGE_VERIFIER" "$FINAL_IMG"
+    MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" "$PAYLOAD_IMAGE_VERIFIER" "$FINAL_IMG"
     own_by_user "$PAYLOAD_DIR"
 }
 
@@ -975,6 +987,7 @@ show_plan() {
     echo "  board:     $BOARD${VARIANT:+ ($VARIANT)}"
     echo "  layout:    $IMAGE_LAYOUT"
     echo "  version:   $VERSION"
+    [ "$BOARD" != "micropanel-touch" ] || echo "  app rev:   $MICROPANEL_TOUCH_REVISION"
     echo "  workspace: $WORKSPACE"
     echo "  vanilla:   $VANILLA_XZ"
     echo "  repobins:  $REPOBINS"
@@ -1006,6 +1019,7 @@ show_plan() {
 main() {
     log "misc-tools unified image builder"
     info "board=$BOARD${VARIANT:+ variant=$VARIANT} layout=$IMAGE_LAYOUT version=$VERSION workspace=$WORKSPACE"
+    [ "$BOARD" != "micropanel-touch" ] || info "micropanel-touch revision=$MICROPANEL_TOUCH_REVISION"
 
     setup_git_credentials   # one-shot GIT_USERNAME/GIT_TOKEN, if provided
     preflight

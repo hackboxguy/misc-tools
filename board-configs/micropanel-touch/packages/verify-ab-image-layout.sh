@@ -3,6 +3,7 @@
 set -euo pipefail
 
 image_path=${1:-}
+expected_micropanel_touch_revision=${MICROPANEL_TOUCH_REVISION:-}
 [ -n "$image_path" ] || {
     echo "Usage: sudo $0 /path/to/micropanel-touch-ab.img" >&2
     exit 2
@@ -151,6 +152,13 @@ require grep -Fq 'SLOT_COMPATIBLE_BOARDS=pi4' \
     "$root_a_mount/opt/micropanel-touch/share/micropanel-touch/image-manifest.env"
 require grep -Eq '^PANEL_VARIANT=[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' \
     "$root_a_mount/opt/micropanel-touch/share/micropanel-touch/image-manifest.env"
+if [ -n "$expected_micropanel_touch_revision" ]; then
+    require grep -Fqx "MICROPANEL_TOUCH_REVISION=$expected_micropanel_touch_revision" \
+        "$root_a_mount/opt/micropanel-touch/share/micropanel-touch/image-manifest.env"
+else
+    require grep -Eq '^MICROPANEL_TOUCH_REVISION=[0-9a-f]{40}$' \
+        "$root_a_mount/opt/micropanel-touch/share/micropanel-touch/image-manifest.env"
+fi
 
 for directory in micropanel-touch micropanel-touch/logs micropanel-touch/ssh-host-keys \
                  micropanel-touch-system micropanel-touch-network/dhcp-server \

@@ -80,6 +80,7 @@ printf '%s\n' 'fixture overlay payload' > "$source_boot_mount/overlays/vc4-kms-v
 
 install -d "$source_root_mount/etc/NetworkManager/system-connections"
 manifest="$source_root_mount/opt/micropanel-touch/share/micropanel-touch/image-manifest.env"
+fixture_app_revision=0123456789012345678901234567890123456789
 install -Dm0644 /dev/null "$manifest"
 printf '%s\n' \
     'root:x:0:0:root:/root:/bin/bash' \
@@ -89,7 +90,9 @@ printf '%s\n' \
     'PARTUUID=fixture-root / ext4 defaults 0 1' \
     'PARTUUID=fixture-boot /boot/firmware vfat defaults 0 2' \
     > "$source_root_mount/etc/fstab"
-printf '%s\n' 'IMAGE_VERSION=fixture' 'PANEL_VARIANT=piscreen' > "$manifest"
+printf '%s\n' 'IMAGE_VERSION=fixture' \
+    "MICROPANEL_TOUCH_REVISION=$fixture_app_revision" \
+    'PANEL_VARIANT=piscreen' > "$manifest"
 printf '%s\n' '[connection]' 'id=fixture' > "$source_root_mount/etc/NetworkManager/system-connections/fixture.nmconnection"
 chmod 0600 "$source_root_mount/etc/NetworkManager/system-connections/fixture.nmconnection"
 chmod 0700 "$source_root_mount/etc/NetworkManager/system-connections"
@@ -103,13 +106,13 @@ source_loop=""
 # DATA_PARTITION_MB intentionally remains unset: it has no meaning when p8
 # is the A/B layout's remainder and this verifies that it is not a hidden
 # requirement of the finalizer API.
-env -u DATA_PARTITION_MB \
+env -u DATA_PARTITION_MB MICROPANEL_TOUCH_REVISION="$fixture_app_revision" \
     IMAGE_PATH="$image" AB_LAYOUT=1 AB_IMAGE_SIZE_MB=384 \
     AB_BOOT_PARTITION_MB=32 AB_ROOT_PARTITION_MB=96 AB_FACTORY_PARTITION_MB=32 \
     SLOT_COMPATIBLE_BOARDS=pi4 \
     "$finalizer"
 
-"$verifier" "$image"
+MICROPANEL_TOUCH_REVISION="$fixture_app_revision" "$verifier" "$image"
 payload_prefix="$work/payload/micropanel-touch-fixture-1-luckfox-ctp"
 manifest="$payload_prefix.manifest"
 rootfs="$payload_prefix.rootfs.img.xz"
@@ -174,7 +177,7 @@ done
 }
 losetup -d "$source_loop"
 source_loop=""
-"$verifier" "$image"
+MICROPANEL_TOUCH_REVISION="$fixture_app_revision" "$verifier" "$image"
 
 # Simulate the source-image state left by a host kill while its label was
 # neutralized. The next payload invocation must self-heal p5 before it exits.
@@ -204,7 +207,7 @@ done
 }
 losetup -d "$source_loop"
 source_loop=""
-"$verifier" "$image"
+MICROPANEL_TOUCH_REVISION="$fixture_app_revision" "$verifier" "$image"
 [ "$(sha256sum "$boot_tar" | awk '{print $1}')" = "$boot_sha256" ]
 tar -tf "$boot_tar" | grep -Fqx './cmdline.txt.template'
 if tar -tf "$boot_tar" | grep -Fqx './cmdline.txt'; then

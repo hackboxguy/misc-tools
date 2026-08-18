@@ -24,6 +24,11 @@ if ! git -C "$source_root" checkout --detach "$revision"; then
     git -C "$source_root" checkout --detach "$revision"
 fi
 git -C "$source_root" submodule update --init --recursive
+resolved_revision=$(git -C "$source_root" rev-parse HEAD)
+[ "$resolved_revision" = "$revision" ] || {
+    echo "ERROR: cloned MicroPanel Touch revision $resolved_revision does not match requested $revision" >&2
+    exit 1
+}
 
 cmake -S "$source_root" -B "$source_root/build" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
@@ -251,7 +256,7 @@ grep -Eq "(^|[[:space:]])${overlayroot_token}([[:space:]]|$)" /boot/firmware/cmd
 
 mkdir -p "$destination/share/micropanel-touch"
 cat > "$destination/share/micropanel-touch/image-manifest.env" <<EOF
-MICROPANEL_TOUCH_REVISION=$revision
+MICROPANEL_TOUCH_REVISION=$resolved_revision
 LVGL_REVISION=$(git -C "$source_root/external/lvgl" rev-parse HEAD)
 PANEL_VARIANT=piscreen
 EOF

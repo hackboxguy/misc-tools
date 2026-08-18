@@ -49,6 +49,10 @@ grep -Fq 'requires EXPAND_ROOT=0; first-boot root expansion would corrupt the A/
 grep -Fq 'for tool in sfdisk fdisk mkfs.ext4 mkfs.vfat e2fsck resize2fs e2label blkid blockdev mount; do' "$builder"
 grep -Fq "bash \"\$ab_static_test\"" "$builder"
 grep -Fq -- '--payload requires --layout=ab' "$builder"
+grep -Fq -- '--app-revision=SHA' "$builder"
+grep -Fq 'MicroPanel Touch builds require --app-revision=<40-character lowercase micropanel-touch commit>' "$builder"
+grep -Fq 'MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" "$PAYLOAD_IMAGE_VERIFIER" "$FINAL_IMG"' "$builder"
+grep -Fq 'MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" \' "$builder"
 grep -Fq 'make-ab-update-payload.sh' "$builder"
 grep -Fq 'verify-ab-image-layout.sh' "$builder"
 grep -Fq '"$PAYLOAD_IMAGE_VERIFIER" "$FINAL_IMG"' "$builder"
@@ -74,6 +78,18 @@ luckfox_app_hook=$(grep '^packages/micropanel-touch-hook.sh|' \
     echo 'default and Luckfox hook lists pin different micropanel-touch revisions' >&2
     exit 1
 }
+printf '%s\n' "$base_app_hook" | grep -Fq '|${MICROPANEL_TOUCH_REVISION}|'
+grep -Fq 'resolved_revision=$(git -C "$source_root" rev-parse HEAD)' \
+    "$repo_root/board-configs/micropanel-touch/packages/micropanel-touch-hook.sh"
+grep -Fq 'verify_installed_app_revision "$root_mount"' "$finalizer"
+
+# A release cannot silently use the old hook pin: its exact application
+# revision is mandatory and the builder rejects an omitted pin before preflight
+# or any expensive build stage begins.
+missing_revision_output=$("$builder" --board=micropanel-touch --variant=luckfox-ctp \
+    --layout=ab --version=fixture --dry-run 2>&1 || true)
+printf '%s\n' "$missing_revision_output" | \
+    grep -Fq 'MicroPanel Touch builds require --app-revision=<40-character lowercase micropanel-touch commit>'
 
 template=$(mktemp)
 trap 'rm -f "$template"' EXIT HUP INT TERM

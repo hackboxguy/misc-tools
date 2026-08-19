@@ -180,6 +180,11 @@ awk '
 # It fetches the manifest pair only: discovering that a release is already
 # installed must not cost a payload download.
 ! grep -Fq 'BUNDLE_URL' "$engine/ab-update-check"
+# The GitHub per-asset ceiling must be caught on the build host, not at upload
+# time and certainly not as a `network` failure on a device.
+grep -Fq 'asset_limit_bytes=${AB_ASSET_LIMIT_BYTES:-2147483648}' "$payload_generator"
+grep -Fq 'per-asset limit for a GitHub release' "$payload_generator"
+
 # The check moves two small files, so it is bounded outright - and, like the
 # engine, never follows a redirect out of http(s).
 grep -Fq -- '--max-time "$check_max_seconds"' "$engine/ab-update-check"

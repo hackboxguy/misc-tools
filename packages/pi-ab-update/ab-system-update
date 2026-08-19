@@ -45,7 +45,6 @@ ab_setting() { # $1=env value (may be empty), $2=config key, $3=default
     printf '%s\n' "$3"
 }
 
-product=$(ab_setting "${AB_PRODUCT:-}" AB_PRODUCT pi-ab-update)
 image_manifest=$(ab_setting "${AB_IMAGE_MANIFEST:-}" AB_MANIFEST /usr/lib/pi-ab-update/image-manifest.env)
 variant_key=$(ab_setting "${AB_VARIANT_KEY:-}" AB_VARIANT_KEY PANEL_VARIANT)
 selector=$(ab_setting "${AB_SLOT_SELECTOR:-}" AB_SLOT_SELECTOR /usr/local/sbin/ab-slot-selector)
@@ -123,7 +122,12 @@ internal_failure_context=""
 log_diagnostic() {
     printf '[ERROR] %s\n' "$*" >&2
     command -v logger >/dev/null 2>&1 && \
-        logger -t "ab-system-update[$product]" -p daemon.err -- "$*" || true
+        # Plain tag on purpose. journald parses `identifier[pid]`, so a
+        # bracketed suffix is silently discarded - the product half of
+        # `ab-system-update[$product]` never reached the journal at all, while
+        # looking like it did. One device runs one product, so the bare tag is
+        # already unambiguous, and it is what `journalctl -t` matches.
+        logger -t ab-system-update -p daemon.err -- "$*" || true
 }
 
 # set -e alone loses the failing command. Record it so cleanup can report it.

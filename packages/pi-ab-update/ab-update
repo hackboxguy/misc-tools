@@ -97,7 +97,7 @@ inactive_version() {
     # Read the other slot's own manifest. Root-only, read-only, and under the
     # engine's lock: mounting a slot that is mid-write would be a real hazard,
     # and the lock is exactly what the engine holds while writing it.
-    local part mnt version="" rc=0
+    local part mnt version=""
     part=$(inactive_partition) || return 1
     [ -b "$part" ] || return 1
     [ "$(id -u)" -eq 0 ] || { printf 'unreadable (needs root)\n'; return 0; }
@@ -111,13 +111,15 @@ inactive_version() {
     mnt=$(mktemp -d)
     if mount -o ro,nosuid,nodev,noexec -- "$part" "$mnt" 2>/dev/null; then
         version=$(published_value "$mnt$image_manifest" IMAGE_VERSION 2>/dev/null) || version=""
-        umount "$mnt" 2>/dev/null || rc=1
+        # A failed unmount is worth saying, but it must not turn a successful
+        # read into a failure: callers using `$(...) || echo unknown` would
+        # then print both the version and "unknown".
+        umount "$mnt" 2>/dev/null || printf 'warning: could not unmount %s\n' "$part" >&2
     fi
     rmdir "$mnt" 2>/dev/null || true
     exec {lock_fd}>&-
     if [ -n "$version" ]; then printf '%s\n' "$version"
     else printf 'none (empty or unreadable)\n'; fi
-    return "$rc"
 }
 
 show_status() {
@@ -172,10 +174,32 @@ show_status() {
     fi
 }
 
+warn_if_commit_would_fail() {
+    # Said before the stream, not after it. An operator who installs while a
+    # required unit is down otherwise pays the whole download and a reboot to
+    # discover that the candidate cannot commit. This warns and continues -
+    # never blocks - because installing into a half-broken device is exactly
+    # what someone recovering one needs to do.
+    [ -n "$health_units" ] || return 0
+    local down=''
+    for u in $health_units; do
+        [ "$(systemctl is-active "$u" 2>/dev/null || true)" = active ] || down="$down $u"
+    done
+    [ -n "$down" ] || return 0
+    printf 'WARNING: the commit predicate needs these active, and they are not:\n' >&2
+    for u in $down; do printf '  %s\n' "$u" >&2; done
+    printf 'The update will install and boot once, then fall back at the next\n' >&2
+    printf 'reboot unless they are healthy for the settle window. Continuing.\n\n' >&2
+}
+
 watch_progress() {
-    local last='' phase pct
+    local last='' phase pct quiet=0
     printf 'following %s (Ctrl-C to stop)\n' "$progress_file"
     while :; do
+        if [ ! -f "$progress_file" ] && [ "$quiet" -eq 3 ]; then
+            printf 'no update in progress (nothing has been published yet)\n'
+        fi
+        quiet=$((quiet + 1))
         if phase=$(published_value "$progress_file" phase 2>/dev/null); then
             pct=$(published_value "$progress_file" progress 2>/dev/null || echo 0)
             if [ "$phase:$pct" != "$last" ]; then
@@ -219,8 +243,12 @@ case "${1:-status}" in
 
     status)  show_status ;;
     watch)   watch_progress ;;
-    log)     need_root log; journalctl -t ab-system-update -t ab-update-check \
-                 -u ab-update-commit -n "${2:-40}" --no-pager ;;
+    log)     need_root log
+             # The factory reset is the update-adjacent event an operator is
+             # most likely to be looking for alongside these.
+             journalctl -t ab-system-update -t ab-update-check -t ab-factory-reset \
+                 -t ab-factory-reset-boot -u ab-update-commit \
+                 -n "${2:-40}" --no-pager ;;
 
     check)
         need_root check
@@ -232,10 +260,11 @@ case "${1:-status}" in
         need_root install "${2:-}"
         [ -x "$updater" ] || die "update engine is unavailable: $updater"
         case "${2:-}" in
-            ota|usb) exec "$updater" "$2" ;;
+            ota|usb) warn_if_commit_would_fail; exec "$updater" "$2" ;;
             --file=*)
                 file=${2#*=}
                 [ -f "$file" ] || die "not a file: $file"
+                warn_if_commit_would_fail
                 # `stdin` is the engine's own pipe source: the same reader, the
                 # same mandatory signature check, just fed from a path instead
                 # of discovered media.

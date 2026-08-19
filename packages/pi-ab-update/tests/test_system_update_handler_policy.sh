@@ -160,7 +160,12 @@ grep -Fq "die source 'unable to release a scanned USB filesystem'" "$handler"
 grep -Fq 'set -Eeuo pipefail' "$handler"
 grep -Fq "internal_failure_context=\"line \${LINENO}: \${BASH_COMMAND}\"" "$handler"
 grep -Fq 'log_diagnostic()' "$handler"
-grep -Fq 'logger -t "ab-system-update[$product]"' "$handler"
+# Plain tag, and it must stay plain: journald parses `identifier[pid]` and
+# silently discards a bracketed suffix, so `ab-system-update[$product]` looked
+# like per-product attribution while delivering none. The bare tag is also what
+# `journalctl -t` matches, which `ab-update log` depends on.
+grep -Fq 'logger -t ab-system-update -p daemon.err' "$handler"
+! grep -Fq 'logger -t "ab-system-update[' "$handler"
 grep -Fq 'unexpected failure${internal_failure_context:+ at $internal_failure_context}' "$handler"
 
 # O-01: the bundle descriptors are released before cleanup unmounts, otherwise

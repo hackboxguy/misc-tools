@@ -345,3 +345,21 @@ manifest_publish=""
 sync "$bundle" "$manifest_signature" "$manifest"
 
 echo "Created update payload: $bundle"
+
+# GitHub refuses a release asset over 2 GiB, and it refuses it at upload time -
+# after a full build and a long push. Worse, a release that somehow shipped
+# oversized would fail on the device as a transport error, sending whoever
+# debugged it after the network rather than the artifact. Say it here, on the
+# build host, while it is still cheap to act on.
+bundle_bytes=$(stat -c %s "$bundle")
+asset_limit_bytes=${AB_ASSET_LIMIT_BYTES:-2147483648}          # GitHub: 2 GiB
+asset_warn_bytes=${AB_ASSET_WARN_BYTES:-1932735283}            # 90% of that
+if [ "$bundle_bytes" -ge "$asset_limit_bytes" ]; then
+    echo "ERROR: the bundle is $bundle_bytes bytes, at or over the ${asset_limit_bytes}-byte" >&2
+    echo "       per-asset limit for a GitHub release. It cannot be published there." >&2
+    exit 1
+elif [ "$bundle_bytes" -ge "$asset_warn_bytes" ]; then
+    echo "WARNING: the bundle is $bundle_bytes bytes, within 10% of the" >&2
+    echo "         ${asset_limit_bytes}-byte GitHub per-asset limit. Shrinking the root" >&2
+    echo "         filesystem or choosing another distribution channel is due soon." >&2
+fi

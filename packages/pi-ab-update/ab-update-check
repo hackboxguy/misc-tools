@@ -32,7 +32,6 @@ ab_setting() { # $1=env, $2=key, $3=default
     printf '%s\n' "$3"
 }
 
-product=$(ab_setting "${AB_PRODUCT:-}" AB_PRODUCT pi-ab-update)
 image_manifest=$(ab_setting "${AB_IMAGE_MANIFEST:-}" AB_MANIFEST /usr/lib/pi-ab-update/image-manifest.env)
 variant_key=$(ab_setting "${AB_VARIANT_KEY:-}" AB_VARIANT_KEY PANEL_VARIANT)
 runtime_dir=$(ab_setting "${AB_RUNTIME_DIR:-}" AB_RUNTIME_DIR /run/ab-update)
@@ -58,7 +57,8 @@ trap cleanup EXIT HUP INT TERM
 log_diagnostic() {
     printf '[ERROR] %s\n' "$*" >&2
     command -v logger >/dev/null 2>&1 && \
-        logger -t "ab-update-check[$product]" -p daemon.err -- "$*" || true
+        # Plain tag: journald discards a bracketed suffix (see ab-system-update).
+        logger -t ab-update-check -p daemon.err -- "$*" || true
 }
 
 publish() { # $1=state, $2=version (may be empty)

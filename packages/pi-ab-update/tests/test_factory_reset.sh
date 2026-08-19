@@ -65,6 +65,7 @@ chmod 0755 "$reboot_command"
 run_request() {
     AB_UPDATE_CONFIG="$conf" AB_APP_ACCOUNT="$(id -un)" \
     AB_REBOOT_COMMAND="$reboot_command" REBOOT_LOG="$reboot_log" \
+    AB_REBOOT_DELAY_SECONDS=0 \
         /bin/bash "$request" "$@"
 }
 run_boot() {
@@ -100,6 +101,25 @@ grep -q rebooted "$reboot_log" 2>/dev/null && ok 'request reboots' || fail 'requ
     || fail 'request wiped state before the reboot'
 run_request extra-argument >/dev/null 2>&1 && fail 'request accepted an argument' \
     || ok 'request refuses arguments'
+
+# --- the deferred reboot lets the caller hear the answer -------------------
+# An immediate reboot kills the caller mid-reply, so a broker-mediated UI
+# reports a failure for a request that already succeeded. The request must
+# return first and reboot a moment later.
+: > "$reboot_log"
+start=$(date +%s)
+AB_UPDATE_CONFIG="$conf" AB_APP_ACCOUNT="$(id -un)" \
+    AB_REBOOT_COMMAND="$reboot_command" REBOOT_LOG="$reboot_log" \
+    AB_REBOOT_DELAY_SECONDS=2 /bin/bash "$request" >/dev/null 2>&1
+elapsed=$(( $(date +%s) - start ))
+[ "$elapsed" -le 1 ] && ok 'deferred request returns immediately' \
+    || fail "deferred request blocked for ${elapsed}s"
+grep -q rebooted "$reboot_log" 2>/dev/null && fail 'reboot fired before the caller returned' \
+    || ok 'reboot has not fired yet when the request returns'
+sleep 4
+grep -q rebooted "$reboot_log" 2>/dev/null && ok 'deferred reboot fires afterwards' \
+    || fail 'deferred reboot never fired'
+rm -f "$data/fixture-system/factory-reset-requested"
 
 # --- an interrupted reset retries -----------------------------------------
 # Simulate a power cut part way through: the wipe happened, the marker did not

@@ -46,11 +46,10 @@ skeleton=${AB_DATA_SKELETON:-/usr/local/sbin/ab-data-skeleton}
 reset_seed=$(ab_setting "${AB_RESET_SEED:-}" AB_RESET_SEED '')
 marker=${AB_RESET_MARKER:-$state_dir/factory-reset-requested}
 
-log_note() {
-    printf '%s\n' "$*"
-    command -v logger >/dev/null 2>&1 && \
-        logger -t "ab-factory-reset[$product]" -p daemon.notice -- "$*" || true
-}
+# This runs as a systemd unit, which already captures stdout into the journal.
+# Sending the same line to logger as well would simply double every entry; the
+# request CLI needs logger because *its* output is discarded by the broker.
+log_note() { printf '%s\n' "$*"; }
 die() {
     printf '[ERROR] %s\n' "$*" >&2
     command -v logger >/dev/null 2>&1 && \

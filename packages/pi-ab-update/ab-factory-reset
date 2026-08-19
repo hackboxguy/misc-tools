@@ -35,6 +35,11 @@ product=$(ab_setting "${AB_PRODUCT:-}" AB_PRODUCT pi-ab-update)
 state_dir=$(ab_setting "${AB_STATE_DIR:-}" AB_STATE_DIR /data/pi-ab-update)
 marker=${AB_RESET_MARKER:-$state_dir/factory-reset-requested}
 reboot_command=${AB_REBOOT_COMMAND:-/usr/sbin/reboot}
+# Rebooting immediately kills the caller before it can be told the request
+# succeeded: a broker-mediated UI sees its connection die mid-reply and reports
+# a failure for an operation that has in fact already been scheduled. Give the
+# reply a moment to land. Set to 0 for a synchronous reboot (fixtures do).
+reboot_delay=$(ab_setting "${AB_REBOOT_DELAY_SECONDS:-}" AB_REBOOT_DELAY_SECONDS 2)
 
 log_diagnostic() {
     printf '[ERROR] %s\n' "$*" >&2
@@ -60,5 +65,14 @@ sync -f "$temporary"
 mv -f "$temporary" "$marker"
 sync -f "$state_dir"
 
+[[ $reboot_delay =~ ^[0-9]+$ ]] || die 'reboot delay must be a whole number of seconds'
+
 printf '[SUCCESS] factory reset requested; rebooting to perform it\n'
-"$reboot_command"
+if [ "$reboot_delay" -eq 0 ]; then
+    "$reboot_command"
+else
+    # Detached, so this process can exit and be reaped normally; the marker is
+    # already durable, so nothing depends on this surviving.
+    setsid sh -c 'sleep "$1"; shift; exec "$@"' _ "$reboot_delay" "$reboot_command" \
+        >/dev/null 2>&1 < /dev/null &
+fi

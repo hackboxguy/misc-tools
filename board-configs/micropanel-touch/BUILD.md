@@ -208,16 +208,23 @@ explicit failure classes to the two previously unguarded mounts on the USB
 discovery path, and mirrored handler diagnostics into the root-only journal.
 On the bench: no media reported `failed-source`, a stick without a bundle
 reported `failed-payload`, and a normal `00.27`→`00.28` update from an
-unlabelled exFAT stick committed as usual. `journalctl -t
-micropanel-touch-system-update` now names the cause of a refusal, and stays
-silent on a successful update.
+unlabelled exFAT stick committed as usual. The updater's diagnostics reach the
+root-only journal under the tag `ab-system-update[micropanel-touch]` (the
+engine tags itself with `AB_PRODUCT`), naming the cause of a refusal and
+staying silent on a successful update:
 
-Reading the handler back out of a built image and comparing it to the source is
-a cheap check worth keeping:
+```sh
+sudo journalctl -t 'ab-system-update[micropanel-touch]' -b
+```
+
+Reading the updater back out of a built image and comparing it to the source is
+a cheap check worth keeping. Since Stage 2c the updater is the shared engine,
+so both paths changed:
 
 ```sh
 sudo losetup --find --show --partscan --read-only <image>   # then mount p5 ro
-sha256sum <mount>/opt/micropanel-touch/usr/bin/micropanel-touch-system-update
+sha256sum <mount>/usr/local/sbin/ab-system-update
+sha256sum packages/pi-ab-update/ab-system-update            # must match
 ```
 
 #### Latest Stage 2 bench evidence — complete, 2026-08-18

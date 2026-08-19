@@ -60,6 +60,7 @@ printf '%s\n' \
 
 run_check() {
     AB_IMAGE_MANIFEST="$image_manifest" AB_SOURCE_CONFIG="$source_config" \
+    AB_CHECK_MAX_SECONDS="${AB_CHECK_MAX_SECONDS:-10}" \
     AB_SIGNING_KEY="$work/release.pub" AB_RUNTIME_DIR="$work/runtime" \
     AB_BOARD=pi4 AB_NETWORK_TIMEOUT=5 \
         /bin/bash "$check" >/dev/null 2>&1
@@ -112,6 +113,50 @@ openssl pkeyutl -sign -inkey "$work/release.key" -rawin -in "$serve/manifest" -o
 run_check
 [ "$(state)" = compatibility ] && ok 'release for another board' 'compatibility' \
     || fail "wrong board: state=$(state)"
+
+# --- a server that connects and then says nothing --------------------------
+# The failure mode --max-time exists for: without it this holds "checking" until
+# the client's reply timeout, for two files totalling a few hundred bytes.
+python3 - "$work/stall.port" <<'STALL' &
+import socket, sys, time
+srv = socket.socket(); srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+srv.bind(('127.0.0.1', 0)); srv.listen(8)
+open(sys.argv[1], 'w').write(str(srv.getsockname()[1]))
+held = []
+deadline = time.time() + 60
+while time.time() < deadline:
+    srv.settimeout(1.0)
+    try:
+        conn, _ = srv.accept()
+    except socket.timeout:
+        continue
+    held.append(conn)   # accepted, and deliberately never answered
+STALL
+stall_pid=$!
+for _ in $(seq 1 40); do [ -s "$work/stall.port" ] && break; sleep 0.25; done
+stall_port=$(cat "$work/stall.port" 2>/dev/null)
+if [ -n "$stall_port" ]; then
+    printf '%s\n' \
+        "MANIFEST_URL=http://127.0.0.1:$stall_port/manifest" \
+        "MANIFEST_SIG_URL=http://127.0.0.1:$stall_port/manifest.sig" \
+        "BUNDLE_URL=http://127.0.0.1:$stall_port/bundle.mpupdate" > "$source_config"
+    started=$SECONDS
+    AB_CHECK_MAX_SECONDS=3 run_check
+    elapsed=$((SECONDS - started))
+    if [ "$(state)" = network ] && [ "$elapsed" -lt 30 ]; then
+        ok 'server connects then stalls' "network (${elapsed}s)"
+    else
+        fail "stalling server: state=$(state) elapsed=${elapsed}s"
+    fi
+else
+    echo '  skip  stalling server: could not start the stand-in'
+fi
+kill "$stall_pid" 2>/dev/null || true
+wait "$stall_pid" 2>/dev/null || true
+printf '%s\n' \
+    "MANIFEST_URL=http://127.0.0.1:$port/manifest" \
+    "MANIFEST_SIG_URL=http://127.0.0.1:$port/manifest.sig" \
+    "BUNDLE_URL=http://127.0.0.1:$port/bundle.mpupdate" > "$source_config"
 
 # --- the server is gone ----------------------------------------------------
 write_release 00.35

@@ -172,6 +172,11 @@ awk '
 # It fetches the manifest pair only: discovering that a release is already
 # installed must not cost a payload download.
 ! grep -Fq 'BUNDLE_URL' "$engine/ab-update-check"
+# The check moves two small files, so it is bounded outright - and, like the
+# engine, never follows a redirect out of http(s).
+grep -Fq -- '--max-time "$check_max_seconds"' "$engine/ab-update-check"
+grep -Fq -- "--proto '=http,https' --proto-redir '=http,https'" "$engine/ab-update-check"
+grep -Fq "77) die image" "$engine/ab-update-check"
 # The release source is board-authored and overridable per build; the URLs stay
 # version-less because the version lives inside the signed manifest.
 grep -Fq -- '--release-url-template=*' "$builder"

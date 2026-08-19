@@ -43,6 +43,12 @@ done
     exit 1
 }
 
+# 0.0.0.0 is the useful default - the device under test has to reach this host
+# across the LAN - but it is worth saying plainly what that means.
+if [ "$bind" = 0.0.0.0 ]; then
+    echo "NOTE: serving to every host on this network, not just the bench device."
+    echo "      Pass a bind address as the third argument to narrow it."
+fi
 echo "serving $payload_dir on http://$bind:$port/"
 for asset in "$payload_dir"/*.manifest "$payload_dir"/*.manifest.sig "$payload_dir"/*.mpupdate; do
     printf '  %s  (%s bytes)\n' "$(basename "$asset")" "$(stat -c %s "$asset")"

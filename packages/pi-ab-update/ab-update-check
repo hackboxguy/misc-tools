@@ -40,6 +40,9 @@ signing_key=$(ab_setting "${AB_SIGNING_KEY:-}" AB_SIGNING_KEY /usr/lib/pi-ab-upd
 source_config=$(ab_setting "${AB_SOURCE_CONFIG:-}" AB_SOURCE_CONFIG /usr/lib/pi-ab-update/update-source.conf)
 network_timeout=$(ab_setting "${AB_NETWORK_TIMEOUT:-}" AB_NETWORK_TIMEOUT 30)
 curl_command=${AB_CURL:-curl}
+# The whole check moves two small files; anything slower than this is a fault,
+# not a slow link.
+check_max_seconds=${AB_CHECK_MAX_SECONDS:-60}
 result_file=${AB_CHECK_RESULT_FILE:-$runtime_dir/check}
 manifest_max_bytes=65536
 
@@ -104,17 +107,33 @@ source_config_value() { # $1=key
 }
 
 fetch() { # $1=url, $2=destination, $3=max bytes
-    local status=0
-    "$curl_command" --fail --location --silent --show-error \
-        --connect-timeout "$network_timeout" --max-filesize "$3" \
-        --output "$2" "$1" 2>/dev/null || status=$?
+    local status=0 detail
+    # Both fetches here are a few hundred bytes, so --max-time bounds them
+    # outright: without it a server that connects and then goes quiet holds the
+    # check open until the client's reply timeout, for metadata that should
+    # arrive in one packet. --proto/--proto-redir keep --location from ever
+    # leaving http(s); authenticity does not depend on that, but there is no
+    # reason to allow it.
+    detail=$("$curl_command" --fail --location --silent --show-error \
+        --proto '=http,https' --proto-redir '=http,https' \
+        --connect-timeout "$network_timeout" --max-time "$check_max_seconds" \
+        --max-filesize "$3" --output "$2" "$1" 2>&1) || status=$?
     [ "$status" -eq 0 ] && return 0
+    # Curl's own words go to the root-only journal. They are the difference
+    # between "network failed" and "this name does not resolve", and they are
+    # never shown to the unprivileged client.
+    [ -z "$detail" ] || log_diagnostic "curl: $(printf '%s' "$detail" | tail -n 1)"
     case "$status" in
-        60|77|35)
+        # 77 is an unreadable CA bundle - an image defect, not a clock problem.
+        # Telling the operator to set the time would send them somewhere there
+        # is nothing to fix.
+        77) die image 'the certificate store on this device cannot be read' ;;
+        60|35)
             clock_is_unsynchronized && \
                 die clock 'the release server could not be authenticated and this device has no synchronized clock'
             die network 'the release server could not be authenticated' ;;
-        6|7|28) die network 'the release server could not be reached' ;;
+        6|7) die network 'the release server could not be reached' ;;
+        28) die network 'the release server stopped responding' ;;
         22) die network 'the release server has no release for this device' ;;
         *) die network "the release check failed (curl status $status)" ;;
     esac

@@ -440,6 +440,51 @@ SLOW
     printf '  ok  %-46s -> %s (%ss)\n' 'mid-download failure not blamed on transport' \
         "$slow_phase" "$slow_elapsed"
 
+    # A server that accepts the connection and then goes quiet. Until the
+    # rootfs member starts there is no other detector watching - the engine's
+    # own stall detector measures bytes the *target device* accepted, which do
+    # not move while the manifest and boot archive are being read - so without
+    # a transfer-rate floor this blocks in dd indefinitely.
+    python3 - "$work/stall.port" <<'STALL' &
+import socket, sys, time
+srv = socket.socket(); srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+srv.bind(('127.0.0.1', 0)); srv.listen(8)
+open(sys.argv[1], 'w').write(str(srv.getsockname()[1]))
+held = []
+deadline = time.time() + 120
+while time.time() < deadline:
+    srv.settimeout(1.0)
+    try:
+        conn, _ = srv.accept()
+    except socket.timeout:
+        continue
+    held.append(conn)   # accepted, and deliberately never answered
+STALL
+    stall_pid=$!
+    for _ in $(seq 1 40); do [ -s "$work/stall.port" ] && break; sleep 0.25; done
+    stall_port=$(cat "$work/stall.port" 2>/dev/null)
+    if [ -n "$stall_port" ]; then
+        reset_target
+        printf 'BUNDLE_URL=http://127.0.0.1:%s/bundle.mpupdate\n' "$stall_port" > "$ota_config"
+        stall_started=$SECONDS
+        if AB_SOURCE_CONFIG="$ota_config" AB_NETWORK_MIN_RATE=1 AB_NETWORK_STALL_SECONDS=3 \
+                run_handler ota >/dev/null 2>&1; then
+            echo 'ERROR: a stalled download was accepted' >&2; exit 1
+        fi
+        stall_elapsed=$((SECONDS - stall_started))
+        stall_phase=$(sed -n 's/^phase=//p' "$runtime_dir/progress")
+        [ "$stall_phase" = failed-network ] || {
+            echo "ERROR: stalled download reported $stall_phase" >&2; exit 1; }
+        [ "$stall_elapsed" -lt 60 ] || {
+            echo "ERROR: the stalled download was not bounded (${stall_elapsed}s)" >&2; exit 1; }
+        printf '  ok  %-46s -> %s (%ss)\n' 'download stalls after connecting' \
+            "$stall_phase" "$stall_elapsed"
+    else
+        echo '  skip  stalling server: could not start the stand-in'
+    fi
+    kill "$stall_pid" 2>/dev/null || true
+    wait "$stall_pid" 2>/dev/null || true
+
     # Server gone entirely.
     reset_target
     kill "$ota_server_pid" 2>/dev/null || true

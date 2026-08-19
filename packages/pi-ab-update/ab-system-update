@@ -78,6 +78,8 @@ signing_key=$(ab_setting "${AB_SIGNING_KEY:-}" AB_SIGNING_KEY /usr/lib/pi-ab-upd
 source_config=$(ab_setting "${AB_SOURCE_CONFIG:-}" AB_SOURCE_CONFIG /usr/lib/pi-ab-update/update-source.conf)
 curl_command=${AB_CURL:-curl}
 network_timeout=$(ab_setting "${AB_NETWORK_TIMEOUT:-}" AB_NETWORK_TIMEOUT 30)
+network_min_bytes_per_second=$(ab_setting "${AB_NETWORK_MIN_RATE:-}" AB_NETWORK_MIN_RATE 512)
+network_stall_seconds=$(ab_setting "${AB_NETWORK_STALL_SECONDS:-}" AB_NETWORK_STALL_SECONDS 60)
 
 # Bundle policy. Names are exact, order is exact, and the two staged members
 # are bounded so a hostile bundle cannot exhaust the tmpfs runtime directory.
@@ -107,6 +109,7 @@ boot_archive=""
 bundle_file=""
 fetch_pid=""
 fetch_status=""
+fetch_stderr_file=""
 source_kind=""
 failure_reported=0
 lock_fd=""
@@ -181,9 +184,17 @@ fetch_terminated() {
 }
 
 fetch_exit_status() { # prints curl's exit status, or nothing if not knowable
+    local detail
     if [ -z "$fetch_status" ]; then
         fetch_terminated || return 1
         set +e; wait "$fetch_pid" 2>/dev/null; fetch_status=$?; set -e
+        # Curl's own words, once, to the root-only journal. "Could not resolve
+        # host" and "certificate has expired" are both `network` to the UI, and
+        # both send an operator somewhere completely different.
+        if [ "$fetch_status" -ne 0 ] && [ -s "${fetch_stderr_file:-/nonexistent}" ]; then
+            detail=$(tail -n 1 "$fetch_stderr_file")
+            [ -z "$detail" ] || log_diagnostic "curl: $detail"
+        fi
     fi
     printf '%s\n' "$fetch_status"
 }
@@ -202,7 +213,10 @@ transport_class() { # $1=class the reader chose; prints the class to publish
     status=$(fetch_exit_status) || { printf '%s\n' "$chosen"; return; }
     [ "$status" -ne 0 ] || { printf '%s\n' "$chosen"; return; }
     case "$status" in
-        60|77|35) clock_is_unsynchronized && printf 'clock\n' || printf 'network\n' ;;
+        # 77 is an unreadable certificate store: an image defect, and nothing an
+        # operator fixes by setting the clock.
+        77) printf 'image\n' ;;
+        60|35) clock_is_unsynchronized && printf 'clock\n' || printf 'network\n' ;;
         *) printf 'network\n' ;;
     esac
 }
@@ -237,7 +251,7 @@ cleanup() {
     [ -z "$hash_pid" ] || wait "$hash_pid" 2>/dev/null || true
     [ -z "$count_pid" ] || wait "$count_pid" 2>/dev/null || true
     rm -f -- "$hash_fifo" "$count_fifo" "$hash_output" "$count_output" "$dd_pid_file" \
-        "$header_file" "$manifest_file" "$signature_file" "$boot_archive"
+        "$header_file" "$manifest_file" "$signature_file" "$boot_archive" "$fetch_stderr_file"
     # O-01: the bundle is still open on fd 0/3 on every failure path, and an
     # open file keeps its filesystem busy — so the unmount below used to fail
     # EBUSY and be swallowed by `|| true`, stranding the mount inside the
@@ -667,8 +681,20 @@ elif [ "$source_kind" = ota ]; then
     # `wait` below reads directly. An earlier version had the subshell record
     # the status to a file instead, which could never work - `set -e` is in
     # force inside it, so a failing curl killed the subshell before the write.
+    #
+    # --speed-limit/--speed-time is the transfer-stall bound. A whole-transfer
+    # deadline would be wrong here - a 5 GiB bundle over a slow link is not a
+    # fault - but a server that connects and then goes quiet is, and until the
+    # rootfs member starts there is no other detector watching: the engine's
+    # own stall detector measures the target device's accepted bytes, which do
+    # not move while the manifest, signature and boot archive are being read.
+    fetch_stderr_file=$(mktemp "$private_runtime_dir/.curl-stderr.XXXXXX")
     exec 0< <(exec "$curl_command" --fail --location --silent --show-error \
-                  --connect-timeout "$network_timeout" "$bundle_url" 2>/dev/null)
+                  --proto '=http,https' --proto-redir '=http,https' \
+                  --connect-timeout "$network_timeout" \
+                  --speed-limit "$network_min_bytes_per_second" \
+                  --speed-time "$network_stall_seconds" \
+                  "$bundle_url" 2>"$fetch_stderr_file")
     fetch_pid=$!
 fi
 # Bash assigns /dev/null to the standard input of an asynchronous list unless

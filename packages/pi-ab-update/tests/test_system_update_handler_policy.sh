@@ -54,6 +54,20 @@ grep -Fq 'signing_key=$(ab_setting "${AB_SIGNING_KEY:-}" AB_SIGNING_KEY /usr/lib
 # only staging area, exactly as it is for USB.
 grep -Fq 'exec 0< <(exec "$curl_command" --fail --location --silent --show-error' "$handler"
 ! grep -Eq -- '--output|-o "\$' "$handler"
+# A transfer-rate floor, not a whole-transfer deadline: a 5 GiB bundle over a
+# slow link is not a fault, but a server that connects and then goes quiet is,
+# and nothing else is watching until the rootfs member starts.
+grep -Fq -- '--speed-limit "$network_min_bytes_per_second"' "$handler"
+grep -Fq -- '--speed-time "$network_stall_seconds"' "$handler"
+! grep -Fq -- '--max-time' "$handler"
+# --location must never leave http(s).
+grep -Fq -- "--proto '=http,https' --proto-redir '=http,https'" "$handler"
+# Curl's own words reach the root-only journal; they are the difference between
+# an unresolvable name and an expired certificate, which are one class to the UI.
+grep -Fq 'log_diagnostic "curl: $detail"' "$handler"
+# An unreadable certificate store is an image defect. Reporting it as a clock
+# problem would send an operator somewhere there is nothing to fix.
+grep -Fq "77) printf 'image" "$handler"
 # Curl's status comes from `wait`, never from a file the subshell writes:
 # `set -e` kills that subshell before any such write on the failure paths
 # that matter most.

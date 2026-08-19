@@ -25,6 +25,7 @@ run 'bundle reader'          bash "$engine/tests/test_update_bundle_reader.sh" "
 run 'commit policy'          sh "$engine/tests/test_update_commit_policy.sh" "$engine/ab-update-commit" "$engine/ab-update-commit.service"
 run 'commit public status'   sh "$engine/tests/test_update_commit_public_status.sh" "$engine/ab-update-commit"
 run 'update check'           bash "$engine/tests/test_ota_check.sh" "$engine/ab-update-check"
+run 'update cli'             bash "$engine/tests/test_update_cli.sh" "$engine/ab-update"
 
 if [ "$(id -u)" -eq 0 ]; then
     run 'handler loopback'   bash "$engine/tests/test_system_update_handler_integration.sh" "$engine/ab-system-update"

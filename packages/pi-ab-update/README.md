@@ -14,6 +14,7 @@ profile and, so far, its only adopter.
 | File | Role |
 |---|---|
 | `ab-system-update` | the root-only installer: USB discovery, single-pass bundle reader, streaming write, hash-before-arm, selector arm, reboot |
+| `ab-update` | the front door: `status`, `check`, `install ota\|usb\|--file=`, `watch`, `log`, plus single-value queries for scripts. Composes and delegates; contains no policy of its own |
 | `ab-update-check` | asks the release server what it offers: fetches the manifest and its signature only, verifies, and publishes `available` / `up-to-date` |
 | `ab-slot-selector` | the three-operation slot protocol (`current-slot`, `arm-candidate`, `commit`) — the seam a secure-boot backend replaces |
 | `ab-update-commit` + `.service` | commits a candidate after a sustained health window, or records `fallback` |
@@ -24,7 +25,7 @@ profile and, so far, its only adopter.
 | `ab-verify-image.sh` | read-only host-side acceptance check for a built image |
 | `ab-release-key.sh` | ed25519 release-key custody (create, sign, verify) |
 | `ab-serve-release.sh` | host-side bench helper: serves a payload directory over HTTP so an over-the-air update can be rehearsed before publishing |
-| `tests/` | host suites (bundle reader, handler policy, commit policy and status, factory reset, and two root-only loopback fixtures); `tests/run-tests.sh` runs them all |
+| `tests/` | host suites (bundle reader, handler policy, commit policy and status, the update check, the front-end CLI, factory reset, and three root-only loopback fixtures); `tests/run-tests.sh` runs them all |
 
 ## The board contract
 
@@ -59,6 +60,21 @@ AB_REBOOT_DELAY_SECONDS=2                       # 0 reboots synchronously
 
 `AB_RUNTIME_DIR` is also read by whatever shows progress to a user, so a board
 with a UI must keep the two in agreement.
+
+### About the front end
+
+`ab-update` exists because operating this engine otherwise means remembering
+four file paths and three script names. It follows one rule: **it composes, it
+never decides.** It reads state the engine publishes and hands work to the
+engine; it holds no version comparison, no compatibility rule and no health
+judgement. A second copy of that policy would drift from the engine, and the
+copy people actually run would be the one no fixture covers - so a static test
+forbids it.
+
+`ab-update --inactive-version` is the one thing it can do that nothing else
+could: it mounts the other slot read-only to report what a rollback would land
+on. It takes the engine's own lock first, because mounting a slot that is
+mid-write is a real hazard.
 
 ### About update authenticity
 

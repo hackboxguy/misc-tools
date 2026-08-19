@@ -158,6 +158,14 @@ grep -Fq 'scheduled reboot failed' "$engine/ab-factory-reset"
 
 # --- Stage 4: the check tool and the release source -----------------------
 bash -n "$engine/ab-update-check"
+bash -n "$engine/ab-update"
+[ -x "$engine/ab-update" ] || { echo "missing or non-executable: $engine/ab-update" >&2; exit 1; }
+grep -Fq '/usr/local/sbin/ab-update"' "$finalizer"
+grep -Fq 'sbin/ab-update"' "$verifier"
+# The front end composes and delegates; policy stays in the engine. A second
+# copy of it here would drift, and the copy people run would be the untested one.
+! grep -qE 'sort -V|version_greater' "$engine/ab-update"
+grep -Fq 'exec "$updater"' "$engine/ab-update"
 [ -x "$engine/ab-update-check" ] || {
     echo "missing or non-executable update check: $engine/ab-update-check" >&2; exit 1; }
 grep -Fq '/usr/local/sbin/ab-update-check' "$finalizer"

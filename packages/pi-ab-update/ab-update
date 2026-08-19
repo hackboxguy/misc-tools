@@ -1,0 +1,250 @@
+#!/bin/bash
+# pi-ab-update: one front door for the A/B update engine.
+#
+# This composes; it never decides. It reads state the engine publishes and
+# invokes the engine to act. It deliberately contains no version comparison,
+# no compatibility rule and no health judgement: those live in the engine, and
+# a second copy here would drift from it - with the copy people actually run
+# being the one no fixture covers.
+#
+# Usage:
+#   ab-update [status]                 everything on one screen (default)
+#   ab-update check                    ask the release source; downloads no payload
+#   ab-update install ota              install from the configured release source
+#   ab-update install usb              install from attached USB media
+#   ab-update install --file=PATH      install from a bundle already on disk
+#   ab-update watch                    follow progress until it settles
+#   ab-update log [N]                  the engine and commit journal
+#
+# Single-value queries, for scripts:
+#   --active-version --active-slot --active-partition --active-revision
+#   --inactive-version --inactive-partition
+#   --state --update-state --check-state --progress
+#
+# Options:
+#   --source-config=FILE   bench override for the release source (URLs are
+#                          otherwise pinned in the image and not client-supplied)
+#   --help
+set -Eeuo pipefail
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL=C
+
+ab_config=${AB_UPDATE_CONFIG:-/usr/lib/pi-ab-update/ab-update.conf}
+
+ab_config_value() { # $1=key
+    [ -f "$ab_config" ] && [ ! -L "$ab_config" ] || return 0
+    awk -v key="$1" '
+        /^[[:space:]]*#/ { next }
+        index($0, key "=") == 1 { value = substr($0, length(key) + 2); if (value != "") { print value; found = 1 } }
+        END { exit !found }
+    ' "$ab_config" 2>/dev/null || true
+}
+ab_setting() { # $1=env, $2=key, $3=default
+    if [ -n "$1" ]; then printf '%s\n' "$1"; return; fi
+    local configured; configured=$(ab_config_value "$2")
+    if [ -n "$configured" ]; then printf '%s\n' "$configured"; return; fi
+    printf '%s\n' "$3"
+}
+
+image_manifest=$(ab_setting "${AB_IMAGE_MANIFEST:-}" AB_MANIFEST /usr/lib/pi-ab-update/image-manifest.env)
+state_dir=$(ab_setting "${AB_STATE_DIR:-}" AB_STATE_DIR /data/pi-ab-update)
+runtime_dir=$(ab_setting "${AB_RUNTIME_DIR:-}" AB_RUNTIME_DIR /run/ab-update)
+lower_root_mount=$(ab_setting "${AB_LOWER_ROOT_MOUNT:-}" AB_LOWER_ROOT_MOUNT /media/root-ro)
+root_parent_pattern=$(ab_setting "${AB_ROOT_PARENT_PATTERN:-}" AB_ROOT_PARENT_PATTERN '^mmcblk[0-9]+$')
+health_units=$(ab_setting "${AB_HEALTH_UNITS:-}" AB_HEALTH_UNITS '')
+
+selector=${AB_SLOT_SELECTOR:-/usr/local/sbin/ab-slot-selector}
+updater=${AB_UPDATE_SCRIPT:-/usr/local/sbin/ab-system-update}
+checker=${AB_CHECK_SCRIPT:-/usr/local/sbin/ab-update-check}
+progress_file=$runtime_dir/progress
+check_file=${AB_CHECK_RESULT_FILE:-$runtime_dir/check}
+update_state_file=$state_dir/update-state
+lock_file=${AB_LOCK_FILE:-$runtime_dir/private/update.lock}
+
+die() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
+usage() { sed -n '/^# Usage:/,/^set -/p' "$0" | sed -e 's/^# \{0,1\}//' -e '$d'; exit "${1:-0}"; }
+need_root() { [ "$(id -u)" -eq 0 ] || die "this needs root: try sudo $(basename "$0") $*"; }
+
+manifest_value() { # $1=key - from the running image's own manifest
+    [ -f "$image_manifest" ] || return 1
+    awk -F= -v key="$1" '$1 == key { print substr($0, length(key) + 2); found = 1 }
+        END { exit !found }' "$image_manifest" 2>/dev/null
+}
+published_value() { # $1=file, $2=key
+    [ -f "$1" ] || return 1
+    awk -F= -v key="$2" '$1 == key { print substr($0, length(key) + 2); found = 1 }
+        END { exit !found }' "$1" 2>/dev/null
+}
+
+active_slot() { "$selector" current-slot 2>/dev/null | tr -d '[:space:]'; }
+
+active_partition() {
+    findmnt -rn -T "$lower_root_mount" -o SOURCE 2>/dev/null | head -1
+}
+
+inactive_partition() { # the slot a candidate would be written to
+    local slot part source parent
+    slot=$(active_slot) || return 1
+    case "$slot" in A) part=6 ;; B) part=5 ;; *) return 1 ;; esac
+    source=$(active_partition) || return 1
+    parent=$(lsblk -no PKNAME "$source" 2>/dev/null | tr -d '[:space:]')
+    [[ $parent =~ $root_parent_pattern ]] || return 1
+    printf '/dev/%sp%s\n' "$parent" "$part"
+}
+
+inactive_version() {
+    # Read the other slot's own manifest. Root-only, read-only, and under the
+    # engine's lock: mounting a slot that is mid-write would be a real hazard,
+    # and the lock is exactly what the engine holds while writing it.
+    local part mnt version="" rc=0
+    part=$(inactive_partition) || return 1
+    [ -b "$part" ] || return 1
+    [ "$(id -u)" -eq 0 ] || { printf 'unreadable (needs root)\n'; return 0; }
+    install -d -m0700 "$(dirname "$lock_file")" 2>/dev/null || true
+    exec {lock_fd}>>"$lock_file" 2>/dev/null || { printf 'unreadable (no lock)\n'; return 0; }
+    if ! flock -n "$lock_fd"; then
+        exec {lock_fd}>&-
+        printf 'unreadable (an update is running)\n'
+        return 0
+    fi
+    mnt=$(mktemp -d)
+    if mount -o ro,nosuid,nodev,noexec -- "$part" "$mnt" 2>/dev/null; then
+        version=$(published_value "$mnt$image_manifest" IMAGE_VERSION 2>/dev/null) || version=""
+        umount "$mnt" 2>/dev/null || rc=1
+    fi
+    rmdir "$mnt" 2>/dev/null || true
+    exec {lock_fd}>&-
+    if [ -n "$version" ]; then printf '%s\n' "$version"
+    else printf 'none (empty or unreadable)\n'; fi
+    return "$rc"
+}
+
+show_status() {
+    local slot part inactive_part v rev state check_state check_version phase pct
+    slot=$(active_slot) || slot='unknown'
+    part=$(active_partition) || part='unknown'
+    inactive_part=$(inactive_partition) || inactive_part='unknown'
+    v=$(manifest_value IMAGE_VERSION) || v='unknown'
+    rev=$(manifest_value MICROPANEL_TOUCH_REVISION 2>/dev/null) || rev=$(manifest_value AB_APP_REVISION 2>/dev/null) || rev=''
+
+    printf 'Running\n'
+    printf '  version            %s\n' "$v"
+    [ -z "$rev" ] || printf '  app revision       %s\n' "$rev"
+    printf '  slot               %s\n' "$slot"
+    printf '  partition          %s\n' "$part"
+    printf '\nInactive slot (what a rollback or the next update uses)\n'
+    printf '  partition          %s\n' "$inactive_part"
+    printf '  version            %s\n' "$(inactive_version 2>/dev/null || echo 'unknown')"
+
+    printf '\nUpdate state\n'
+    if state=$(published_value "$update_state_file" state 2>/dev/null); then
+        printf '  state              %s\n' "$state"
+        for k in candidate_slot version variant; do
+            published_value "$update_state_file" "$k" >/dev/null 2>&1 && \
+                printf '  %-18s %s\n' "$k" "$(published_value "$update_state_file" "$k")"
+        done
+    else
+        printf '  state              none recorded (no update has run on this device)\n'
+    fi
+
+    if phase=$(published_value "$progress_file" phase 2>/dev/null); then
+        pct=$(published_value "$progress_file" progress 2>/dev/null || echo '?')
+        printf '  last/current run   %s (%s%%)\n' "$phase" "$pct"
+    fi
+
+    printf '\nLast update check\n'
+    if check_state=$(published_value "$check_file" state 2>/dev/null); then
+        check_version=$(published_value "$check_file" version 2>/dev/null || true)
+        printf '  result             %s%s\n' "$check_state" \
+            "${check_version:+ ($check_version)}"
+    else
+        printf '  result             never run\n'
+    fi
+
+    # The single most surprising operational fact, stated where it is needed:
+    # an update applied while these are down installs, boots once, and falls back.
+    if [ -n "$health_units" ]; then
+        printf '\nCommit requires these to stay healthy for the settle window\n'
+        for u in $health_units; do
+            printf "  %-36s %s\n" "$u" "$(systemctl is-active "$u" 2>/dev/null || echo unknown)"
+        done
+    fi
+}
+
+watch_progress() {
+    local last='' phase pct
+    printf 'following %s (Ctrl-C to stop)\n' "$progress_file"
+    while :; do
+        if phase=$(published_value "$progress_file" phase 2>/dev/null); then
+            pct=$(published_value "$progress_file" progress 2>/dev/null || echo 0)
+            if [ "$phase:$pct" != "$last" ]; then
+                printf '%s  %s %s%%\n' "$(date +%H:%M:%S)" "$phase" "$pct"
+                last="$phase:$pct"
+            fi
+            case "$phase" in
+                failed-*) printf 'terminal: %s\n' "$phase"; return 1 ;;
+                arming)   printf 'terminal: armed; the device reboots into the candidate\n'; return 0 ;;
+            esac
+        fi
+        sleep 2
+    done
+}
+
+# --- argument handling ----------------------------------------------------
+source_config_override=''
+args=()
+for arg in "$@"; do
+    case "$arg" in
+        --source-config=*) source_config_override=${arg#*=} ;;
+        *) args+=("$arg") ;;
+    esac
+done
+set -- ${args[@]+"${args[@]}"}
+
+[ -n "$source_config_override" ] && export AB_SOURCE_CONFIG="$source_config_override"
+
+case "${1:-status}" in
+    -h|--help|help) usage 0 ;;
+
+    --active-version)    manifest_value IMAGE_VERSION || die 'no image manifest' ;;
+    --active-revision)   manifest_value MICROPANEL_TOUCH_REVISION || manifest_value AB_APP_REVISION || die 'no revision recorded' ;;
+    --active-slot)       active_slot || die 'slot selector unavailable' ;;
+    --active-partition)  active_partition || die 'running root partition unavailable' ;;
+    --inactive-partition) inactive_partition || die 'inactive partition unavailable' ;;
+    --inactive-version)  need_root --inactive-version; inactive_version ;;
+    --state|--update-state) published_value "$update_state_file" state || die 'no update state recorded' ;;
+    --check-state)       published_value "$check_file" state || die 'no check has run' ;;
+    --progress)          [ -f "$progress_file" ] && cat "$progress_file" || die 'no update has run' ;;
+
+    status)  show_status ;;
+    watch)   watch_progress ;;
+    log)     need_root log; journalctl -t ab-system-update -t ab-update-check \
+                 -u ab-update-commit -n "${2:-40}" --no-pager ;;
+
+    check)
+        need_root check
+        [ -x "$checker" ] || die "update check is unavailable: $checker"
+        "$checker"
+        ;;
+
+    install)
+        need_root install "${2:-}"
+        [ -x "$updater" ] || die "update engine is unavailable: $updater"
+        case "${2:-}" in
+            ota|usb) exec "$updater" "$2" ;;
+            --file=*)
+                file=${2#*=}
+                [ -f "$file" ] || die "not a file: $file"
+                # `stdin` is the engine's own pipe source: the same reader, the
+                # same mandatory signature check, just fed from a path instead
+                # of discovered media.
+                exec "$updater" stdin < "$file"
+                ;;
+            '') die 'install needs a source: ota | usb | --file=PATH' ;;
+            *) die "unknown install source: $2 (expected ota, usb or --file=PATH)" ;;
+        esac
+        ;;
+
+    *) printf '[ERROR] unknown command: %s\n\n' "$1" >&2; usage 64 ;;
+esac

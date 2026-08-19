@@ -10,3 +10,11 @@ network-manager
 polkitd
 util-linux
 xz-utils
+# Stage 4 update path: curl fetches the release, openssl verifies the manifest
+# signature, and ca-certificates lets the fetch authenticate an HTTPS release
+# server. The signature check itself needs none of these certificates - it is
+# raw ed25519 against a key pinned in the image - which is why a device with no
+# clock and no network can still install a signed release from USB.
+curl
+openssl
+ca-certificates

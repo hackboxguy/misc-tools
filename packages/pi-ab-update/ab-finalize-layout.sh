@@ -37,6 +37,7 @@ script_dir=$(cd "$(dirname "$0")" && pwd)
 data_skeleton_script=${DATA_SKELETON_SCRIPT:-}
 selector_script=${SLOT_SELECTOR_SCRIPT:-$script_dir/ab-slot-selector}
 update_script=${AB_UPDATE_SCRIPT:-$script_dir/ab-system-update}
+check_script=${AB_CHECK_SCRIPT:-$script_dir/ab-update-check}
 reset_script=${AB_RESET_SCRIPT:-$script_dir/ab-factory-reset}
 reset_boot_script=${AB_RESET_BOOT_SCRIPT:-$script_dir/ab-factory-reset-boot}
 reset_unit=${AB_RESET_UNIT:-$script_dir/ab-factory-reset.service}
@@ -171,6 +172,7 @@ install_data_skeleton_tool() { # $1=root mount
 install_update_engine() { # $1=root mount
     local root=$1 unit=lib/systemd/system/ab-update-commit.service health_units reset_before
     install -Dm0755 "$update_script" "$root/usr/local/sbin/ab-system-update"
+    install -Dm0755 "$check_script" "$root/usr/local/sbin/ab-update-check"
     install -Dm0755 "$commit_script" "$root/usr/local/sbin/ab-update-commit"
     install -Dm0644 "$commit_unit" "$root/$unit"
     # `systemctl enable` needs a running system; the WantedBy symlink is what

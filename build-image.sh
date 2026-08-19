@@ -71,6 +71,15 @@
 #   --signing-key=FILE  ed25519 release signing key for --payload (default:
 #                       /etc/micropanel-touch/release-signing/ed25519-release.key,
 #                       created on first use)
+#   --release-url-template=URL
+#                       Where the device fetches releases from, with @ASSET@
+#                       standing in for the asset name (default: the board's
+#                       MICROPANEL_TOUCH_RELEASE_URL_TEMPLATE). Point this at a
+#                       local server to rehearse an over-the-air update:
+#                         --release-url-template=http://192.168.1.80:8000/@ASSET@
+#                       Authenticity comes from the pinned signing key, not the
+#                       transport, so a plain-HTTP source is a faithful
+#                       rehearsal rather than a weakened one.
 #   --keep-build-deps   Pass through to imager (skip build-dep purge)
 #   --debug             Pass --debug to imager (keep mounted on error)
 #   --list-boards       List available board configs and exit
@@ -105,6 +114,7 @@ BOARD="" VARIANT="" VERSION="" PASSWORD="" WORKSPACE=""
 ARG_BASEIMAGE="" ARG_IMAGE_URL="" ARG_START_FROM="" ARG_REPOBINS="" ARG_FLASH=""
 ARG_SOURCES_DIR="" ARG_OUTPUT_DIR="" ARG_EXTEND_SIZE="" ARG_BASE_PROFILE="" ARG_LAYOUT=""
 ARG_PAYLOAD_DIR="" ARG_APP_REVISION="" ARG_APP_REF="" ARG_SIGNING_KEY=""
+ARG_RELEASE_URL_TEMPLATE=""
 SKIP_BASE=0 SKIP_KERNEL=0 SKIP_APPS=0
 FORCE_BASE=0 FORCE_KERNEL=0 FORCE_APPS=0
 DRY_RUN=0 OFFLINE=0 KEEP_BUILD_DEPS=0 DEBUG=0 LIST_BOARDS=0 BUILD_PAYLOAD=0
@@ -126,6 +136,7 @@ for arg in "$@"; do
         --payload)       BUILD_PAYLOAD=1 ;;
         --payload-dir=*) ARG_PAYLOAD_DIR="${arg#*=}" ;;
         --signing-key=*) ARG_SIGNING_KEY="${arg#*=}" ;;
+        --release-url-template=*) ARG_RELEASE_URL_TEMPLATE="${arg#*=}" ;;
         --extend-size-mb=*) ARG_EXTEND_SIZE="${arg#*=}" ;;
         --base-profile=*)   ARG_BASE_PROFILE="${arg#*=}" ;;
         --baseimage=*)  ARG_BASEIMAGE="${arg#*=}" ;;
@@ -434,6 +445,21 @@ if [ -z "$RELEASE_SIGNING_KEY" ] && [ -x "$RELEASE_KEY_TOOL" ]; then
     RELEASE_SIGNING_KEY="$("$RELEASE_KEY_TOOL" key-path)"
 fi
 RELEASE_SIGNING_PUBLIC_KEY="${RELEASE_SIGNING_KEY:+$RELEASE_SIGNING_KEY.pub}"
+
+# Where the built image will look for releases. The board default points at the
+# project's GitHub releases; --release-url-template redirects it, which is how
+# an over-the-air update is rehearsed against a server on the bench LAN.
+RELEASE_URL_TEMPLATE="${ARG_RELEASE_URL_TEMPLATE:-${MICROPANEL_TOUCH_RELEASE_URL_TEMPLATE:-}}"
+if [ -n "$RELEASE_URL_TEMPLATE" ]; then
+    case "$RELEASE_URL_TEMPLATE" in
+        http://*|https://*) ;;
+        *) echo "ERROR: --release-url-template must be an http(s) URL: $RELEASE_URL_TEMPLATE" >&2; exit 1 ;;
+    esac
+    case "$RELEASE_URL_TEMPLATE" in
+        *@ASSET@*) ;;
+        *) echo "ERROR: --release-url-template must contain @ASSET@: $RELEASE_URL_TEMPLATE" >&2; exit 1 ;;
+    esac
+fi
 
 # ------------------------------------------------------------------------------
 # Hook-list parsing (for preflight + stamps)
@@ -1008,7 +1034,7 @@ run_post_image_hook() {
         SLOT_COMPATIBLE_BOARDS="$SLOT_COMPATIBLE_BOARDS" \
         IMAGE_VERSION="$VERSION" \
         UPDATE_SIGNING_PUBLIC_KEY="$RELEASE_SIGNING_PUBLIC_KEY" \
-        UPDATE_RELEASE_URL_TEMPLATE="${MICROPANEL_TOUCH_RELEASE_URL_TEMPLATE:-}" \
+        UPDATE_RELEASE_URL_TEMPLATE="$RELEASE_URL_TEMPLATE" \
         AB_PRODUCT="${AB_PRODUCT:-}" \
         AB_MANIFEST_PATH="${AB_MANIFEST_PATH:-}" \
         AB_LIB_DIR="${AB_LIB_DIR:-}" \

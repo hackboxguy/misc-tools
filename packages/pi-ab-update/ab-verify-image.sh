@@ -155,6 +155,7 @@ image_manifest="$root_a_mount$ab_manifest_path"
 require test -x "$root_a_mount/usr/local/sbin/ab-data-skeleton"
 require test -x "$root_a_mount/usr/local/sbin/ab-slot-selector"
 require test -x "$root_a_mount/usr/local/sbin/ab-system-update"
+require test -x "$root_a_mount/usr/local/sbin/ab-update-check"
 require test -x "$root_a_mount/usr/local/sbin/ab-update-commit"
 require test -x "$root_a_mount/usr/local/sbin/ab-factory-reset"
 require test -x "$root_a_mount/usr/local/sbin/ab-factory-reset-boot"
@@ -173,17 +174,24 @@ require grep -Eq '^SLOT_COMPATIBLE_BOARDS=[a-z0-9]+(,[a-z0-9]+)*$' "$image_manif
 # updater refuses to run without it and uses it for its already-up-to-date
 # abort before any large member is read.
 require grep -Eq '^IMAGE_VERSION=[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' "$image_manifest"
-# Stage 4 groundwork shipped now: the pinned release public key and the
-# reserved, root-owned OTA URL template.
+# The pinned release public key and the root-owned release source. Updates are
+# authenticated by this key, not by the transport, so the URL scheme is not a
+# security control here - but a production image should still be pointed at an
+# https source, and an http one is worth saying out loud.
 require grep -Fq 'BEGIN PUBLIC KEY' "$root_a_mount$engine_lib_dir/update-signing-key.pub"
 require test "$(stat -c '%u:%g:%a' "$root_a_mount$engine_lib_dir/update-signing-key.pub")" = '0:0:644'
-require grep -Eq '^BUNDLE_URL=https://[^[:space:]]+\.mpupdate$' \
+require grep -Eq '^BUNDLE_URL=https?://[^[:space:]]+\.mpupdate$' \
     "$root_a_mount$engine_lib_dir/update-source.conf"
-require grep -Eq '^MANIFEST_URL=https://[^[:space:]]+\.manifest$' \
+require grep -Eq '^MANIFEST_URL=https?://[^[:space:]]+\.manifest$' \
     "$root_a_mount$engine_lib_dir/update-source.conf"
-require grep -Eq '^MANIFEST_SIG_URL=https://[^[:space:]]+\.manifest\.sig$' \
+require grep -Eq '^MANIFEST_SIG_URL=https?://[^[:space:]]+\.manifest\.sig$' \
     "$root_a_mount$engine_lib_dir/update-source.conf"
 require test "$(stat -c '%u:%g:%a' "$root_a_mount$engine_lib_dir/update-source.conf")" = '0:0:644'
+if grep -Eq '^(BUNDLE|MANIFEST|MANIFEST_SIG)_URL=http://' \
+       "$root_a_mount$engine_lib_dir/update-source.conf"; then
+    echo "NOTICE: this image fetches releases over plain http - expected for a" >&2
+    echo "        bench rehearsal, not for a shipping image." >&2
+fi
 
 # Whatever else this particular product requires of its own image.
 if [ -n "$ab_assertions" ]; then

@@ -48,6 +48,11 @@ fi
 grep -Fqx 'AB_LAYOUT=0' "$board/board.conf"
 grep -Fqx 'SLOT_COMPATIBLE_BOARDS="pi4"' "$board/board.conf"
 grep -Fqx 'xz-utils' "$board/runtime-deps.txt"
+# Stage 4 needs these on the device: curl to fetch, openssl to verify, and the
+# CA bundle for an https release server.
+grep -Fqx 'curl' "$board/runtime-deps.txt"
+grep -Fqx 'openssl' "$board/runtime-deps.txt"
+grep -Fqx 'ca-certificates' "$board/runtime-deps.txt"
 grep -Fqx 'util-linux' "$board/runtime-deps.txt"
 grep -Fq 'requires EXPAND_ROOT=0; first-boot root expansion would corrupt the A/B partition layout' "$builder"
 grep -Fq 'for tool in sfdisk fdisk mkfs.ext4 mkfs.vfat e2fsck resize2fs e2label blkid blockdev mount; do' "$builder"
@@ -150,6 +155,29 @@ marker_line=$(grep -nF 'mv -f "$temporary" "$marker"' "$engine/ab-factory-reset"
 # A detached reboot that fails must leave a trace: otherwise the device resets
 # at whatever unrelated reboot comes next, possibly days later.
 grep -Fq 'scheduled reboot failed' "$engine/ab-factory-reset"
+
+# --- Stage 4: the check tool and the release source -----------------------
+bash -n "$engine/ab-update-check"
+[ -x "$engine/ab-update-check" ] || {
+    echo "missing or non-executable update check: $engine/ab-update-check" >&2; exit 1; }
+grep -Fq '/usr/local/sbin/ab-update-check' "$finalizer"
+grep -Fq 'ab-update-check' "$verifier"
+# The check verifies the manifest signature before it reads any field of it,
+# so an attacker-supplied manifest never reaches the comparison logic.
+awk '
+    /openssl pkeyutl -verify/ { verified = NR }
+    /^offered_version=\$\(read_exact_value/ { parsed = NR }
+    END { exit !(verified && parsed && verified < parsed) }
+' "$engine/ab-update-check"
+# It fetches the manifest pair only: discovering that a release is already
+# installed must not cost a payload download.
+! grep -Fq 'BUNDLE_URL' "$engine/ab-update-check"
+# The release source is board-authored and overridable per build; the URLs stay
+# version-less because the version lives inside the signed manifest.
+grep -Fq -- '--release-url-template=*' "$builder"
+grep -Fq 'RELEASE_URL_TEMPLATE="${ARG_RELEASE_URL_TEMPLATE:-${MICROPANEL_TOUCH_RELEASE_URL_TEMPLATE:-}}"' "$builder"
+grep -Fq '@ASSET@' "$builder"
+grep -Fq '@ASSET@' "$board/board.conf"
 
 # Elapsed-time checks must be monotonic. An RTC-less appliance boots in the
 # past and jumps forward when NTP syncs - and a factory reset enlarges that

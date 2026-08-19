@@ -1,0 +1,16 @@
+[Unit]
+Description=Commit a healthy pi-ab-update tryboot candidate
+Wants=data.mount
+After=data.mount
+ConditionPathExists=/usr/local/sbin/ab-slot-selector
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/sbin/ab-update-commit
+TimeoutStartSec=3min
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -414,13 +414,21 @@ fi
 PAYLOAD_VARIANT="${VARIANT:-${DEFAULT_PANEL_VARIANT:-default}}"
 # Stage 2b publishes version-less asset names so the Stage 4
 # releases/latest/download/ URLs are stable; the version lives in the manifest.
-PAYLOAD_PREFIX="micropanel-touch-${PAYLOAD_VARIANT}"
+PAYLOAD_PREFIX="${AB_PRODUCT:-$BOARD}-${PAYLOAD_VARIANT}"
 PAYLOAD_BUNDLE="$PAYLOAD_DIR/$PAYLOAD_PREFIX.mpupdate"
 PAYLOAD_SIGNATURE="$PAYLOAD_DIR/$PAYLOAD_PREFIX.manifest.sig"
 PAYLOAD_MANIFEST="$PAYLOAD_DIR/$PAYLOAD_PREFIX.manifest"
-PAYLOAD_GENERATOR="$BOARD_DIR/packages/make-ab-update-payload.sh"
-PAYLOAD_IMAGE_VERIFIER="$BOARD_DIR/packages/verify-ab-image-layout.sh"
-RELEASE_KEY_TOOL="$BOARD_DIR/packages/micropanel-touch-release-key.sh"
+# The A/B engine is shared across boards; only its inputs are board-specific.
+AB_ENGINE_DIR="$SCRIPT_DIR/packages/pi-ab-update"
+# Exported so the key helper and the payload generator agree on the location
+# without every call site repeating it.
+export AB_RELEASE_KEY_DIR="${AB_RELEASE_KEY_DIR:-}"
+PAYLOAD_GENERATOR="$AB_ENGINE_DIR/ab-make-payload.sh"
+PAYLOAD_IMAGE_VERIFIER="$AB_ENGINE_DIR/ab-verify-image.sh"
+RELEASE_KEY_TOOL="$AB_ENGINE_DIR/ab-release-key.sh"
+AB_UPDATE_CONF_PATH="$(resolve_board_file "${AB_UPDATE_CONF:-none}")"
+AB_ASSERTIONS_PATH="$(resolve_board_file "${AB_ASSERTIONS:-none}")"
+DATA_SKELETON_PATH="$(resolve_board_file "${DATA_SKELETON:-none}")"
 RELEASE_SIGNING_KEY="${ARG_SIGNING_KEY:-}"
 if [ -z "$RELEASE_SIGNING_KEY" ] && [ -x "$RELEASE_KEY_TOOL" ]; then
     RELEASE_SIGNING_KEY="$("$RELEASE_KEY_TOOL" key-path)"
@@ -1001,6 +1009,14 @@ run_post_image_hook() {
         IMAGE_VERSION="$VERSION" \
         UPDATE_SIGNING_PUBLIC_KEY="$RELEASE_SIGNING_PUBLIC_KEY" \
         UPDATE_RELEASE_URL_TEMPLATE="${MICROPANEL_TOUCH_RELEASE_URL_TEMPLATE:-}" \
+        AB_PRODUCT="${AB_PRODUCT:-}" \
+        AB_MANIFEST_PATH="${AB_MANIFEST_PATH:-}" \
+        AB_LIB_DIR="${AB_LIB_DIR:-}" \
+        AB_APP_ACCOUNT="${AB_APP_ACCOUNT:-}" \
+        AB_APP_REVISION_KEY="${AB_APP_REVISION_KEY:-}" \
+        AB_APP_REVISION="$MICROPANEL_TOUCH_REVISION" \
+        AB_UPDATE_CONF="$AB_UPDATE_CONF_PATH" \
+        DATA_SKELETON_SCRIPT="$DATA_SKELETON_PATH" \
         bash "$POST_IMAGE_HOOK"
 }
 
@@ -1023,9 +1039,12 @@ run_payload() {
         --version="$VERSION" \
         --variant="$PAYLOAD_VARIANT" \
         --boards="$SLOT_COMPATIBLE_BOARDS" \
+        --product="${AB_PRODUCT:-$BOARD}" \
         --signing-key="$RELEASE_SIGNING_KEY"
     info "Verifying source A/B image after payload generation..."
-    MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" "$PAYLOAD_IMAGE_VERIFIER" "$FINAL_IMG"
+    MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" \
+        AB_MANIFEST_PATH="${AB_MANIFEST_PATH:-}" AB_ASSERTIONS="$AB_ASSERTIONS_PATH" \
+        "$PAYLOAD_IMAGE_VERIFIER" "$FINAL_IMG"
     own_by_user "$PAYLOAD_DIR"
 }
 

@@ -1,0 +1,175 @@
+#!/bin/bash
+# pi-ab-update: commit a tryboot candidate only after it has been continuously
+# healthy. Separate from the installer so a candidate that never reaches
+# userspace simply remains uncommitted and falls back on the next reset.
+#
+# Board-agnostic. The health predicate is data plus one optional hook: every
+# unit in AB_HEALTH_UNITS must be active with no restarts, /data must be
+# mounted rw, this must be a tryboot candidate boot, and AB_HEALTH_HOOK (if
+# configured) must exit 0. A touchscreen product points that hook at its
+# first-frame marker; a headless one points it at whatever proves its service
+# is really working, or omits it.
+set -euo pipefail
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL=C
+
+ab_config=${AB_UPDATE_CONFIG:-/usr/lib/pi-ab-update/ab-update.conf}
+
+ab_config_value() { # $1=key; empty when absent
+    [ -f "$ab_config" ] && [ ! -L "$ab_config" ] || return 0
+    awk -v key="$1" '
+        /^[[:space:]]*#/ { next }
+        index($0, key "=") == 1 {
+            value = substr($0, length(key) + 2)
+            if (value != "") { print value; found = 1 }
+        }
+        END { exit !found }
+    ' "$ab_config" 2>/dev/null || true
+}
+ab_setting() { # $1=env value, $2=config key, $3=default
+    if [ -n "$1" ]; then printf '%s\n' "$1"; return; fi
+    local configured; configured=$(ab_config_value "$2")
+    if [ -n "$configured" ]; then printf '%s\n' "$configured"; return; fi
+    printf '%s\n' "$3"
+}
+
+selector=$(ab_setting "${AB_SLOT_SELECTOR:-}" AB_SLOT_SELECTOR /usr/local/sbin/ab-slot-selector)
+state_dir=$(ab_setting "${AB_STATE_DIR:-}" AB_STATE_DIR /data/pi-ab-update)
+state_file=${AB_STATE_FILE:-$state_dir/update-state}
+status_dir=$(ab_setting "${AB_RUNTIME_DIR:-}" AB_RUNTIME_DIR /run/ab-update)
+status_file=${AB_STATUS_FILE:-$status_dir/status}
+health_units=$(ab_setting "${AB_HEALTH_UNITS:-}" AB_HEALTH_UNITS '')
+health_hook=$(ab_setting "${AB_HEALTH_HOOK:-}" AB_HEALTH_HOOK '')
+data_mount=$(ab_setting "${AB_DATA_MOUNT:-}" AB_DATA_MOUNT /data)
+tryboot_marker=${AB_TRYBOOT_MARKER:-/proc/device-tree/chosen/bootloader/tryboot}
+settle_seconds=$(ab_setting "${AB_SETTLE_SECONDS:-}" AB_SETTLE_SECONDS 30)
+wait_seconds=$(ab_setting "${AB_COMMIT_WAIT_SECONDS:-}" AB_COMMIT_WAIT_SECONDS 120)
+
+die() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
+is_positive_integer() { [[ ${1:-} =~ ^[1-9][0-9]*$ ]]; }
+
+load_state() {
+    local line key value
+    declare -gA update_state=()
+    while IFS= read -r line || [ -n "$line" ]; do
+        [[ $line =~ ^(state|candidate_slot|version|variant)=([^=[:space:]]+)$ ]] || return 1
+        key=${line%%=*}; value=${line#*=}
+        [ -z "${update_state[$key]+present}" ] || return 1
+        update_state[$key]=$value
+    done < "$state_file"
+    [ "${#update_state[@]}" -eq 4 ] || return 1
+    case "${update_state[state]}" in candidate-armed|committed|fallback) ;; *) return 1 ;; esac
+    case "${update_state[candidate_slot]}" in A|B) ;; *) return 1 ;; esac
+    [[ ${update_state[version]} =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || return 1
+    [[ ${update_state[variant]} =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || return 1
+}
+
+is_tryboot_candidate() {
+    [ -r "$tryboot_marker" ] || return 1
+    od -An -tu1 "$tryboot_marker" | awk '{ for (i = 1; i <= NF; ++i) if ($i != 0) found = 1 } END { exit !found }'
+}
+
+data_is_writable() {
+    [ "$(findmnt -rn -T "$state_dir" -o TARGET 2>/dev/null || true)" = "$data_mount" ] || return 1
+    findmnt -rn -T "$state_dir" -o OPTIONS | grep -Eq '(^|,)rw(,|$)'
+}
+
+# One restart of a health unit during the candidate window means the candidate
+# is not healthy, even if it happens to be active again by the time we look.
+restart_counts() {
+    local unit count output=""
+    for unit in $health_units; do
+        count=$(systemctl show --value --property=NRestarts "$unit" 2>/dev/null) || return 1
+        [[ $count =~ ^[0-9]+$ ]] || return 1
+        output="$output$unit=$count "
+    done
+    printf '%s\n' "$output"
+}
+
+candidate_is_healthy() {
+    local expected_restarts=${1:-} unit
+    for unit in $health_units; do
+        systemctl is-active --quiet "$unit" || return 1
+    done
+    data_is_writable || return 1
+    if [ -n "$health_hook" ]; then
+        [ -x "$health_hook" ] || return 1
+        "$health_hook" >/dev/null 2>&1 || return 1
+    fi
+    [ -z "$expected_restarts" ] || [ "$(restart_counts)" = "$expected_restarts" ]
+}
+
+write_update_state() { # $1=state
+    local new_state=$1 temporary
+    temporary=$(mktemp "$state_dir/.update-state.XXXXXX")
+    {
+        printf 'state=%s\n' "$new_state"
+        printf 'candidate_slot=%s\n' "${update_state[candidate_slot]}"
+        printf 'version=%s\n' "${update_state[version]}"
+        printf 'variant=%s\n' "${update_state[variant]}"
+    } > "$temporary"
+    chmod 0600 "$temporary"
+    sync -f "$temporary"
+    mv -f "$temporary" "$state_file"
+    sync -f "$state_dir"
+}
+
+# The durable state remains root-only authority.  This separate, bounded file
+# is UI telemetry only, so the unprivileged HMI can show committed/pending or
+# fallback truthfully without gaining access to update control state.
+publish_status() { # $1=committed|candidate-armed|fallback
+    local public_state=$1 temporary
+    install -d -m0755 "$status_dir"
+    temporary=$(mktemp "$status_dir/.status.XXXXXX")
+    printf 'state=%s\n' "$public_state" > "$temporary"
+    chmod 0644 "$temporary"
+    mv -f "$temporary" "$status_file"
+}
+
+[ -n "$health_units" ] || die 'AB_HEALTH_UNITS is empty; refusing to commit on a health check that asserts nothing'
+is_positive_integer "$settle_seconds" || die 'commit settle interval is invalid'
+is_positive_integer "$wait_seconds" || die 'commit readiness wait interval is invalid'
+[ -f "$state_file" ] && [ ! -L "$state_file" ] || exit 0
+load_state || { printf '%s\n' '[ERROR] ignoring malformed update state' >&2; exit 0; }
+case "${update_state[state]}" in
+    committed) publish_status committed; exit 0 ;;
+    fallback) publish_status fallback; exit 0 ;;
+esac
+
+[ -x "$selector" ] || die 'slot selector is unavailable'
+if ! is_tryboot_candidate; then
+    current_slot=$("$selector" current-slot) || exit 0
+    if [ "$current_slot" != "${update_state[candidate_slot]}" ]; then
+        write_update_state fallback
+        publish_status fallback
+    else
+        publish_status candidate-armed
+    fi
+    exit 0
+fi
+current_slot=$("$selector" current-slot) || exit 0
+[ "$current_slot" = "${update_state[candidate_slot]}" ] || exit 0
+publish_status candidate-armed
+
+# Refuse any restart of a health unit from this candidate boot, including one
+# that happens before the hook makes the normal readiness predicate true.
+restarts=$(restart_counts) || exit 0
+for pair in $restarts; do
+    [ "${pair#*=}" = 0 ] || exit 0
+done
+deadline=$(( $(date +%s) + wait_seconds ))
+while ! candidate_is_healthy "$restarts"; do
+    [ "$(date +%s)" -lt "$deadline" ] || exit 0
+    sleep 1
+done
+for _ in $(seq 1 "$settle_seconds"); do
+    candidate_is_healthy "$restarts" || exit 0
+    sleep 1
+done
+candidate_is_healthy "$restarts" || exit 0
+
+"$selector" commit "$current_slot"
+write_update_state committed
+publish_status committed
+printf '[SUCCESS] committed candidate slot %s after %s seconds of health\n' "$current_slot" "$settle_seconds"

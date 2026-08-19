@@ -1,20 +1,20 @@
 #!/bin/bash
-# Build the slot-neutral format=2 update bundle from a completed MicroPanel
-# Touch A/B image.  This is host-side only: the device-side updater streams the
-# bundle's rootfs member straight into its inactive slot and renders
-# cmdline.txt from the template carried in the boot member.
+# pi-ab-update: build the slot-neutral format=2 update bundle from a completed
+# A/B image.  Host-side only: the device-side updater streams the bundle's
+# rootfs member straight into its inactive slot and renders cmdline.txt from
+# the template carried in the boot member.
 #
 # Published assets (deliberately version-less so the Stage 4
 # `releases/latest/download/` URLs are stable; the real version lives inside
 # the manifest):
 #
-#   micropanel-touch-<variant>.mpupdate      outer ustar bundle, fixed order:
+#   <product>-<variant>.mpupdate      outer ustar bundle, fixed order:
 #                                              1 manifest
 #                                              2 manifest.sig
 #                                              3 boot.tar
 #                                              4 rootfs.img.xz  (last, streamed)
-#   micropanel-touch-<variant>.manifest      standalone copy for cheap checks
-#   micropanel-touch-<variant>.manifest.sig  its detached signature
+#   <product>-<variant>.manifest      standalone copy for cheap checks
+#   <product>-<variant>.manifest.sig  its detached signature
 #
 # The standalone signature is published from the first format=2 release for the
 # same reason the bundle carries one: Stage 4's check step verifies the tiny
@@ -34,14 +34,15 @@ version=""
 variant=""
 boards=""
 signing_key=""
+product=""
 
 script_dir=$(cd "$(dirname "$0")" && pwd)
-release_key_tool=${MICROPANEL_RELEASE_KEY_TOOL:-$script_dir/micropanel-touch-release-key.sh}
+release_key_tool=${AB_RELEASE_KEY_TOOL:-$script_dir/ab-release-key.sh}
 
 usage() {
     cat >&2 <<'EOF'
-Usage: make-ab-update-payload.sh --image FILE --output-dir DIR --version VER \
-       --variant NAME --boards LIST [--signing-key=FILE]
+Usage: ab-make-payload.sh --image FILE --output-dir DIR --version VER \
+       --variant NAME --boards LIST --product NAME [--signing-key=FILE]
 EOF
     exit 2
 }
@@ -54,6 +55,7 @@ for argument in "$@"; do
         --variant=*) variant=${argument#*=} ;;
         --boards=*) boards=${argument#*=} ;;
         --signing-key=*) signing_key=${argument#*=} ;;
+        --product=*) product=${argument#*=} ;;
         --help|-h) usage ;;
         *) echo "ERROR: unknown option: $argument" >&2; usage ;;
     esac
@@ -71,6 +73,7 @@ safe_boards() {
 [ -n "$output_dir" ] || usage
 safe_token "$version" || { echo 'ERROR: --version must be a safe release token' >&2; exit 1; }
 safe_token "$variant" || { echo 'ERROR: --variant must be a safe release token' >&2; exit 1; }
+safe_token "$product" || { echo 'ERROR: --product must be a safe product name' >&2; exit 1; }
 safe_boards "$boards" || { echo 'ERROR: --boards must be a comma-separated board allow-list' >&2; exit 1; }
 [ -x "$release_key_tool" ] || {
     echo "ERROR: release signing helper is unavailable: $release_key_tool" >&2
@@ -194,7 +197,7 @@ grep -Fqx "root=LABEL=@MICROPANEL_SLOT@" <(tr ' ' '\n' < "$work/boot-tree/cmdlin
 
 # Published names carry no version: the manifest is the authority on which
 # release this is, and stable names give Stage 4 a stable download URL.
-asset_prefix="micropanel-touch-${variant}"
+asset_prefix="${product}-${variant}"
 mkdir -p "$output_dir"
 bundle="$output_dir/${asset_prefix}.mpupdate"
 manifest="$output_dir/${asset_prefix}.manifest"

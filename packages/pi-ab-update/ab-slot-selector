@@ -1,23 +1,44 @@
 #!/bin/bash
-# Minimal SD-card selector backend for MicroPanel Touch A/B images.
+# pi-ab-update: minimal SD-card slot selector backend.
 #
-# The updater and its commit service are added later.  This backend is shipped
-# now so they share one exact implementation of the selector-file protocol.
+# Board-agnostic: the three-operation protocol (current-slot, arm-candidate,
+# commit) is the seam the CM4 secure-boot backend replaces without touching the
+# updater, the commit service, or any UI.
 set -euo pipefail
 
-boot_dir=${MICROPANEL_BOOT_DIR:-/boot/firmware}
-template=${MICROPANEL_BOOT_CONFIG_TEMPLATE:-/usr/lib/micropanel-touch/boot-selector-config.base}
+ab_config=${AB_UPDATE_CONFIG:-/usr/lib/pi-ab-update/ab-update.conf}
+ab_config_value() { # $1=key; empty when absent
+    [ -f "$ab_config" ] && [ ! -L "$ab_config" ] || return 0
+    awk -v key="$1" '
+        /^[[:space:]]*#/ { next }
+        index($0, key "=") == 1 {
+            value = substr($0, length(key) + 2)
+            if (value != "") { print value; found = 1 }
+        }
+        END { exit !found }
+    ' "$ab_config" 2>/dev/null || true
+}
+ab_setting() { # $1=env value, $2=config key, $3=default
+    if [ -n "$1" ]; then printf '%s\n' "$1"; return; fi
+    local configured; configured=$(ab_config_value "$2")
+    if [ -n "$configured" ]; then printf '%s\n' "$configured"; return; fi
+    printf '%s\n' "$3"
+}
+
+boot_dir=$(ab_setting "${AB_BOOT_DIR:-}" AB_BOOT_DIR /boot/firmware)
+template=$(ab_setting "${AB_BOOT_CONFIG_TEMPLATE:-}" AB_BOOT_CONFIG_TEMPLATE \
+    /usr/lib/pi-ab-update/boot-selector-config.base)
 
 # These render operations are intentionally identical today. Keeping separate
 # names reserves candidate-only selector policy without changing the updater.
 
 usage() {
     cat >&2 <<'EOF'
-Usage: micropanel-touch-slot-selector current-slot
-       micropanel-touch-slot-selector render-normal A|B
-       micropanel-touch-slot-selector render-candidate A|B
-       micropanel-touch-slot-selector arm-candidate A|B
-       micropanel-touch-slot-selector commit A|B
+Usage: ab-slot-selector current-slot
+       ab-slot-selector render-normal A|B
+       ab-slot-selector render-candidate A|B
+       ab-slot-selector arm-candidate A|B
+       ab-slot-selector commit A|B
 EOF
     exit 2
 }
@@ -33,7 +54,7 @@ current_slot() {
     case " $(cat /proc/cmdline) " in
         *' root=LABEL=MP_ROOT_A '*) printf 'A\n' ;;
         *' root=LABEL=MP_ROOT_B '*) printf 'B\n' ;;
-        *) echo "ERROR: active root is not an A/B MicroPanel slot" >&2; exit 1 ;;
+        *) echo "ERROR: active root is not an A/B slot" >&2; exit 1 ;;
     esac
 }
 
@@ -43,6 +64,7 @@ render_config() { # $1=slot; render names intentionally remain separate protocol
     # Both normal and one-shot selections use their complete, independently
     # updated os_prefix boot tree. Pi 4 hardware acceptance covers normal A
     # as well as tryboot B, so no flat-A compatibility path remains.
+    # MP_ROOT_* labels stay as the fixed cross-board layout contract.
     printf 'os_prefix=%s/\n' "$slot"
     cat "$template"
 }

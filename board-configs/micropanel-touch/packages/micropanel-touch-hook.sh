@@ -76,8 +76,11 @@ systemctl enable "$destination/lib/systemd/system/micropanel-touch-dhcp-server.s
 install -d /usr/local/sbin /etc/systemd/system
 install -Dm0755 "$destination/usr/share/micropanel-touch/tools/micropanel-touch-restore-machine-id" \
     /usr/local/sbin/micropanel-touch-restore-machine-id
-install -Dm0755 "$destination/usr/share/micropanel-touch/tools/micropanel-touch-update-commit" \
-    /usr/local/sbin/micropanel-touch-update-commit
+# The A/B commit service itself is the pi-ab-update engine's, installed by the
+# image finalizer. This application contributes only the health hook the engine
+# calls: proof that the HMI actually rendered a frame.
+install -Dm0755 "$destination/usr/share/micropanel-touch/tools/micropanel-touch-update-health" \
+    /usr/lib/micropanel-touch/update-health
 cat > /etc/systemd/system/micropanel-touch-machine-id.service <<'EOF'
 [Unit]
 Description=Restore persistent MicroPanel Touch machine identity
@@ -99,7 +102,6 @@ RemainAfterExit=yes
 WantedBy=sysinit.target
 EOF
 systemctl enable micropanel-touch-machine-id.service
-systemctl enable "$destination/lib/systemd/system/micropanel-touch-update-commit.service"
 : > /etc/machine-id
 chmod 0444 /etc/machine-id
 install -d /var/lib/dbus

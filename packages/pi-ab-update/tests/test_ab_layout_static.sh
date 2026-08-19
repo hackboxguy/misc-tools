@@ -2,12 +2,14 @@
 set -eu
 
 repo_root=$(unset CDPATH; cd -- "$(dirname -- "$0")/../../.." && pwd)
-finalizer="$repo_root/board-configs/micropanel-touch/packages/finalize-image-layout.sh"
-selector="$repo_root/board-configs/micropanel-touch/packages/micropanel-touch-slot-selector"
-skeleton="$repo_root/board-configs/micropanel-touch/packages/micropanel-touch-data-skeleton.sh"
-verifier="$repo_root/board-configs/micropanel-touch/packages/verify-ab-image-layout.sh"
-payload_generator="$repo_root/board-configs/micropanel-touch/packages/make-ab-update-payload.sh"
-release_key_tool="$repo_root/board-configs/micropanel-touch/packages/micropanel-touch-release-key.sh"
+engine="$repo_root/packages/pi-ab-update"
+board="$repo_root/board-configs/micropanel-touch"
+finalizer="$engine/ab-finalize-layout.sh"
+selector="$engine/ab-slot-selector"
+skeleton="$board/packages/micropanel-touch-data-skeleton.sh"
+verifier="$engine/ab-verify-image.sh"
+payload_generator="$engine/ab-make-payload.sh"
+release_key_tool="$engine/ab-release-key.sh"
 builder="$repo_root/build-image.sh"
 
 bash -n "$finalizer" "$selector" "$skeleton" "$verifier" "$payload_generator" "$release_key_tool" "$builder"
@@ -43,10 +45,10 @@ if "$builder" --board=micropanel-touch --layout=invalid --dry-run >/dev/null 2>&
     echo 'invalid --layout was accepted' >&2
     exit 1
 fi
-grep -Fqx 'AB_LAYOUT=0' "$repo_root/board-configs/micropanel-touch/board.conf"
-grep -Fqx 'SLOT_COMPATIBLE_BOARDS="pi4"' "$repo_root/board-configs/micropanel-touch/board.conf"
-grep -Fqx 'xz-utils' "$repo_root/board-configs/micropanel-touch/runtime-deps.txt"
-grep -Fqx 'util-linux' "$repo_root/board-configs/micropanel-touch/runtime-deps.txt"
+grep -Fqx 'AB_LAYOUT=0' "$board/board.conf"
+grep -Fqx 'SLOT_COMPATIBLE_BOARDS="pi4"' "$board/board.conf"
+grep -Fqx 'xz-utils' "$board/runtime-deps.txt"
+grep -Fqx 'util-linux' "$board/runtime-deps.txt"
 grep -Fq 'requires EXPAND_ROOT=0; first-boot root expansion would corrupt the A/B partition layout' "$builder"
 grep -Fq 'for tool in sfdisk fdisk mkfs.ext4 mkfs.vfat e2fsck resize2fs e2label blkid blockdev mount; do' "$builder"
 grep -Fq "bash \"\$ab_static_test\"" "$builder"
@@ -57,9 +59,10 @@ grep -Fq 'resolve_micropanel_touch_revision()' "$builder"
 grep -Fq 'resolved=$(git_remote_rev "$MICROPANEL_TOUCH_APP_REPO" "$MICROPANEL_TOUCH_REF")' "$builder"
 grep -Fq 'MicroPanel Touch builds require --app-revision=<40-character lowercase micropanel-touch commit> or --app-ref=<branch-or-tag>' "$builder"
 grep -Fq 'MICROPANEL_TOUCH_APP_REPO="${MICROPANEL_TOUCH_APP_REPO:-}" "$IMAGER"' "$builder"
-grep -Fq 'MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" "$PAYLOAD_IMAGE_VERIFIER" "$FINAL_IMG"' "$builder"
 grep -Fq 'MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" \' "$builder"
-grep -Fq 'make-ab-update-payload.sh' "$builder"
+grep -Fq 'AB_MANIFEST_PATH="${AB_MANIFEST_PATH:-}" AB_ASSERTIONS="$AB_ASSERTIONS_PATH" \' "$builder"
+grep -Fq 'MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" \' "$builder"
+grep -Fq 'AB_ENGINE_DIR="$SCRIPT_DIR/packages/pi-ab-update"' "$builder"
 
 
 # The imager parses the hook list in its own process, so every ${VAR} a hook
@@ -72,8 +75,8 @@ imager_invocation=$(awk '
         for (i = NR - 7; i <= NR; ++i) if (i > 0) print window[i % 8]
     }' "$builder")
 [ -n "$imager_invocation" ] || { echo 'no imager invocation found in the builder' >&2; exit 1; }
-for hook_list in "$repo_root/board-configs/micropanel-touch/hooks.txt" \
-                 "$repo_root/board-configs/micropanel-touch/hooks-luckfox-ctp.txt"; do
+for hook_list in "$board/hooks.txt" \
+                 "$board/hooks-luckfox-ctp.txt"; do
     hook_variables=$(sed -n 's/.*${\([A-Za-z_][A-Za-z0-9_]*\)}.*/\1/p' "$hook_list" | sort -u)
     for hook_variable in $hook_variables; do
         printf '%s\n' "$imager_invocation" | grep -Fq "$hook_variable=" || {
@@ -87,28 +90,53 @@ grep -Fq 'exit "$exit_code"' "$repo_root/custom-pi-imager/custom-pi-imager.sh"
 grep -Fq '[ERROR]${NC} $1" >&2' "$repo_root/custom-pi-imager/custom-pi-imager.sh"
 grep -Fq 'apps stage produced no image' "$builder"
 
+# The extracted engine is board-agnostic: no engine file may name a product.
+# The board profile beside it supplies every product-specific value.
+for engine_script in "$engine"/ab-*; do
+    case "$engine_script" in *.service) continue ;; esac
+    if grep -Eq 'micropanel|MicroPanel' "$engine_script"; then
+        echo "engine script names a product: $engine_script" >&2
+        grep -nE 'micropanel|MicroPanel' "$engine_script" >&2
+        exit 1
+    fi
+done
+[ -f "$board/ab-update.conf" ] || { echo 'board profile ab-update.conf is missing' >&2; exit 1; }
+[ -x "$board/ab-assertions.sh" ] || { echo 'board assertions script is missing' >&2; exit 1; }
+grep -Fqx 'AB_PRODUCT=micropanel-touch' "$board/ab-update.conf"
+grep -Fq 'AB_HEALTH_UNITS=micropanel-touch.service micropanel-touch-privileged.service' "$board/ab-update.conf"
+grep -Fq 'AB_HEALTH_HOOK=/usr/lib/micropanel-touch/update-health' "$board/ab-update.conf"
+grep -Fqx 'AB_PRODUCT="micropanel-touch"' "$board/board.conf"
+grep -Fqx 'POST_IMAGE_HOOK=../../packages/pi-ab-update/ab-finalize-layout.sh' "$board/board.conf"
+# The engine installs itself into the image; the board ships no copy.
+grep -Fq 'install_update_engine "$root_mount"' "$finalizer"
+grep -Fq '/usr/local/sbin/ab-system-update' "$finalizer"
+grep -Fq '/usr/local/sbin/ab-update-commit' "$finalizer"
+grep -Fq 'multi-user.target.wants/ab-update-commit.service' "$finalizer"
+grep -Fq 'ab-update.conf' "$finalizer"
+# The health predicate is data plus one hook, not hardcoded unit names.
+grep -Fq 'AB_HEALTH_UNITS' "$engine/ab-update-commit"
+grep -Fq 'health_hook' "$engine/ab-update-commit"
+
 # V5-05: exactly one place names the application/release repository, and it is
 # also where the reserved Stage 4 OTA URL template lives.
 grep -Fqx 'MICROPANEL_TOUCH_APP_REPO="https://github.com/hackboxguy/micropanel-touch.git"' \
-    "$repo_root/board-configs/micropanel-touch/board.conf"
+    "$board/board.conf"
 grep -Fq 'MICROPANEL_TOUCH_RELEASE_URL_TEMPLATE=' \
-    "$repo_root/board-configs/micropanel-touch/board.conf"
+    "$board/board.conf"
 grep -Fq 'releases/latest/download/@ASSET@' \
-    "$repo_root/board-configs/micropanel-touch/board.conf"
+    "$board/board.conf"
 duplicate_repo_references=$(grep -rlF 'github.com/hackboxguy/micropanel-touch' \
     "$repo_root/board-configs/micropanel-touch" "$builder" | grep -v '/tests/' | sort)
-[ "$duplicate_repo_references" = "$repo_root/board-configs/micropanel-touch/board.conf" ] || {
+[ "$duplicate_repo_references" = "$board/board.conf" ] || {
     echo 'the micropanel-touch repository URL is duplicated outside board.conf:' >&2
     printf '%s\n' "$duplicate_repo_references" >&2
     exit 1
 }
-grep -Fq 'verify-ab-image-layout.sh' "$builder"
-grep -Fq '"$PAYLOAD_IMAGE_VERIFIER" "$FINAL_IMG"' "$builder"
 grep -Fq 'PAYLOAD_VARIANT="${VARIANT:-${DEFAULT_PANEL_VARIANT:-default}}"' "$builder"
 grep -Fq -- '--signing-key=' "$builder"
-grep -Fq 'PAYLOAD_PREFIX="micropanel-touch-${PAYLOAD_VARIANT}"' "$builder"
+grep -Fq 'PAYLOAD_PREFIX="${AB_PRODUCT:-$BOARD}-${PAYLOAD_VARIANT}"' "$builder"
 grep -Fq 'PAYLOAD_BUNDLE="$PAYLOAD_DIR/$PAYLOAD_PREFIX.mpupdate"' "$builder"
-grep -Fq 'RELEASE_KEY_TOOL="$BOARD_DIR/packages/micropanel-touch-release-key.sh"' "$builder"
+grep -Fq 'RELEASE_KEY_TOOL="$AB_ENGINE_DIR/ab-release-key.sh"' "$builder"
 grep -Fq 'UPDATE_SIGNING_PUBLIC_KEY="$RELEASE_SIGNING_PUBLIC_KEY"' "$builder"
 grep -Fq 'UPDATE_RELEASE_URL_TEMPLATE=' "$builder"
 grep -Fq 'IMAGE_VERSION="$VERSION"' "$builder"
@@ -127,7 +155,7 @@ grep -Fq 'MANIFEST_SIG_URL=' "$verifier"
 # O-05: releases cannot silently share a payload directory.
 grep -Fq 'PAYLOAD_DIR="${ARG_PAYLOAD_DIR:-$OUT_DIR/payloads/$VERSION}"' "$builder"
 grep -Fq 'already holds release' "$payload_generator"
-grep -Fq 'asset_prefix="micropanel-touch-${variant}"' "$payload_generator"
+grep -Fq 'asset_prefix="${product}-${variant}"' "$payload_generator"
 grep -Fq '"$release_key_tool" sign "$work/bundle/manifest" "$work/bundle/manifest.sig"' "$payload_generator"
 grep -Fq '"$release_key_tool" verify "$work/bundle/manifest" "$work/bundle/manifest.sig"' "$payload_generator"
 if grep -Eq '^format=1$' "$payload_generator"; then
@@ -136,12 +164,16 @@ if grep -Eq '^format=1$' "$payload_generator"; then
 fi
 grep -Fq 'openssl genpkey -algorithm ed25519' "$release_key_tool"
 grep -Fq 'openssl pkeyutl -sign -inkey "$key_path" -rawin' "$release_key_tool"
-grep -Fq '/etc/micropanel-touch/release-signing' "$release_key_tool"
+grep -Fq 'AB_RELEASE_KEY_DIR' "$release_key_tool"
+# The board keeps its existing key location, whose public half is already in
+# flashed images; only a board without one takes the generic default.
+grep -Fqx 'AB_RELEASE_KEY_DIR="/etc/micropanel-touch/release-signing"' "$board/board.conf"
 
 # The finalizer bakes the Stage 4 groundwork into every A/B image.
 grep -Fq 'install_update_source_config "$root_mount"' "$finalizer"
 grep -Fq 'update-signing-key.pub' "$finalizer"
 grep -Fq 'update-source.conf' "$finalizer"
+grep -Fq 'AB_RELEASE_KEY_DIR' "$builder"
 grep -Fq 'IMAGE_VERSION=%s' "$finalizer"
 grep -Fq 'IMAGE_VERSION=' "$verifier"
 grep -Fq 'update-signing-key.pub' "$verifier"
@@ -169,19 +201,19 @@ for script in "$payload_generator" "$selector"; do
         exit 1
     }
 done
-grep -Fq 'PANEL_VARIANT=piscreen' "$repo_root/board-configs/micropanel-touch/packages/micropanel-touch-hook.sh"
-grep -Fqx 'DEFAULT_PANEL_VARIANT=piscreen' "$repo_root/board-configs/micropanel-touch/board.conf"
+grep -Fq 'PANEL_VARIANT=piscreen' "$board/packages/micropanel-touch-hook.sh"
+grep -Fqx 'DEFAULT_PANEL_VARIANT=piscreen' "$board/board.conf"
 base_app_hook=$(grep '^packages/micropanel-touch-hook.sh|' \
-    "$repo_root/board-configs/micropanel-touch/hooks.txt")
+    "$board/hooks.txt")
 luckfox_app_hook=$(grep '^packages/micropanel-touch-hook.sh|' \
-    "$repo_root/board-configs/micropanel-touch/hooks-luckfox-ctp.txt")
+    "$board/hooks-luckfox-ctp.txt")
 [ "$base_app_hook" = "$luckfox_app_hook" ] || {
     echo 'default and Luckfox hook lists pin different micropanel-touch revisions' >&2
     exit 1
 }
 printf '%s\n' "$base_app_hook" | grep -Fq '|${MICROPANEL_TOUCH_REVISION}|'
 grep -Fq 'resolved_revision=$(git -C "$source_root" rev-parse HEAD)' \
-    "$repo_root/board-configs/micropanel-touch/packages/micropanel-touch-hook.sh"
+    "$board/packages/micropanel-touch-hook.sh"
 grep -Fq 'verify_installed_app_revision "$root_mount"' "$finalizer"
 
 # A release cannot silently use the old hook pin: its exact application
@@ -200,9 +232,9 @@ printf '%s\n' "$conflicting_app_source_output" | \
 template=$(mktemp)
 trap 'rm -f "$template"' EXIT HUP INT TERM
 printf '%s\n' 'dtoverlay=vc4-kms-v3d' > "$template"
-normal_a=$(MICROPANEL_BOOT_CONFIG_TEMPLATE="$template" "$selector" render-normal A)
-normal_b=$(MICROPANEL_BOOT_CONFIG_TEMPLATE="$template" "$selector" render-normal B)
-candidate_a=$(MICROPANEL_BOOT_CONFIG_TEMPLATE="$template" "$selector" render-candidate A)
+normal_a=$(AB_BOOT_CONFIG_TEMPLATE="$template" "$selector" render-normal A)
+normal_b=$(AB_BOOT_CONFIG_TEMPLATE="$template" "$selector" render-normal B)
+candidate_a=$(AB_BOOT_CONFIG_TEMPLATE="$template" "$selector" render-candidate A)
 expected_normal_b=$(printf 'os_prefix=B/\ndtoverlay=vc4-kms-v3d')
 expected_normal_a=$(printf 'os_prefix=A/\ndtoverlay=vc4-kms-v3d')
 expected_candidate_a=$(printf 'os_prefix=A/\ndtoverlay=vc4-kms-v3d')

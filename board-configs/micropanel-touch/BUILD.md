@@ -39,7 +39,9 @@ filesystem.
 Before flashing an A/B artifact, run the read-only host check as root:
 
 ```sh
-sudo board-configs/micropanel-touch/packages/verify-ab-image-layout.sh \
+sudo AB_MANIFEST_PATH=/opt/micropanel-touch/share/micropanel-touch/image-manifest.env \
+  AB_ASSERTIONS=board-configs/micropanel-touch/ab-assertions.sh \
+  packages/pi-ab-update/ab-verify-image.sh \
   /path/to/micropanel-touch-luckfox-ctp-ab-00.13.img
 ```
 
@@ -119,7 +121,7 @@ The keypair lives **outside every git checkout**, by default at:
 
 `build-image.sh` creates it on first use and prints a custody notice;
 `--signing-key=FILE` selects a different location. The public half is baked
-into every A/B image at `/usr/lib/micropanel-touch/update-signing-key.pub`, so:
+into every A/B image at `/usr/lib/pi-ab-update/update-signing-key.pub`, so:
 
 - **back the private key up offline before publishing anything with it.**
   Losing it means no already-flashed device will accept a future signed
@@ -127,14 +129,13 @@ into every A/B image at `/usr/lib/micropanel-touch/update-signing-key.pub`, so:
 - **changing the key changes the image contract.** Devices flashed with an
   older public key will reject the new key's releases once Stage 4 lands.
 
-`board-configs/micropanel-touch/packages/micropanel-touch-release-key.sh` is
-the helper behind all of this (`ensure`, `key-path`, `public-path`, `sign`,
+`packages/pi-ab-update/ab-release-key.sh` is the helper behind all of this (`ensure`, `key-path`, `public-path`, `sign`,
 `verify`) and can be used directly to verify a published manifest.
 
 ### Reserved Stage 4 OTA location
 
 Every A/B image also ships a root-owned, currently unused
-`/usr/lib/micropanel-touch/update-source.conf` holding the version-less
+`/usr/lib/pi-ab-update/update-source.conf` holding the version-less
 `MANIFEST_URL` and `BUNDLE_URL` for this variant. It is rendered from
 `MICROPANEL_TOUCH_RELEASE_URL_TEMPLATE` in `board.conf`, which is also the one
 place that names the application/release repository — the builder resolves
@@ -162,16 +163,17 @@ preflight. The finalizer/verifier integration fixture remains a manual
 pre-flash check and uses only a temporary loopback image:
 
 ```sh
-board-configs/micropanel-touch/tests/test_ab_layout_static.sh
-sudo board-configs/micropanel-touch/tests/test_ab_layout_integration.sh
+packages/pi-ab-update/tests/test_ab_layout_static.sh
+sudo packages/pi-ab-update/tests/test_ab_layout_integration.sh
 ```
 
-The application repository carries the matching device-side checks:
-`ctest -R update-bundle-reader` (no root; drives the real reader through a pipe
-with malformed bundles) and
-`sudo tests/test_system_update_handler_integration.sh handlers/micropanel-touch-system-update`
-(loopback A/B slots, the pipe path, and real FAT32/exFAT USB discovery
-including the zero-bundle and two-bundle refusals).
+The A/B engine and every one of its suites now live in
+`packages/pi-ab-update/`. One command runs them all; the two loopback fixtures
+need root and skip themselves without it:
+
+```sh
+sudo packages/pi-ab-update/tests/run-tests.sh
+```
 
 #### Stage 2b bench evidence — complete, 2026-08-19
 
@@ -309,7 +311,7 @@ sudo e2fsck -pf /dev/mmcblk0p6
 sudo blkid /dev/mmcblk0p5 /dev/mmcblk0p6
 
 # Arm only the inactive B slot, then boot it exactly once.
-selector=/usr/local/sbin/micropanel-touch-slot-selector
+selector=/usr/local/sbin/ab-slot-selector
 sudo "$selector" current-slot                 # must print A
 sudo "$selector" arm-candidate B
 sudo reboot "0 tryboot"
@@ -320,7 +322,7 @@ machine-ID service and `/data` are healthy, then commit **from B**. The
 selector intentionally rejects `commit B` while A is running.
 
 ```sh
-selector=/usr/local/sbin/micropanel-touch-slot-selector
+selector=/usr/local/sbin/ab-slot-selector
 sudo "$selector" current-slot                 # must print B
 systemctl is-active micropanel-touch.service micropanel-touch-privileged.service \
   micropanel-touch-machine-id.service
@@ -337,8 +339,7 @@ the selector guards and the one-shot path without hand-editing generated
 
 On A/B images, `config.txt` and `tryboot.txt` are selector-managed generated
 files. Persistent image-level configuration changes belong in
-`/usr/lib/micropanel-touch/boot-selector-config.base` before the image is
-built; an ad-hoc edit to p1 is overwritten by the next selector commit.
+`/usr/lib/pi-ab-update/boot-selector-config.base` before the image is built; an ad-hoc edit to p1 is overwritten by the next selector commit.
 Because `config.txt` itself is shared by both slots, a template change is a
 special release: it must be called out in the release notes and the fallback
 slot must be re-tested. The accepted Luckfox CTP A/B manifest currently names

@@ -1,5 +1,11 @@
 #!/bin/bash
-# Host-side post-image hook for MicroPanel Touch storage layouts.
+# pi-ab-update: host-side post-image hook for A/B storage layouts.
+#
+# Board-agnostic. Everything product-specific arrives as environment from the
+# builder (AB_PRODUCT, AB_MANIFEST_PATH, AB_LIB_DIR, AB_APP_ACCOUNT,
+# AB_APP_REVISION_KEY/AB_APP_REVISION, DATA_SKELETON_SCRIPT, AB_UPDATE_CONF).
+# The engine scripts themselves are installed from this directory, so the
+# adopting board ships no copy of them.
 #
 # Default mode retains the established three-partition appliance image.  The
 # opt-in A/B mode creates the Stage 1 MBR layout without altering the source
@@ -16,22 +22,32 @@ ab_boot_partition_mb=${AB_BOOT_PARTITION_MB:-256}
 ab_root_partition_mb=${AB_ROOT_PARTITION_MB:-5120}
 ab_factory_partition_mb=${AB_FACTORY_PARTITION_MB:-2048}
 slot_compatible_boards=${SLOT_COMPATIBLE_BOARDS:-pi4}
-expected_micropanel_touch_revision=${MICROPANEL_TOUCH_REVISION:-}
+ab_product=${AB_PRODUCT:-pi-ab-update}
+ab_manifest_path=${AB_MANIFEST_PATH:-}
+ab_lib_dir=${AB_LIB_DIR:-/usr/lib/pi-ab-update}
+ab_app_account=${AB_APP_ACCOUNT:-}
+ab_app_revision_key=${AB_APP_REVISION_KEY:-}
+expected_app_revision=${AB_APP_REVISION:-}
+ab_update_conf=${AB_UPDATE_CONF:-}
 image_version=${IMAGE_VERSION:-}
 update_signing_public_key=${UPDATE_SIGNING_PUBLIC_KEY:-}
 update_release_url_template=${UPDATE_RELEASE_URL_TEMPLATE:-}
 
 script_dir=$(cd "$(dirname "$0")" && pwd)
-data_skeleton_script=${DATA_SKELETON_SCRIPT:-$script_dir/micropanel-touch-data-skeleton.sh}
-selector_script=${SLOT_SELECTOR_SCRIPT:-$script_dir/micropanel-touch-slot-selector}
+data_skeleton_script=${DATA_SKELETON_SCRIPT:-}
+selector_script=${SLOT_SELECTOR_SCRIPT:-$script_dir/ab-slot-selector}
+update_script=${AB_UPDATE_SCRIPT:-$script_dir/ab-system-update}
+commit_script=${AB_COMMIT_SCRIPT:-$script_dir/ab-update-commit}
+commit_unit=${AB_COMMIT_UNIT:-$script_dir/ab-update-commit.service}
+engine_lib_dir=/usr/lib/pi-ab-update
 
 data_label=MICROPANEL_DATA
 alignment_sectors=2048
 
 usage() {
     cat >&2 <<'EOF'
-Usage: finalize-image-layout.sh
-       finalize-image-layout.sh --print-ab-layout
+Usage: ab-finalize-layout.sh
+       ab-finalize-layout.sh --print-ab-layout
 EOF
     exit 2
 }
@@ -140,19 +156,47 @@ image_partition_lines() {
 }
 
 account_ids() { # $1=root mount; prints UID:GID
-    awk -F: '$1 == "micropanel-touch" {print $3 ":" $4; exit}' "$1/etc/passwd"
+    awk -F: -v account="$ab_app_account" '$1 == account {print $3 ":" $4; exit}' "$1/etc/passwd"
 }
 
 install_data_skeleton_tool() { # $1=root mount
-    install -Dm0755 "$data_skeleton_script" \
-        "$1/usr/local/sbin/micropanel-touch-data-skeleton"
+    install -Dm0755 "$data_skeleton_script" "$1/usr/local/sbin/ab-data-skeleton"
+}
+
+# The engine ships with the image, so an adopting board carries no copy of the
+# updater, the selector, the commit service or their unit.
+install_update_engine() { # $1=root mount
+    local root=$1 unit=lib/systemd/system/ab-update-commit.service health_units
+    install -Dm0755 "$update_script" "$root/usr/local/sbin/ab-system-update"
+    install -Dm0755 "$commit_script" "$root/usr/local/sbin/ab-update-commit"
+    install -Dm0644 "$commit_unit" "$root/$unit"
+    # `systemctl enable` needs a running system; the WantedBy symlink is what
+    # it would create, and doing it explicitly keeps the image deterministic.
+    install -d -m0755 "$root/etc/systemd/system/multi-user.target.wants"
+    ln -sf "/$unit" \
+        "$root/etc/systemd/system/multi-user.target.wants/ab-update-commit.service"
+    [ -n "$ab_update_conf" ] && [ -f "$ab_update_conf" ] || {
+        echo "ERROR: AB_UPDATE_CONF must name the board's ab-update.conf" >&2
+        exit 1
+    }
+    install -D -m0644 -o root -g root "$ab_update_conf" \
+        "$root$engine_lib_dir/ab-update.conf"
+    # Order the commit service after the units it will be judging, so it does
+    # not spend its readiness budget waiting for them to be started at all.
+    health_units=$(awk -F= '$1 == "AB_HEALTH_UNITS" { print $2; exit }' \
+        "$ab_update_conf" 2>/dev/null || true)
+    if [ -n "$health_units" ]; then
+        install -d -m0755 "$root/etc/systemd/system/ab-update-commit.service.d"
+        printf '[Unit]\nWants=%s\nAfter=%s\n' "$health_units" "$health_units" \
+            > "$root/etc/systemd/system/ab-update-commit.service.d/10-health-units.conf"
+    fi
 }
 
 seed_data_skeleton() { # $1=root mount; $2=data mount
     local account
     account=$(account_ids "$1")
     [[ "$account" =~ ^[0-9]+:[0-9]+$ ]] || {
-        echo "ERROR: micropanel-touch sysuser was not created in the image" >&2
+        echo "ERROR: $ab_app_account sysuser was not created in the image" >&2
         exit 1
     }
     "$data_skeleton_script" --root "$2" \
@@ -172,11 +216,11 @@ seed_network_connections() { # $1=root mount; $2=data mount
 
 replace_data_fstab_single() { # $1=root mount; $2=data PARTUUID
     local data_partuuid=$2 fstab="$1/etc/fstab" temporary
-    temporary="$fstab.micropanel-touch"
+    temporary="$fstab.ab-update"
     grep -vE '[[:space:]](/data|/etc/NetworkManager/system-connections)[[:space:]]' \
         "$fstab" > "$temporary" || true
     {
-        printf '\n# MicroPanel Touch persistent state (must not block boot if damaged).\n'
+        printf '\n# Persistent state (must not block boot if damaged).\n'
         printf 'PARTUUID=%s /data ext4 defaults,nofail,x-systemd.device-timeout=5s 0 2\n' \
             "$data_partuuid"
         printf '%s\n' '/data/NetworkManager/system-connections /etc/NetworkManager/system-connections none bind,nofail,x-systemd.requires=data.mount,x-systemd.before=NetworkManager.service 0 0'
@@ -186,10 +230,10 @@ replace_data_fstab_single() { # $1=root mount; $2=data PARTUUID
 
 replace_ab_fstab() { # $1=root mount
     local fstab="$1/etc/fstab" temporary
-    temporary="$fstab.micropanel-touch"
+    temporary="$fstab.ab-update"
     awk '$2 == "/" || $2 == "/boot/firmware" || $2 == "/data" || $2 == "/etc/NetworkManager/system-connections" {next} {print}' \
         "$fstab" > "$temporary"
-    printf '\n# MicroPanel Touch A/B layout. Labels keep each slot independent of partition numbering.\n' >> "$temporary"
+    printf '\n# A/B layout. Labels keep each slot independent of partition numbering.\n' >> "$temporary"
     printf '%s\n' \
         'LABEL=MP_BOOT_A /boot/firmware vfat defaults,ro,nofail,x-systemd.device-timeout=5s 0 2' \
         'LABEL=MICROPANEL_DATA /data ext4 defaults,nofail,x-systemd.device-timeout=5s 0 2' \
@@ -211,7 +255,7 @@ set_cmdline_root_label() { # $1=cmdline path; $2=filesystem label
 
 write_watchdog_config() { # $1=root mount
     install -d "$1/etc/systemd/system.conf.d"
-    cat > "$1/etc/systemd/system.conf.d/90-micropanel-touch-watchdog.conf" <<'EOF'
+    cat > "$1/etc/systemd/system.conf.d/90-pi-ab-update-watchdog.conf" <<'EOF'
 [Manager]
 # Stage 0 verified that PID 1 owns the BCM2835 watchdog and resets a wedged
 # tryboot candidate after this interval.  Do not add a test/fault service.
@@ -220,10 +264,10 @@ EOF
 }
 
 append_ab_manifest() { # $1=root mount
-    local manifest="$1/opt/micropanel-touch/share/micropanel-touch/image-manifest.env"
+    local manifest="$1$ab_manifest_path"
     local temporary
     [ -f "$manifest" ] || {
-        echo "ERROR: required MicroPanel Touch image manifest is missing: $manifest" >&2
+        echo "ERROR: required image manifest is missing: $manifest" >&2
         exit 1
     }
     # Stage 2b needs the running release version on the device: it is what the
@@ -233,7 +277,7 @@ append_ab_manifest() { # $1=root mount
         echo "ERROR: IMAGE_VERSION must be a safe release token for an A/B image" >&2
         exit 1
     }
-    temporary="$manifest.micropanel-touch"
+    temporary="$manifest.ab-update"
     grep -vE '^(IMAGE_LAYOUT|SLOT_COMPATIBLE_BOARDS|IMAGE_VERSION)=' "$manifest" > "$temporary" || true
     printf 'IMAGE_LAYOUT=ab\nSLOT_COMPATIBLE_BOARDS=%s\nIMAGE_VERSION=%s\n' \
         "$slot_compatible_boards" "$image_version" >> "$temporary"
@@ -244,10 +288,12 @@ append_ab_manifest() { # $1=root mount
 # both exist now so Stage 4 turns verification and OTA on without a new image
 # contract or a migration release.
 install_update_source_config() { # $1=root mount
-    local root=$1 variant manifest asset_manifest asset_bundle
-    manifest="$root/opt/micropanel-touch/share/micropanel-touch/image-manifest.env"
-    variant=$(awk -F= '$1 == "PANEL_VARIANT" { print $2; exit }' "$manifest" 2>/dev/null || true)
-    [ -n "$variant" ] || { echo 'ERROR: image manifest has no PANEL_VARIANT' >&2; exit 1; }
+    local root=$1 variant manifest asset_manifest asset_bundle variant_key
+    manifest="$root$ab_manifest_path"
+    variant_key=$(awk -F= '$1 == "AB_VARIANT_KEY" { print $2; exit }' "$ab_update_conf" 2>/dev/null || true)
+    variant_key=${variant_key:-PANEL_VARIANT}
+    variant=$(awk -F= -v key="$variant_key" '$1 == key { print $2; exit }' "$manifest" 2>/dev/null || true)
+    [ -n "$variant" ] || { echo "ERROR: image manifest has no $variant_key" >&2; exit 1; }
     [ -f "$update_signing_public_key" ] || {
         echo "ERROR: release signing public key is unavailable: ${update_signing_public_key:-<unset>}" >&2
         exit 1
@@ -255,12 +301,12 @@ install_update_source_config() { # $1=root mount
     # Pinned in the image, root-owned, never client-supplied. Stage 4 verifies
     # every manifest against this key before offering or applying an update.
     install -D -m0644 -o root -g root "$update_signing_public_key" \
-        "$root/usr/lib/micropanel-touch/update-signing-key.pub"
-    asset_manifest="micropanel-touch-${variant}.manifest"
-    asset_signature="micropanel-touch-${variant}.manifest.sig"
-    asset_bundle="micropanel-touch-${variant}.mpupdate"
-    install -d -m0755 "$root/usr/lib/micropanel-touch"
-    cat > "$root/usr/lib/micropanel-touch/update-source.conf" <<EOF
+        "$root$engine_lib_dir/update-signing-key.pub"
+    asset_manifest="${ab_product}-${variant}.manifest"
+    asset_signature="${ab_product}-${variant}.manifest.sig"
+    asset_bundle="${ab_product}-${variant}.mpupdate"
+    install -d -m0755 "$root$engine_lib_dir"
+    cat > "$root$engine_lib_dir/update-source.conf" <<EOF
 # Reserved Stage 4 OTA source. Root-owned and unused by the Stage 2b updater;
 # it exists now so enabling OTA needs no new image contract. The URLs are
 # deliberately version-less: the release version lives inside the manifest.
@@ -268,16 +314,16 @@ MANIFEST_URL=${update_release_url_template//@ASSET@/$asset_manifest}
 MANIFEST_SIG_URL=${update_release_url_template//@ASSET@/$asset_signature}
 BUNDLE_URL=${update_release_url_template//@ASSET@/$asset_bundle}
 EOF
-    chmod 0644 "$root/usr/lib/micropanel-touch/update-source.conf"
-    chown root:root "$root/usr/lib/micropanel-touch/update-source.conf"
+    chmod 0644 "$root$engine_lib_dir/update-source.conf"
+    chown root:root "$root$engine_lib_dir/update-source.conf"
 }
 
 verify_installed_app_revision() { # $1=root mount
-    local manifest="$1/opt/micropanel-touch/share/micropanel-touch/image-manifest.env" actual_revision
-    [ -n "$expected_micropanel_touch_revision" ] || return 0
-    actual_revision=$(awk -F= '$1 == "MICROPANEL_TOUCH_REVISION" { print $2; exit }' "$manifest" 2>/dev/null || true)
-    [ "$actual_revision" = "$expected_micropanel_touch_revision" ] || {
-        echo "ERROR: installed MicroPanel Touch revision ${actual_revision:-missing} does not match requested $expected_micropanel_touch_revision" >&2
+    local manifest="$1$ab_manifest_path" actual_revision
+    [ -n "$expected_app_revision" ] && [ -n "$ab_app_revision_key" ] || return 0
+    actual_revision=$(awk -F= -v key="$ab_app_revision_key" '$1 == key { print $2; exit }' "$manifest" 2>/dev/null || true)
+    [ "$actual_revision" = "$expected_app_revision" ] || {
+        echo "ERROR: installed application revision ${actual_revision:-missing} does not match requested $expected_app_revision" >&2
         exit 1
     }
 }
@@ -380,8 +426,9 @@ copy_slot_boot_tree() { # $1=source boot mount; $2=destination boot mount; $3=sl
 
 render_boot_selector() { # $1=root mount; $2=boot mount; $3=selector command; $4=slot; $5=destination
     local root=$1 boot=$2 selector_command=$3 slot=$4 destination=$5
-    MICROPANEL_BOOT_CONFIG_TEMPLATE="$root/usr/lib/micropanel-touch/boot-selector-config.base" \
-        "$root/usr/local/sbin/micropanel-touch-slot-selector" \
+    AB_BOOT_CONFIG_TEMPLATE="$root$engine_lib_dir/boot-selector-config.base" \
+        AB_UPDATE_CONFIG="$root$engine_lib_dir/ab-update.conf" \
+        "$root/usr/local/sbin/ab-slot-selector" \
         "$selector_command" "$slot" > "$boot/$destination"
 }
 
@@ -426,7 +473,7 @@ finalize_ab_layout() {
     data_size=$((total_sectors - p8_start))
     extended_size=$((total_sectors - extended_start))
     [ "$data_size" -gt "$alignment_sectors" ] || {
-        echo "ERROR: AB_IMAGE_SIZE_MB leaves no usable MICROPANEL_DATA partition" >&2
+        echo "ERROR: AB_IMAGE_SIZE_MB leaves no usable data partition" >&2
         exit 1
     }
 
@@ -495,8 +542,9 @@ EOF
         exit 1
     }
     install -D -m0644 "$boot_mount/config.txt" \
-        "$root_mount/usr/lib/micropanel-touch/boot-selector-config.base"
-    install -Dm0755 "$selector_script" "$root_mount/usr/local/sbin/micropanel-touch-slot-selector"
+        "$root_mount$engine_lib_dir/boot-selector-config.base"
+    install -Dm0755 "$selector_script" "$root_mount/usr/local/sbin/ab-slot-selector"
+    install_update_engine "$root_mount"
     render_boot_selector "$root_mount" "$boot_mount" render-normal A config.txt
     render_boot_selector "$root_mount" "$boot_mount" render-candidate B tryboot.txt
 

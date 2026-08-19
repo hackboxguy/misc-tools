@@ -1,0 +1,739 @@
+#!/bin/bash
+# pi-ab-update: root-only in-system A/B installer.
+#
+# Board-agnostic. Everything product-specific comes from one board-authored
+# config (see ab-update.conf below); nothing in this file names a product.
+# Its caller gives it exactly one source enum; it owns all discovery, mounts,
+# devices, selectors, archive paths, and reboot behavior. On boards with an
+# unprivileged UI a typed broker execs it; on headless boards this root CLI
+# *is* the interface.
+#
+# The payload is a single format=2 `.mpupdate` bundle: an uncompressed ustar
+# archive whose members appear in one fixed order.  The reader below is
+# deliberately single-pass and pipe-capable, so the Stage 4 OTA path is
+# literally `curl | this reader` with no format or reader rework.
+# -E so the ERR trap below is inherited by functions: an unexpected failure
+# must still be able to say which command failed.
+set -Eeuo pipefail
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL=C
+
+ab_config=${AB_UPDATE_CONFIG:-/usr/lib/pi-ab-update/ab-update.conf}
+
+# The board config is root-owned and authored at image build time, so it is as
+# trusted as this script. Parse it strictly anyway rather than sourcing it:
+# this handler never evaluates a file as shell code, and keeping that rule
+# absolute is worth more than the four lines it costs.
+ab_config_value() { # $1=key; empty when absent
+    [ -f "$ab_config" ] && [ ! -L "$ab_config" ] || return 0
+    awk -v key="$1" '
+        /^[[:space:]]*#/ { next }
+        index($0, key "=") == 1 {
+            value = substr($0, length(key) + 2)
+            if (value != "") { print value; found = 1 }
+        }
+        END { exit !found }
+    ' "$ab_config" 2>/dev/null || true
+}
+
+# Precedence throughout: environment (test seams) > board config > default.
+ab_setting() { # $1=env value (may be empty), $2=config key, $3=default
+    if [ -n "$1" ]; then printf '%s\n' "$1"; return; fi
+    local configured; configured=$(ab_config_value "$2")
+    if [ -n "$configured" ]; then printf '%s\n' "$configured"; return; fi
+    printf '%s\n' "$3"
+}
+
+product=$(ab_setting "${AB_PRODUCT:-}" AB_PRODUCT pi-ab-update)
+image_manifest=$(ab_setting "${AB_IMAGE_MANIFEST:-}" AB_MANIFEST /usr/lib/pi-ab-update/image-manifest.env)
+variant_key=$(ab_setting "${AB_VARIANT_KEY:-}" AB_VARIANT_KEY PANEL_VARIANT)
+selector=$(ab_setting "${AB_SLOT_SELECTOR:-}" AB_SLOT_SELECTOR /usr/local/sbin/ab-slot-selector)
+boot_dir=$(ab_setting "${AB_BOOT_DIR:-}" AB_BOOT_DIR /boot/firmware)
+state_dir=$(ab_setting "${AB_STATE_DIR:-}" AB_STATE_DIR /data/pi-ab-update)
+runtime_dir=$(ab_setting "${AB_RUNTIME_DIR:-}" AB_RUNTIME_DIR /run/ab-update)
+source_mount=${AB_SOURCE_MOUNT:-$runtime_dir/source}
+progress_file=${AB_PROGRESS_FILE:-$runtime_dir/progress}
+private_runtime_dir=$runtime_dir/private
+lower_root_mount=$(ab_setting "${AB_LOWER_ROOT_MOUNT:-}" AB_LOWER_ROOT_MOUNT /media/root-ro)
+root_parent_pattern=$(ab_setting "${AB_ROOT_PARENT_PATTERN:-}" AB_ROOT_PARENT_PATTERN '^mmcblk[0-9]+$')
+lock_file=${AB_LOCK_FILE:-$private_runtime_dir/update.lock}
+reboot_command=${AB_REBOOT_COMMAND:-/usr/sbin/reboot}
+# Same fixed-command seam as the reboot command above: the bench fixture can
+# present a synthetic block-device inventory without a real USB stick.
+lsblk_command=${AB_LSBLK:-lsblk}
+# V5-04 stall policy: the multi-gigabyte write is the only unbounded-duration
+# phase, so it detects its own stall instead of relying on the caller's
+# ceiling. Every other phase remains covered by that ceiling.
+stall_seconds=$(ab_setting "${AB_STALL_SECONDS:-}" AB_STALL_SECONDS 300)
+
+# Bundle policy. Names are exact, order is exact, and the two staged members
+# are bounded so a hostile bundle cannot exhaust the tmpfs runtime directory.
+bundle_extension=.mpupdate
+bundle_manifest_member=manifest
+bundle_signature_member=manifest.sig
+bundle_boot_member=boot.tar
+bundle_rootfs_member=rootfs.img.xz
+bundle_manifest_max_bytes=65536
+bundle_signature_max_bytes=4096
+bundle_boot_max_bytes=268435456
+usb_max_candidates=8
+
+source_was_mounted=0
+boot_was_remounted_rw=0
+hash_pid=""
+count_pid=""
+hash_fifo=""
+count_fifo=""
+hash_output=""
+count_output=""
+dd_pid_file=""
+header_file=""
+manifest_file=""
+signature_file=""
+boot_archive=""
+bundle_file=""
+failure_reported=0
+lock_fd=""
+lock_held=0
+internal_failure_context=""
+
+# The broker deliberately never relays handler output, and nothing else
+# captures it, so a `failed-internal` used to be undiagnosable after the fact.
+# Mirror diagnostics into the root-only journal: the class published for the
+# UI stays fixed and content-free, but an operator can find out what happened.
+log_diagnostic() {
+    printf '[ERROR] %s\n' "$*" >&2
+    command -v logger >/dev/null 2>&1 && \
+        logger -t "ab-system-update[$product]" -p daemon.err -- "$*" || true
+}
+
+# set -e alone loses the failing command. Record it so cleanup can report it.
+trap 'internal_failure_context="line ${LINENO}: ${BASH_COMMAND}"' ERR
+
+valid_failure_class() {
+    case "$1" in
+        source|integrity|compatibility|payload|version|stall|boot|target|selector|image|internal) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+die() {
+    local class=${1:-internal} message
+    shift || true
+    if ! valid_failure_class "$class"; then
+        set -- "$class" "$@"
+        class=internal
+    fi
+    message=$*
+    # Publish only a fixed failure class for the unprivileged UI, never device
+    # paths or image-controlled text. The detail goes to the root-only journal.
+    write_update_progress "failed-${class}" 0 >/dev/null 2>&1 || true
+    failure_reported=1
+    log_diagnostic "$message"
+    exit 1
+}
+usage() { printf '%s\n' '[ERROR] system update handler requires one source: usb' >&2; exit 64; }
+
+# `die` inside a command substitution publishes its class from a subshell, so
+# the surrounding `failure_reported` flag never sees it. The published file is
+# the only state that crosses that boundary; consult it before overwriting an
+# already-explicit class with the generic internal one.
+terminal_failure_published() {
+    [ -f "$progress_file" ] || return 1
+    grep -q '^phase=failed-' "$progress_file"
+}
+
+cleanup() {
+    local status=$?
+    # V5-01: the signal traps re-enter this handler through EXIT. Disarm every
+    # trap first so unmount and progress work runs exactly once.
+    trap - EXIT HUP INT TERM
+    # A signal during the write leaves the streaming subshell holding the
+    # bundle open too, so closing only this shell's descriptors would not free
+    # the mount. Stop it first, then reap the digest and counter helpers.
+    if [ -n "${stream_pid:-}" ] && kill -0 "$stream_pid" 2>/dev/null; then
+        kill -TERM "$stream_pid" 2>/dev/null || true
+        wait "$stream_pid" 2>/dev/null || true
+    fi
+    [ -z "$hash_pid" ] || wait "$hash_pid" 2>/dev/null || true
+    [ -z "$count_pid" ] || wait "$count_pid" 2>/dev/null || true
+    rm -f -- "$hash_fifo" "$count_fifo" "$hash_output" "$count_output" "$dd_pid_file" \
+        "$header_file" "$manifest_file" "$signature_file" "$boot_archive"
+    # O-01: the bundle is still open on fd 0/3 on every failure path, and an
+    # open file keeps its filesystem busy — so the unmount below used to fail
+    # EBUSY and be swallowed by `|| true`, stranding the mount inside the
+    # broker's PrivateTmp namespace for as long as the broker lives. That
+    # mount holds an exclusive claim on the USB device while being invisible
+    # in the host's /proc/mounts, which is what blocked host-side mkfs/wipefs
+    # after a failed run until the stick was replugged. Close first, then
+    # unmount. Fd 3 may not exist yet, so guard both.
+    exec 0</dev/null 2>/dev/null || true
+    exec 3<&- 2>/dev/null || true
+    [ "$source_was_mounted" != 1 ] || umount "$source_mount" || true
+    [ "$boot_was_remounted_rw" != 1 ] || mount -o remount,ro "$boot_dir" || true
+    # Commands protected by set -e can still fail outside an explicit die().
+    # Do not expose their output, but leave a bounded terminal UI result.
+    if [ "$status" -ne 0 ] && [ "$failure_reported" -eq 0 ] && ! terminal_failure_published; then
+        log_diagnostic "unexpected failure${internal_failure_context:+ at $internal_failure_context}"
+        write_update_progress failed-internal 0 >/dev/null 2>&1 || true
+    fi
+    exit "$status"
+}
+trap cleanup EXIT HUP INT TERM
+
+safe_token() { [[ ${1:-} =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]; }
+safe_boards() { [[ ${1:-} =~ ^[a-z0-9]+(,[a-z0-9]+)*$ ]]; }
+contains_board() { case ",$1," in *",$2,"*) return 0 ;; *) return 1 ;; esac; }
+
+# Read only an exact, unique key without ever sourcing an image-controlled
+# environment file as shell code.
+read_exact_value() {
+    awk -v wanted="$2" '
+        index($0, wanted "=") == 1 {
+            if (++count != 1) exit 1
+            value = substr($0, length(wanted) + 2)
+            if (value == "") exit 1
+        }
+        END { if (count != 1 || value == "") exit 1; print value }
+    ' "$1"
+}
+
+load_payload_manifest() {
+    local line key value
+    declare -gA payload=()
+    while IFS= read -r line || [ -n "$line" ]; do
+        [[ $line =~ ^(version|variant|boards|rootfs_sha256|rootfs_bytes|boot_sha256|format)=([^=[:space:]]+)$ ]] || die payload 'payload manifest has an invalid line'
+        key=${line%%=*}; value=${line#*=}
+        [ -z "${payload[$key]+present}" ] || die payload 'payload manifest repeats a key'
+        payload[$key]=$value
+    done < "$1"
+    [ "${#payload[@]}" -eq 7 ] || die payload 'payload manifest is incomplete or has unknown keys'
+    safe_token "${payload[version]}" || die payload 'payload manifest version is unsafe'
+    safe_token "${payload[variant]}" || die payload 'payload manifest variant is unsafe'
+    safe_boards "${payload[boards]}" || die payload 'payload manifest board list is unsafe'
+    [[ ${payload[rootfs_sha256]} =~ ^[0-9a-f]{64}$ ]] || die payload 'payload rootfs digest is invalid'
+    [[ ${payload[boot_sha256]} =~ ^[0-9a-f]{64}$ ]] || die payload 'payload boot digest is invalid'
+    [[ ${payload[rootfs_bytes]} =~ ^[1-9][0-9]*$ ]] || die payload 'payload rootfs length is invalid'
+    [ "${payload[format]}" = 2 ] || die payload 'payload format is unsupported'
+}
+
+detect_board() {
+    [ -z "${AB_BOARD:-}" ] || { printf '%s\n' "$AB_BOARD"; return; }
+    local model
+    model=$(tr -d '\000' < /proc/device-tree/model 2>/dev/null || true)
+    case "$model" in
+        Raspberry\ Pi\ 3*) printf '%s\n' pi3 ;;
+        Raspberry\ Pi\ 4*) printf '%s\n' pi4 ;;
+        Raspberry\ Pi\ 5*) printf '%s\n' pi5 ;;
+        *) die compatibility 'unsupported Raspberry Pi board for system update' ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# USB discovery
+# ---------------------------------------------------------------------------
+
+# A shop-fresh stick needs no label, no partitioning scheme, and no specific
+# filesystem beyond the two Windows ships. Removability is deliberately *not*
+# part of the predicate: USB SSDs and many sticks report RM=0/HOTPLUG=0, and
+# the bench fixture is one of them. The USB transport plus a mountable FAT
+# filesystem is the whole rule.
+list_usb_filesystems() {
+    local line path type tran fstype pkname
+    local -a records=() usb_disks=()
+    while IFS= read -r line; do
+        [[ $line =~ ^PATH=\"([^\"]*)\"\ TYPE=\"([^\"]*)\"\ TRAN=\"([^\"]*)\"\ FSTYPE=\"([^\"]*)\"\ PKNAME=\"([^\"]*)\"$ ]] || continue
+        path=${BASH_REMATCH[1]}; type=${BASH_REMATCH[2]}; tran=${BASH_REMATCH[3]}
+        fstype=${BASH_REMATCH[4]}; pkname=${BASH_REMATCH[5]}
+        records+=("$path|$type|$tran|$fstype|$pkname")
+        [ "$type" = disk ] && [ "$tran" = usb ] && usb_disks+=("$(basename "$path")")
+    done < <("$lsblk_command" -P -o PATH,TYPE,TRAN,FSTYPE,PKNAME 2>/dev/null || true)
+    local record disk
+    for record in "${records[@]}"; do
+        IFS='|' read -r path type tran fstype pkname <<< "$record"
+        case "$fstype" in vfat|exfat) ;; *) continue ;; esac
+        if [ "$type" = disk ] && [ "$tran" = usb ]; then
+            printf '%s\n' "$path"
+            continue
+        fi
+        [ "$type" = part ] || continue
+        for disk in ${usb_disks[@]+"${usb_disks[@]}"}; do
+            [ "$pkname" = "$disk" ] || continue
+            printf '%s\n' "$path"
+            break
+        done
+    done
+}
+
+# V5-02: a SIGKILL'd predecessor cannot run its cleanup, so it can strand this
+# mountpoint. Only the update-lock owner reaches this code, so a leftover mount
+# here is provably stale; reclaim it when it is not busy.
+reclaim_stale_source_mount() {
+    [ "$lock_held" -eq 1 ] || die internal 'refusing to reclaim a source mount without the update lock'
+    mountpoint -q "$source_mount" || return 0
+    printf '[INFO] reclaiming a stale update source mountpoint\n' >&2
+    umount "$source_mount" 2>/dev/null || die source 'a stale update source mount is still busy'
+}
+
+mount_source_device() { # $1=device
+    mount -o ro,nosuid,nodev,noexec -- "$1" "$source_mount"
+    source_was_mounted=1
+}
+
+unmount_source() {
+    [ "$source_was_mounted" = 1 ] || return 0
+    umount "$source_mount" || return 1
+    source_was_mounted=0
+}
+
+# Exactly one bundle across every USB filesystem; fail closed on zero or many.
+discover_usb_bundle() {
+    local -a devices=() found_devices=() found_names=()
+    local device candidate examined=0
+    mapfile -t devices < <(list_usb_filesystems)
+    [ "${#devices[@]}" -gt 0 ] || die source 'no USB filesystem is available for a system update'
+    # Reclaim before install -d: a stranded read-only mount makes the
+    # mountpoint itself unwritable.
+    reclaim_stale_source_mount
+    install -d -m0700 "$source_mount"
+    for device in "${devices[@]}"; do
+        examined=$((examined + 1))
+        [ "$examined" -le "$usb_max_candidates" ] || die source 'too many USB filesystems to scan for an update bundle'
+        [ -b "$device" ] || continue
+        mount_source_device "$device" || { source_was_mounted=0; continue; }
+        shopt -s nullglob
+        for candidate in "$source_mount"/*"$bundle_extension"; do
+            [ -f "$candidate" ] && [ ! -L "$candidate" ] || continue
+            found_devices+=("$device")
+            found_names+=("$(basename "$candidate")")
+        done
+        shopt -u nullglob
+        # Every mount and unmount below gets an explicit failure class. Left
+        # unguarded, `set -e` would drop straight into cleanup and publish the
+        # generic internal class for what is plainly a source problem.
+        unmount_source || die source 'unable to release a scanned USB filesystem'
+    done
+    [ "${#found_names[@]}" -ne 0 ] || die payload 'no update bundle was found on the USB media'
+    [ "${#found_names[@]}" -eq 1 ] || die payload 'USB media must contain exactly one update bundle'
+    mount_source_device "${found_devices[0]}" || \
+        die source 'unable to mount the USB filesystem holding the update bundle'
+    bundle_file="$source_mount/${found_names[0]}"
+    [ -f "$bundle_file" ] && [ ! -L "$bundle_file" ] && [ -r "$bundle_file" ] || \
+        die payload 'the update bundle is not a readable regular file'
+}
+
+# ---------------------------------------------------------------------------
+# Single-pass bundle reader (the future OTA reader, byte for byte)
+# ---------------------------------------------------------------------------
+
+# Read exactly $1 bytes from the bundle stream to stdout without ever
+# over-reading it, so a pipe source stays perfectly positioned for the next
+# member header.
+stream_exact_bytes() { # $1=byte count
+    local remaining=$1 chunks
+    if [ "$remaining" -ge 1048576 ]; then
+        chunks=$((remaining / 1048576))
+        dd bs=1M count="$chunks" iflag=fullblock status=none
+        remaining=$((remaining - chunks * 1048576))
+    fi
+    if [ "$remaining" -ge 512 ]; then
+        chunks=$((remaining / 512))
+        dd bs=512 count="$chunks" iflag=fullblock status=none
+        remaining=$((remaining - chunks * 512))
+    fi
+    [ "$remaining" -eq 0 ] || dd bs=1 count="$remaining" iflag=fullblock status=none
+}
+
+skip_member_padding() { # $1=member byte count
+    local padding=$(( (512 - ($1 % 512)) % 512 ))
+    [ "$padding" -eq 0 ] || dd bs=1 count="$padding" iflag=fullblock status=none >/dev/null
+}
+
+header_field() { # $1=offset $2=length
+    dd if="$header_file" bs=1 skip="$1" count="$2" status=none | tr -d '\000'
+}
+
+header_checksum_matches() {
+    od -An -v -tu1 "$header_file" | awk '
+        { for (i = 1; i <= NF; ++i) bytes[++n] = $i }
+        END {
+            if (n != 512) exit 1
+            for (i = 1; i <= 512; ++i) sum += (i >= 149 && i <= 156) ? 32 : bytes[i]
+            stored = 0
+            for (i = 149; i <= 156; ++i) {
+                c = bytes[i]
+                if (c == 0 || c == 32) continue
+                if (c < 48 || c > 55) exit 1
+                stored = stored * 8 + (c - 48)
+            }
+            exit stored != sum
+        }'
+}
+
+header_is_zero_block() {
+    od -An -v -tu1 "$header_file" | awk '{ for (i = 1; i <= NF; ++i) if ($i != 0) exit 1 }'
+}
+
+# Fills member_name/member_size. Returns 1 at end of archive.
+read_bundle_header() {
+    local name size_field type magic prefix header_bytes
+    dd bs=512 count=1 iflag=fullblock status=none > "$header_file"
+    header_bytes=$(stat -c %s "$header_file")
+    [ "$header_bytes" -eq 0 ] && return 1
+    [ "$header_bytes" -eq 512 ] || die payload 'update bundle ends inside a member header'
+    header_is_zero_block && return 1
+    header_checksum_matches || die payload 'update bundle member header is corrupt'
+    magic=$(header_field 257 5)
+    [ "$magic" = ustar ] || die payload 'update bundle is not a ustar archive'
+    prefix=$(header_field 345 155)
+    [ -z "$prefix" ] || die payload 'update bundle member uses a prefixed path'
+    type=$(header_field 156 1)
+    case "$type" in ''|0) ;; *) die payload 'update bundle contains a non-regular member' ;; esac
+    name=$(header_field 0 100)
+    size_field=$(header_field 124 12)
+    size_field=${size_field// /}
+    [[ $size_field =~ ^[0-7]{1,11}$ ]] || die payload 'update bundle member has an unreadable size'
+    member_name=$name
+    member_size=$((8#$size_field))
+    return 0
+}
+
+stage_bounded_member() { # $1=destination $2=limit
+    [ "$member_size" -le "$2" ] || die payload "update bundle member $member_name is too large"
+    stream_exact_bytes "$member_size" > "$1"
+    skip_member_padding "$member_size"
+}
+
+# ---------------------------------------------------------------------------
+
+check_regular_file() { [ -f "$1" ] && [ ! -L "$1" ] && [ -r "$1" ] || die payload "$2 is not a readable regular file"; }
+
+safe_e2fsck() {
+    local status
+    set +e; e2fsck -pf "$1"; status=$?; set -e
+    case "$status" in 0|1) ;; *) die target "inactive root filesystem check failed (status $status)" ;; esac
+}
+
+# Roots are selected by the fixed A/B partition contract, never by an ext4
+# volume label.  A failed write may have blanked or copied a label before its
+# post-write e2label step, but it must always be retryable from the surviving
+# running root on the same MMC device.
+resolve_target_root() {
+    local running_slot=$1 expected_running_part target_part root_source root_parent root_part target_root
+    case "$running_slot" in
+        A) expected_running_part=5; target_part=6 ;;
+        B) expected_running_part=6; target_part=5 ;;
+        *) die selector 'selector returned an invalid running slot' ;;
+    esac
+    root_source=$(findmnt -rn -T "$lower_root_mount" -o SOURCE) || die target 'running lower root source is unavailable'
+    root_source=$(realpath -e -- "$root_source") || die target 'running lower root source is unsafe'
+    [ -b "$root_source" ] || die target 'running lower root source is not a block device'
+    root_parent=$(lsblk -no PKNAME "$root_source" | tr -d '[:space:]')
+    root_part=$(lsblk -no PARTN "$root_source" | tr -d '[:space:]')
+    [[ $root_parent =~ $root_parent_pattern ]] || die target 'running lower root is not on the configured slot device'
+    [ "$root_part" = "$expected_running_part" ] || die target 'running lower root does not match the selected slot'
+    target_root="/dev/${root_parent}p${target_part}"
+    [ -b "$target_root" ] || die target 'inactive root partition is unavailable'
+    [ "$(lsblk -no PARTN "$target_root" | tr -d '[:space:]')" = "$target_part" ] || \
+        die target 'inactive root partition does not match the A/B layout'
+    printf '%s\n' "$target_root"
+}
+
+check_boot_archive() {
+    local entry relative template_count=0
+    while IFS= read -r entry; do
+        case "$entry" in
+            # GNU tar emits this directory root entry for the intentionally
+            # relative archive. It is not a path to extract.
+            ./) continue ;;
+            ./*) relative=${entry#./} ;;
+            *) die boot 'boot archive contains an unsafe path' ;;
+        esac
+        # tar denotes normal directory entries with a trailing slash. Validate
+        # the relative path components directly, rather than surrounding the
+        # entry with extra slashes (which mistakes that trailing slash for an
+        # empty component).
+        case "$relative" in
+            ..|../*|*/..|*/../*|*//*|cmdline.txt|cmdline.txt/)
+                die boot 'boot archive contains a forbidden path'
+                ;;
+        esac
+        [ "$relative" != cmdline.txt.template ] || template_count=$((template_count + 1))
+    done < <(tar -tf "$1")
+    [ "$template_count" -eq 1 ] || die boot 'boot archive must contain exactly one cmdline.txt.template'
+    tar -tvf "$1" | awk 'substr($0,1,1) != "-" && substr($0,1,1) != "d" { exit 1 }' || die boot 'boot archive contains a non-regular entry'
+}
+
+# @MICROPANEL_SLOT@ and the MP_ROOT_* labels are payload/layout format
+# constants whose names are historical. They are deliberately not renamed: like
+# the labels, a rename would buy nothing and would silently invalidate every
+# already-published bundle.
+render_target_cmdline() {
+    local target_boot=$1 target_slot=$2 template temporary root_count
+    template="$target_boot/cmdline.txt.template"
+    [ -f "$template" ] && [ ! -L "$template" ] || die boot 'boot archive template is missing'
+    [ "$(wc -l < "$template")" -eq 1 ] || die boot 'boot cmdline template must contain exactly one line'
+    root_count=$(tr ' ' '\n' < "$template" | awk '/^root=LABEL=@MICROPANEL_SLOT@$/ { count++ } END { print count + 0 }')
+    [ "$root_count" -eq 1 ] || die boot 'boot cmdline template must contain exactly one slot placeholder'
+    temporary="$target_boot/.cmdline.txt.new"
+    sed "s/@MICROPANEL_SLOT@/MP_ROOT_${target_slot}/g" "$template" > "$temporary"
+    grep -Fqx "root=LABEL=MP_ROOT_${target_slot}" <(tr ' ' '\n' < "$temporary") || die boot 'unable to render the target root label'
+    grep -Eq '(^|[[:space:]])overlayroot=tmpfs:recurse=0([[:space:]]|$)' "$temporary" || die boot 'payload cmdline lacks non-recursive overlayroot'
+    mv -f "$temporary" "$target_boot/cmdline.txt"
+    rm -f "$template"
+}
+
+write_update_state() {
+    local temporary
+    install -d -m0700 "$state_dir"
+    temporary=$(mktemp "$state_dir/.update-state.XXXXXX")
+    {
+        printf 'state=candidate-armed\n'
+        printf 'candidate_slot=%s\n' "$1"
+        printf 'version=%s\n' "$2"
+        printf 'variant=%s\n' "$3"
+    } > "$temporary"
+    chmod 0600 "$temporary"
+    sync -f "$temporary"
+    mv -f "$temporary" "$state_dir/update-state"
+    sync -f "$state_dir"
+}
+
+# This public runtime file is telemetry only. The HMI can read it to update a
+# busy card, but all state transitions and selector authority remain root-only.
+# V5-03: only the update-lock owner may ever publish into it.
+write_update_progress() { # $1=phase, $2=percent (0..100)
+    local temporary
+    [ "$lock_held" -eq 1 ] || return 0
+    install -d -m0755 "$runtime_dir"
+    temporary=$(mktemp "$runtime_dir/.progress.XXXXXX")
+    printf 'phase=%s\nprogress=%s\n' "$1" "$2" > "$temporary"
+    chmod 0644 "$temporary"
+    mv -f "$temporary" "$progress_file"
+}
+
+acquire_update_lock() {
+    install -d -m0700 "$private_runtime_dir"
+    exec {lock_fd}>"$lock_file"
+    if ! flock -n "$lock_fd"; then
+        # Do not publish a terminal state here: another invocation owns that
+        # file and its progress must remain visible to the HMI.
+        failure_reported=1
+        printf '%s\n' '[ERROR] another system update is already in progress' >&2
+        exit 1
+    fi
+    lock_held=1
+}
+
+[ "$#" -eq 1 ] || usage
+case "$1" in
+    # `usb` is the only source the typed broker can request. `stdin` is the
+    # root-only bench and OTA-precursor path: it proves the reader is
+    # pipe-capable and is exactly what Stage 4 will feed with `curl |`.
+    usb|stdin) source_kind=$1 ;;
+    *) usage ;;
+esac
+for tool in mount umount mountpoint findmnt lsblk blkid blockdev dd od stat date tee sha256sum wc xz tar e2fsck e2label awk sed tr grep install mktemp realpath basename sync flock; do
+    command -v "$tool" >/dev/null 2>&1 || die internal "required updater tool is unavailable: $tool"
+done
+acquire_update_lock
+rm -f -- "$progress_file"
+write_update_progress validating 0
+
+[ -x "$selector" ] || die selector 'slot selector is unavailable'
+[ -x "$reboot_command" ] || die internal 'update reboot command is unavailable'
+[ -f "$image_manifest" ] && [ ! -L "$image_manifest" ] || die image 'running image manifest is unavailable'
+[ "$(read_exact_value "$image_manifest" IMAGE_LAYOUT)" = ab ] || die image 'running image is not an A/B layout'
+running_variant=$(read_exact_value "$image_manifest" "$variant_key") || die image 'running image variant is unavailable'
+running_boards=$(read_exact_value "$image_manifest" SLOT_COMPATIBLE_BOARDS) || die image 'running board allow-list is unavailable'
+running_version=$(read_exact_value "$image_manifest" IMAGE_VERSION) || die image 'running image version is unavailable'
+safe_token "$running_variant" || die image 'running image variant is unsafe'
+safe_boards "$running_boards" || die image 'running board allow-list is unsafe'
+safe_token "$running_version" || die image 'running image version is unsafe'
+running_board=$(detect_board)
+safe_token "$running_board" || die compatibility 'detected board identity is unsafe'
+contains_board "$running_boards" "$running_board" || die compatibility 'running board is not enabled by this image'
+
+install -d -m0700 "$private_runtime_dir"
+header_file=$(mktemp "$private_runtime_dir/.bundle-header.XXXXXX")
+manifest_file=$(mktemp "$private_runtime_dir/.bundle-manifest.XXXXXX")
+signature_file=$(mktemp "$private_runtime_dir/.bundle-signature.XXXXXX")
+boot_archive=$(mktemp "$private_runtime_dir/.bundle-boot.XXXXXX")
+
+if [ "$source_kind" = usb ]; then
+    write_update_progress scanning 0
+    discover_usb_bundle
+    exec 0< "$bundle_file"
+fi
+# Bash assigns /dev/null to the standard input of an asynchronous list unless
+# that list carries an explicit redirection, so the streaming stage below needs
+# a named descriptor. Fd 3 and fd 0 share one open file description here, which
+# keeps the single-pass offset consistent across foreground and background
+# reads for a pipe and for a regular file alike.
+exec 3<&0
+
+# --- member 1: manifest (mandatory, first) --------------------------------
+read_bundle_header || die payload 'update bundle is empty'
+[ "$member_name" = "$bundle_manifest_member" ] || die payload 'update bundle must start with its manifest'
+stage_bounded_member "$manifest_file" "$bundle_manifest_max_bytes"
+load_payload_manifest "$manifest_file"
+
+# Manifest-first early abort: a wrong or already-installed release costs a few
+# kilobytes, whether the source is a stick or an OTA stream.
+[ "${payload[variant]}" = "$running_variant" ] || die compatibility 'payload variant does not match this panel image'
+contains_board "${payload[boards]}" "$running_board" || die compatibility 'payload does not support this Raspberry Pi board'
+[ "${payload[version]}" != "$running_version" ] || die version 'the running system already has this release version'
+
+# --- member 2: manifest.sig (optional, reserved for Stage 4) --------------
+read_bundle_header || die payload 'update bundle ends before its boot archive'
+if [ "$member_name" = "$bundle_signature_member" ]; then
+    stage_bounded_member "$signature_file" "$bundle_signature_max_bytes"
+    [ -s "$signature_file" ] || die payload 'update bundle carries an empty manifest signature'
+    # Reserved member: builds sign from the first format=2 release so that no
+    # migration release is needed when Stage 4 turns verification on here.
+    printf '[INFO] manifest signature present; device-side verification lands with Stage 4\n' >&2
+    read_bundle_header || die payload 'update bundle ends before its boot archive'
+fi
+
+# --- member 3: boot.tar ---------------------------------------------------
+[ "$member_name" = "$bundle_boot_member" ] || die payload 'update bundle members are out of order'
+stage_bounded_member "$boot_archive" "$bundle_boot_max_bytes"
+check_regular_file "$boot_archive" 'payload boot archive'
+[ "$(sha256sum "$boot_archive" | awk '{print $1}')" = "${payload[boot_sha256]}" ] || die integrity 'payload boot archive digest does not match its manifest'
+check_boot_archive "$boot_archive"
+
+# --- member 4: rootfs.img.xz (mandatory, last) ----------------------------
+read_bundle_header || die payload 'update bundle ends before its root filesystem'
+[ "$member_name" = "$bundle_rootfs_member" ] || die payload 'update bundle members are out of order'
+rootfs_member_bytes=$member_size
+
+# O-03: the absent-selector and invalid-output cases were handled, but a
+# selector that runs and exits non-zero fell through to the generic class.
+running_slot=$("$selector" current-slot) || die selector 'slot selector failed to report the running slot'
+case "$running_slot" in
+    A) target_slot=B ;;
+    B) target_slot=A ;;
+    *) die selector 'selector returned an invalid running slot' ;;
+esac
+target_root=$(resolve_target_root "$running_slot")
+# A label is useful diagnostic evidence only.  It is intentionally not a
+# resolver: an interrupted prior update may leave it blank or foreign.
+target_label=$(blkid -s LABEL -o value "$target_root" 2>/dev/null || true)
+if [ -n "$target_label" ] && [ "$target_label" != "MP_ROOT_${target_slot}" ]; then
+    printf '[INFO] replacing inactive slot with temporary label %s\n' "$target_label" >&2
+fi
+findmnt -rn -S "$target_root" >/dev/null 2>&1 && die target 'refusing to overwrite a mounted root partition'
+[ "$(blockdev --getsize64 "$target_root")" = "${payload[rootfs_bytes]}" ] || die target 'payload root filesystem length does not match the inactive slot'
+
+# Clear any stale primary superblock before streaming.  Together with the
+# label-neutral artifact, a power cut can leave only an unlabeled dirty
+# inactive partition, never a duplicate label for the committed slot.
+write_update_progress preparing 0
+dd if=/dev/zero of="$target_root" bs=1M count=1 conv=fsync status=none
+
+# The multi-gigabyte path streams straight from the bundle to the inactive
+# block device. The FIFOs feed only a digest and byte count; no rootfs is
+# staged in RAM or /tmp.
+hash_fifo=$(mktemp -u "$private_runtime_dir/.rootfs-hash.XXXXXX")
+count_fifo=$(mktemp -u "$private_runtime_dir/.rootfs-count.XXXXXX")
+hash_output=$(mktemp "$private_runtime_dir/.rootfs-sha256.XXXXXX")
+count_output=$(mktemp "$private_runtime_dir/.rootfs-bytes.XXXXXX")
+dd_pid_file=$(mktemp "$private_runtime_dir/.rootfs-dd.XXXXXX")
+rm -f -- "$dd_pid_file"
+mkfifo "$hash_fifo" "$count_fifo"
+sha256sum < "$hash_fifo" | awk '{print $1}' > "$hash_output" & hash_pid=$!
+wc -c < "$count_fifo" > "$count_output" & count_pid=$!
+set +e
+set -o pipefail
+write_update_progress writing 0
+{ stream_exact_bytes "$rootfs_member_bytes" | \
+    xz --memlimit-decompress=80MiB --decompress --stdout | tee "$hash_fifo" "$count_fifo" | \
+    (printf '%s\n' "$BASHPID" > "$dd_pid_file"; exec dd of="$target_root" bs=8M conv=fsync status=none); } <&3 &
+stream_pid=$!
+set -e
+stalled=0
+last_written=-1
+last_progress_seconds=$(date +%s)
+while kill -0 "$stream_pid" 2>/dev/null; do
+    if [ -s "$dd_pid_file" ]; then
+        dd_pid=$(cat "$dd_pid_file")
+        if [[ $dd_pid =~ ^[1-9][0-9]*$ ]] && [ -r "/proc/$dd_pid/io" ]; then
+            written=$(awk '/^write_bytes:/ { print $2; exit }' "/proc/$dd_pid/io")
+            if [[ $written =~ ^[0-9]+$ ]]; then
+                percent=$((written * 100 / ${payload[rootfs_bytes]}))
+                [ "$percent" -le 99 ] || percent=99
+                write_update_progress writing "$percent"
+                if [ "$written" != "$last_written" ]; then
+                    last_written=$written
+                    last_progress_seconds=$(date +%s)
+                elif [ $(( $(date +%s) - last_progress_seconds )) -ge "$stall_seconds" ]; then
+                    stalled=1
+                    kill -TERM "$dd_pid" 2>/dev/null || true
+                    kill -TERM "$stream_pid" 2>/dev/null || true
+                    break
+                fi
+            fi
+        fi
+    fi
+    sleep 1
+done
+set +e; wait "$stream_pid"; stream_status=$?; set -e
+rm -f -- "$dd_pid_file"; dd_pid_file=""
+wait "$hash_pid"; hash_pid=""
+wait "$count_pid"; count_pid=""
+[ "$stalled" -eq 0 ] || die stall 'root filesystem stream stopped making progress'
+[ "$stream_status" -eq 0 ] || die integrity 'root filesystem stream failed'
+skip_member_padding "$rootfs_member_bytes"
+# rootfs.img.xz is the last member by contract; nothing but end-of-archive
+# padding may follow it.
+if read_bundle_header; then
+    die payload 'update bundle has a member after its root filesystem'
+fi
+rootfs_sha256=$(tr -d '[:space:]' < "$hash_output")
+rootfs_bytes=$(tr -d '[:space:]' < "$count_output")
+[ "$rootfs_sha256" = "${payload[rootfs_sha256]}" ] || die integrity 'payload root filesystem digest does not match its manifest'
+[ "$rootfs_bytes" = "${payload[rootfs_bytes]}" ] || die integrity 'payload root filesystem length changed while streaming'
+rm -f -- "$hash_fifo" "$count_fifo" "$hash_output" "$count_output"
+hash_fifo=""; count_fifo=""; hash_output=""; count_output=""
+
+write_update_progress checking 99
+# Hash before relabel: e2label modifies the superblock and must never occur
+# before the release artifact digest has passed.
+safe_e2fsck "$target_root"
+e2label "$target_root" "MP_ROOT_${target_slot}"
+write_update_progress boot-files 99
+[ "$(findmnt -rn -T "$boot_dir" -o LABEL)" = MP_BOOT_A ] || die boot 'shared A/B boot filesystem is not mounted at the expected path'
+if ! findmnt -rn -T "$boot_dir" -o OPTIONS | grep -Eq '(^|,)rw(,|$)'; then
+    mount -o remount,rw "$boot_dir"
+    boot_was_remounted_rw=1
+fi
+target_boot="$boot_dir/$target_slot"
+case "$target_boot" in
+    "$boot_dir"/A|"$boot_dir"/B) ;;
+    *) die boot 'internal target boot path is invalid' ;;
+esac
+[ -d "$target_boot" ] && [ ! -L "$target_boot" ] || die boot 'inactive boot directory is invalid'
+
+# The inactive prefix is not bootable until the selector arm below succeeds,
+# so it can be replaced in place without staging another boot tree on p1.
+rm -rf -- "$target_boot"
+install -d -m0755 "$target_boot"
+tar --extract --file "$boot_archive" --directory "$target_boot" --no-same-owner --no-same-permissions
+render_target_cmdline "$target_boot" "$target_slot"
+sync "$target_boot"
+
+# The source media is no longer needed once every byte has been consumed and
+# verified. Drop the bundle file descriptor first: it is what keeps the
+# read-only mount busy.
+exec 0</dev/null 3<&-
+unmount_source || printf '[WARN] update source stayed mounted; the reboot releases it\n' >&2
+
+# Record intent before arming. A cut before arm leaves current!=candidate;
+# a cut after arm leaves the candidate enough durable state to prove+commit.
+write_update_state "$target_slot" "${payload[version]}" "${payload[variant]}"
+write_update_progress arming 100
+"$selector" arm-candidate "$target_slot"
+sync
+printf '[SUCCESS] payload verified; slot %s is armed for one candidate boot\n' "$target_slot"
+"$reboot_command" "0 tryboot"

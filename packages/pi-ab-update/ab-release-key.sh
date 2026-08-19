@@ -1,10 +1,10 @@
 #!/bin/bash
-# Release signing key custody helper for MicroPanel Touch update bundles.
+# pi-ab-update: release signing key custody helper.
 #
 # Build-side signing starts with the first format=2 release, long before the
 # device enforces it (plan Stage 4). Every published bundle therefore already
 # carries `manifest.sig`, so turning verification on needs no migration
-# release. See BUILD.md "Release signing key custody" for the operator rules.
+# release. See the adopting board's BUILD.md "Release signing key custody".
 #
 # The key lives outside every git checkout on purpose: a private key inside a
 # repository is one `git push` away from being public.
@@ -12,17 +12,19 @@ set -euo pipefail
 
 export LC_ALL=C
 
-default_dir=/etc/micropanel-touch/release-signing
+# A board sets AB_RELEASE_KEY_DIR to keep its existing key location; the
+# generic default only applies to a board that has not chosen one.
+default_dir=${AB_RELEASE_KEY_DIR:-/etc/pi-ab-update/release-signing}
 key_path=${MICROPANEL_RELEASE_KEY:-$default_dir/ed25519-release.key}
 public_path="$key_path.pub"
 
 usage() {
     cat >&2 <<'EOF'
-Usage: micropanel-touch-release-key.sh ensure
-       micropanel-touch-release-key.sh key-path
-       micropanel-touch-release-key.sh public-path
-       micropanel-touch-release-key.sh sign FILE SIGNATURE
-       micropanel-touch-release-key.sh verify FILE SIGNATURE
+Usage: ab-release-key.sh ensure
+       ab-release-key.sh key-path
+       ab-release-key.sh public-path
+       ab-release-key.sh sign FILE SIGNATURE
+       ab-release-key.sh verify FILE SIGNATURE
 
 Override the key location with MICROPANEL_RELEASE_KEY=/path/to/key.
 EOF

@@ -44,7 +44,8 @@ older data volume.
   service on every boot.
 - `/run/micropanel-touch-ui/first-frame-ready`, the private USB source mount
   used by a system update, and the bounded manifest/signature/`boot.tar`
-  members a Stage 2b bundle stages under `/run/micropanel-touch-update/private`;
+  members a bundle stages under `/run/micropanel-touch-update/private` (the
+  engine's `AB_RUNTIME_DIR` for this board);
   all are per-boot evidence/scratch state. The multi-gigabyte rootfs member is
   never among them: it streams straight to the inactive slot.
 - System journal (journald is restarted before journal flush after durable

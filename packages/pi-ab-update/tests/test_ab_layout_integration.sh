@@ -5,10 +5,13 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "$0")/../../.." && pwd)
-finalizer="$repo_root/board-configs/micropanel-touch/packages/finalize-image-layout.sh"
-verifier="$repo_root/board-configs/micropanel-touch/packages/verify-ab-image-layout.sh"
-payload_generator="$repo_root/board-configs/micropanel-touch/packages/make-ab-update-payload.sh"
-release_key_tool="$repo_root/board-configs/micropanel-touch/packages/micropanel-touch-release-key.sh"
+engine="$repo_root/packages/pi-ab-update"
+board="$repo_root/board-configs/micropanel-touch"
+finalizer="$engine/ab-finalize-layout.sh"
+verifier="$engine/ab-verify-image.sh"
+payload_generator="$engine/ab-make-payload.sh"
+release_key_tool="$engine/ab-release-key.sh"
+skeleton="$board/packages/micropanel-touch-data-skeleton.sh"
 
 [ "$(id -u)" -eq 0 ] || {
     echo "ERROR: run as root so the fixture can use loop partitions" >&2
@@ -94,6 +97,9 @@ printf '%s\n' \
 printf '%s\n' 'IMAGE_VERSION=fixture' \
     "MICROPANEL_TOUCH_REVISION=$fixture_app_revision" \
     'PANEL_VARIANT=piscreen' > "$manifest"
+# The health hook is the application's contribution to the engine's candidate
+# predicate; its own hook installs it, so the fixture stands one in for it.
+install -Dm0755 /dev/null "$source_root_mount/usr/lib/micropanel-touch/update-health"
 printf '%s\n' '[connection]' 'id=fixture' > "$source_root_mount/etc/NetworkManager/system-connections/fixture.nmconnection"
 chmod 0600 "$source_root_mount/etc/NetworkManager/system-connections/fixture.nmconnection"
 chmod 0700 "$source_root_mount/etc/NetworkManager/system-connections"
@@ -111,15 +117,30 @@ source_loop=""
 release_key="$work/release-signing/ed25519-release.key"
 MICROPANEL_RELEASE_KEY="$release_key" "$release_key_tool" ensure 2>/dev/null
 
-env -u DATA_PARTITION_MB MICROPANEL_TOUCH_REVISION="$fixture_app_revision" \
+# The board profile the engine is driven with. This fixture uses the
+# micropanel-touch one, which is the reference profile.
+ab_update_conf="$board/ab-update.conf"
+ab_assertions="$board/ab-assertions.sh"
+ab_manifest_path=/opt/micropanel-touch/share/micropanel-touch/image-manifest.env
+
+env -u DATA_PARTITION_MB \
     IMAGE_PATH="$image" AB_LAYOUT=1 AB_IMAGE_SIZE_MB=384 \
     AB_BOOT_PARTITION_MB=32 AB_ROOT_PARTITION_MB=96 AB_FACTORY_PARTITION_MB=32 \
     SLOT_COMPATIBLE_BOARDS=pi4 IMAGE_VERSION=fixture-running \
     UPDATE_SIGNING_PUBLIC_KEY="$release_key.pub" \
     UPDATE_RELEASE_URL_TEMPLATE='https://example.invalid/releases/latest/download/@ASSET@' \
+    AB_PRODUCT=micropanel-touch \
+    AB_MANIFEST_PATH="$ab_manifest_path" \
+    AB_LIB_DIR=/usr/lib/micropanel-touch \
+    AB_APP_ACCOUNT=micropanel-touch \
+    AB_APP_REVISION_KEY=MICROPANEL_TOUCH_REVISION \
+    AB_APP_REVISION="$fixture_app_revision" \
+    AB_UPDATE_CONF="$ab_update_conf" \
+    DATA_SKELETON_SCRIPT="$skeleton" \
     "$finalizer"
 
-MICROPANEL_TOUCH_REVISION="$fixture_app_revision" "$verifier" "$image"
+MICROPANEL_TOUCH_REVISION="$fixture_app_revision" \
+    AB_MANIFEST_PATH="$ab_manifest_path" AB_ASSERTIONS="$ab_assertions" "$verifier" "$image"
 # Stage 2b publishes exactly two version-less assets: the bundle and a
 # standalone copy of its manifest.
 asset_prefix="$work/payload/micropanel-touch-luckfox-ctp"
@@ -131,7 +152,7 @@ install -d "$failing_bin"
 printf '%s\n' '#!/bin/sh' 'exit 1' > "$failing_bin/xz"
 chmod 0755 "$failing_bin/xz"
 if PATH="$failing_bin:$PATH" "$payload_generator" --image="$image" --output-dir="$work/failed-payload" \
-    --version=fixture-failure --variant=luckfox-ctp --boards=pi4 \
+    --version=fixture-failure --variant=luckfox-ctp --boards=pi4 --product=micropanel-touch \
     --signing-key="$release_key" >/dev/null 2>&1; then
     echo 'ERROR: payload generator accepted a forced compression failure' >&2
     exit 1
@@ -157,7 +178,8 @@ mkdir -p "$work/payload"
 printf '%s\n' 'obsolete payload artifact' > "$manifest"
 printf '%s\n' 'obsolete payload artifact' > "$bundle"
 "$payload_generator" --image="$image" --output-dir="$work/payload" \
-    --version=fixture-1 --variant=luckfox-ctp --boards=pi4 --signing-key="$release_key"
+    --version=fixture-1 --variant=luckfox-ctp --boards=pi4 --product=micropanel-touch \
+    --signing-key="$release_key"
 [ -f "$bundle" ] && [ -f "$manifest" ] && [ -f "$manifest_signature" ]
 # Exactly three published assets: bundle, standalone manifest, and the detached
 # signature Stage 4's check step needs beside it. The retired format=1 triplet
@@ -235,7 +257,8 @@ done
 }
 losetup -d "$source_loop"
 source_loop=""
-MICROPANEL_TOUCH_REVISION="$fixture_app_revision" "$verifier" "$image"
+MICROPANEL_TOUCH_REVISION="$fixture_app_revision" \
+    AB_MANIFEST_PATH="$ab_manifest_path" AB_ASSERTIONS="$ab_assertions" "$verifier" "$image"
 
 # Simulate the source-image state left by a host kill while its label was
 # neutralized. The next payload invocation must self-heal p5 before it exits.
@@ -251,7 +274,8 @@ sync -f "${source_loop}p5"
 losetup -d "$source_loop"
 source_loop=""
 "$payload_generator" --image="$image" --output-dir="$work/recovered-payload" \
-    --version=fixture-recovery --variant=luckfox-ctp --boards=pi4 --signing-key="$release_key"
+    --version=fixture-recovery --variant=luckfox-ctp --boards=pi4 --product=micropanel-touch \
+    --signing-key="$release_key"
 source_loop=$(losetup --find --show --partscan --read-only "$image")
 retries=0
 while [ "$retries" -lt 20 ]; do
@@ -265,7 +289,8 @@ done
 }
 losetup -d "$source_loop"
 source_loop=""
-MICROPANEL_TOUCH_REVISION="$fixture_app_revision" "$verifier" "$image"
+MICROPANEL_TOUCH_REVISION="$fixture_app_revision" \
+    AB_MANIFEST_PATH="$ab_manifest_path" AB_ASSERTIONS="$ab_assertions" "$verifier" "$image"
 [ "$(sha256sum "$boot_tar" | awk '{print $1}')" = "$boot_sha256" ]
 tar -tf "$boot_tar" | grep -Fqx './cmdline.txt.template'
 if tar -tf "$boot_tar" | grep -Fqx './cmdline.txt'; then
@@ -280,7 +305,7 @@ tar -xOf "$boot_tar" ./cmdline.txt.template | tr ' ' '\n' | \
 # changes the artifact digests (e2label bumps the superblock write time), so it
 # would invalidate the extracted copies the assertions above compare against.
 if "$payload_generator" --image="$image" --output-dir="$work/payload" \
-    --version=fixture-2 --variant=luckfox-ctp --boards=pi4 \
+    --version=fixture-2 --variant=luckfox-ctp --boards=pi4 --product=micropanel-touch \
     --signing-key="$release_key" >/dev/null 2>&1; then
     echo 'ERROR: a different release was published over an existing one' >&2
     exit 1
@@ -291,7 +316,8 @@ grep -Fqx 'version=fixture-1' "$manifest" || {
 }
 # Republishing the same version stays intentional and allowed.
 "$payload_generator" --image="$image" --output-dir="$work/payload" \
-    --version=fixture-1 --variant=luckfox-ctp --boards=pi4 --signing-key="$release_key"
+    --version=fixture-1 --variant=luckfox-ctp --boards=pi4 --product=micropanel-touch \
+    --signing-key="$release_key"
 grep -Fqx 'version=fixture-1' "$manifest"
 [ "$(find "$work/payload" -maxdepth 1 -type f | wc -l)" -eq 3 ]
 echo "A/B finalizer integration test passed"

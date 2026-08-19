@@ -1,13 +1,21 @@
 #!/bin/bash
-# Read-only host-side acceptance check for a completed MicroPanel Touch A/B image.
+# pi-ab-update: read-only host-side acceptance check for a completed A/B image.
+#
+# Everything here is the cross-board layout/engine contract. A board's own
+# assertions - its app account, its /data skeleton, its manifest keys - live in
+# the script named by AB_ASSERTIONS, which this runs with AB_ROOT_MOUNT,
+# AB_BOOT_MOUNT and AB_DATA_MOUNT exported.
 set -euo pipefail
 
 image_path=${1:-}
-expected_micropanel_touch_revision=${MICROPANEL_TOUCH_REVISION:-}
+ab_manifest_path=${AB_MANIFEST_PATH:-}
+ab_assertions=${AB_ASSERTIONS:-}
+engine_lib_dir=/usr/lib/pi-ab-update
 [ -n "$image_path" ] || {
-    echo "Usage: sudo $0 /path/to/micropanel-touch-ab.img" >&2
+    echo "Usage: sudo $0 /path/to/ab-image.img" >&2
     exit 2
 }
+[ -n "$ab_manifest_path" ] || { echo "ERROR: AB_MANIFEST_PATH is required" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || { echo "ERROR: run as root so loop partitions can be mounted" >&2; exit 1; }
 [ -f "$image_path" ] || { echo "ERROR: image does not exist: $image_path" >&2; exit 1; }
 
@@ -125,11 +133,11 @@ require grep -Eq '(^|[[:space:]])root=LABEL=MP_ROOT_B([[:space:]]|$)' "$boot_a_m
 for cmdline in "$boot_a_mount/cmdline.txt" "$boot_a_mount/A/cmdline.txt" "$boot_a_mount/B/cmdline.txt"; do
     require grep -Eq '(^|[[:space:]])overlayroot=tmpfs:recurse=0([[:space:]]|$)' "$cmdline"
 done
-if ! tail -n +2 "$boot_a_mount/config.txt" | cmp - "$root_a_mount/usr/lib/micropanel-touch/boot-selector-config.base"; then
+if ! tail -n +2 "$boot_a_mount/config.txt" | cmp - "$root_a_mount$engine_lib_dir/boot-selector-config.base"; then
     echo "ERROR: normal selector configuration differs from its template" >&2
     exit 1
 fi
-if ! tail -n +2 "$boot_a_mount/tryboot.txt" | cmp - "$root_a_mount/usr/lib/micropanel-touch/boot-selector-config.base"; then
+if ! tail -n +2 "$boot_a_mount/tryboot.txt" | cmp - "$root_a_mount$engine_lib_dir/boot-selector-config.base"; then
     echo "ERROR: tryboot selector configuration differs from its template" >&2
     exit 1
 fi
@@ -142,55 +150,46 @@ require grep -Fq '/data/NetworkManager/system-connections /etc/NetworkManager/sy
     echo "ERROR: A/B root fstab must not identify a slot-specific / filesystem" >&2
     exit 1
 }
-require test -x "$root_a_mount/usr/local/sbin/micropanel-touch-data-skeleton"
-require test -x "$root_a_mount/usr/local/sbin/micropanel-touch-slot-selector"
+image_manifest="$root_a_mount$ab_manifest_path"
+# The engine's own footprint in the image.
+require test -x "$root_a_mount/usr/local/sbin/ab-data-skeleton"
+require test -x "$root_a_mount/usr/local/sbin/ab-slot-selector"
+require test -x "$root_a_mount/usr/local/sbin/ab-system-update"
+require test -x "$root_a_mount/usr/local/sbin/ab-update-commit"
+require test -f "$root_a_mount/lib/systemd/system/ab-update-commit.service"
+require test -L "$root_a_mount/etc/systemd/system/multi-user.target.wants/ab-update-commit.service"
+require test -f "$root_a_mount$engine_lib_dir/ab-update.conf"
+require grep -Eq '^AB_HEALTH_UNITS=[^[:space:]].*$' "$root_a_mount$engine_lib_dir/ab-update.conf"
 require grep -Fq 'RuntimeWatchdogSec=20s' \
-    "$root_a_mount/etc/systemd/system.conf.d/90-micropanel-touch-watchdog.conf"
-require grep -Fq 'IMAGE_LAYOUT=ab' \
-    "$root_a_mount/opt/micropanel-touch/share/micropanel-touch/image-manifest.env"
-require grep -Fq 'SLOT_COMPATIBLE_BOARDS=pi4' \
-    "$root_a_mount/opt/micropanel-touch/share/micropanel-touch/image-manifest.env"
-require grep -Eq '^PANEL_VARIANT=[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' \
-    "$root_a_mount/opt/micropanel-touch/share/micropanel-touch/image-manifest.env"
+    "$root_a_mount/etc/systemd/system.conf.d/90-pi-ab-update-watchdog.conf"
+# The layout/update contract inside the board's image manifest.
+require grep -Fq 'IMAGE_LAYOUT=ab' "$image_manifest"
+require grep -Eq '^SLOT_COMPATIBLE_BOARDS=[a-z0-9]+(,[a-z0-9]+)*$' "$image_manifest"
 # Stage 2b: the running release version is part of the on-device contract; the
 # updater refuses to run without it and uses it for its already-up-to-date
 # abort before any large member is read.
-require grep -Eq '^IMAGE_VERSION=[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' \
-    "$root_a_mount/opt/micropanel-touch/share/micropanel-touch/image-manifest.env"
+require grep -Eq '^IMAGE_VERSION=[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' "$image_manifest"
 # Stage 4 groundwork shipped now: the pinned release public key and the
 # reserved, root-owned OTA URL template.
-require grep -Fq 'BEGIN PUBLIC KEY' "$root_a_mount/usr/lib/micropanel-touch/update-signing-key.pub"
-require test "$(stat -c '%u:%g:%a' "$root_a_mount/usr/lib/micropanel-touch/update-signing-key.pub")" = '0:0:644'
+require grep -Fq 'BEGIN PUBLIC KEY' "$root_a_mount$engine_lib_dir/update-signing-key.pub"
+require test "$(stat -c '%u:%g:%a' "$root_a_mount$engine_lib_dir/update-signing-key.pub")" = '0:0:644'
 require grep -Eq '^BUNDLE_URL=https://[^[:space:]]+\.mpupdate$' \
-    "$root_a_mount/usr/lib/micropanel-touch/update-source.conf"
+    "$root_a_mount$engine_lib_dir/update-source.conf"
 require grep -Eq '^MANIFEST_URL=https://[^[:space:]]+\.manifest$' \
-    "$root_a_mount/usr/lib/micropanel-touch/update-source.conf"
+    "$root_a_mount$engine_lib_dir/update-source.conf"
 require grep -Eq '^MANIFEST_SIG_URL=https://[^[:space:]]+\.manifest\.sig$' \
-    "$root_a_mount/usr/lib/micropanel-touch/update-source.conf"
-require test "$(stat -c '%u:%g:%a' "$root_a_mount/usr/lib/micropanel-touch/update-source.conf")" = '0:0:644'
-if [ -n "$expected_micropanel_touch_revision" ]; then
-    require grep -Fqx "MICROPANEL_TOUCH_REVISION=$expected_micropanel_touch_revision" \
-        "$root_a_mount/opt/micropanel-touch/share/micropanel-touch/image-manifest.env"
-else
-    require grep -Eq '^MICROPANEL_TOUCH_REVISION=[0-9a-f]{40}$' \
-        "$root_a_mount/opt/micropanel-touch/share/micropanel-touch/image-manifest.env"
-fi
+    "$root_a_mount$engine_lib_dir/update-source.conf"
+require test "$(stat -c '%u:%g:%a' "$root_a_mount$engine_lib_dir/update-source.conf")" = '0:0:644'
 
-for directory in micropanel-touch micropanel-touch/logs micropanel-touch/ssh-host-keys \
-                 micropanel-touch-system micropanel-touch-network/dhcp-server \
-                 NetworkManager/system-connections; do
-    require test -d "$data_mount/$directory"
-done
-app_account=$(awk -F: '$1 == "micropanel-touch" { print $3 ":" $4; exit }' "$root_a_mount/etc/passwd")
-case "$app_account" in [0-9]*:[0-9]*) ;; *) echo "ERROR: missing micropanel-touch account in root A" >&2; exit 1 ;; esac
-app_group=${app_account#*:}
-require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel-touch")" = "${app_account}:750"
-require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel-touch/logs")" = "${app_account}:750"
-require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel-touch/ssh-host-keys")" = '0:0:700'
-require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel-touch-system")" = '0:0:700'
-require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel-touch-network")" = "0:${app_group}:750"
-require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel-touch-network/dhcp-server")" = "0:${app_group}:750"
-require test "$(stat -c '%u:%g:%a' "$data_mount/NetworkManager/system-connections")" = '0:0:700'
+# Whatever else this particular product requires of its own image.
+if [ -n "$ab_assertions" ]; then
+    [ -x "$ab_assertions" ] || { echo "ERROR: AB_ASSERTIONS is not executable: $ab_assertions" >&2; exit 1; }
+    AB_ROOT_MOUNT="$root_a_mount" AB_BOOT_MOUNT="$boot_a_mount" AB_DATA_MOUNT="$data_mount" \
+        AB_IMAGE_MANIFEST="$image_manifest" "$ab_assertions" || {
+        echo "ERROR: board assertions failed: $ab_assertions" >&2
+        exit 1
+    }
+fi
 
 # A newly flashed image deliberately leaves B and the factory reserve empty.
 ! find "$boot_b_mount" -mindepth 1 -print -quit | grep -q . || {

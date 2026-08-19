@@ -132,15 +132,49 @@ into every A/B image at `/usr/lib/pi-ab-update/update-signing-key.pub`, so:
 `packages/pi-ab-update/ab-release-key.sh` is the helper behind all of this (`ensure`, `key-path`, `public-path`, `sign`,
 `verify`) and can be used directly to verify a published manifest.
 
-### Reserved Stage 4 OTA location
+### Where releases come from (OTA)
 
-Every A/B image also ships a root-owned, currently unused
+Every A/B image ships a root-owned
 `/usr/lib/pi-ab-update/update-source.conf` holding the version-less
-`MANIFEST_URL` and `BUNDLE_URL` for this variant. It is rendered from
+`MANIFEST_URL`, `MANIFEST_SIG_URL` and `BUNDLE_URL` for this variant, beside the
+pinned release public key. It is rendered from
 `MICROPANEL_TOUCH_RELEASE_URL_TEMPLATE` in `board.conf`, which is also the one
 place that names the application/release repository — the builder resolves
-`--app-ref` against it and both hook lists expand it. Enabling OTA therefore
-needs no new image contract and no second copy of the repository URL.
+`--app-ref` against it and both hook lists expand it. There is no second copy of
+the repository URL anywhere.
+
+`--release-url-template=URL` overrides it per build, with `@ASSET@` standing in
+for the asset name. That is how an over-the-air update is rehearsed on the bench
+before anything is published:
+
+```sh
+# 1. On the build host, serve a payload directory built with --payload:
+packages/pi-ab-update/ab-serve-release.sh \
+    ~/pi-image-workspace/out/micropanel-touch-luckfox-ctp-ab/payloads/<version> 8000
+
+# 2. Build the *device* image so it asks this host instead of GitHub:
+sudo ./build-image.sh --board=micropanel-touch --variant=luckfox-ctp \
+    --version=<version> --layout=ab --app-ref=main \
+    --release-url-template=http://<build-host-ip>:8000/@ASSET@
+```
+
+Plain HTTP is correct for a rehearsal and does not weaken the test: a release is
+authenticated by a **raw ed25519 signature over its manifest**, verified against
+the key pinned in the image, before any manifest field is parsed. The transport
+is not a trust boundary, so an unauthenticated server cannot make a device accept
+anything it would otherwise refuse. `ab-verify-image.sh` accepts an http source
+but prints a notice; shipping images use the https default.
+
+The same property is what makes the **offline deployment** work: there is no
+certificate and no validity window in the signature path, so a panel that has
+never reached an NTP server — and believes it is years in the past — still
+verifies and installs a signed release from a USB stick. Only the *network*
+route needs a roughly correct clock, and when TLS fails on a panel whose clock
+was never set, the failure is reported as a clock problem rather than a network
+one, because that is what an operator has to fix.
+
+Signed **downgrades are permitted**: only an identical version is refused, so an
+older signed release stays installable and rollback remains available.
 
 An update streams directly into the inactive root partition, then reboots into
 that candidate once. Do not remove power while the display says it is writing.

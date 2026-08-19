@@ -14,6 +14,7 @@ profile and, so far, its only adopter.
 | File | Role |
 |---|---|
 | `ab-system-update` | the root-only installer: USB discovery, single-pass bundle reader, streaming write, hash-before-arm, selector arm, reboot |
+| `ab-update-check` | asks the release server what it offers: fetches the manifest and its signature only, verifies, and publishes `available` / `up-to-date` |
 | `ab-slot-selector` | the three-operation slot protocol (`current-slot`, `arm-candidate`, `commit`) — the seam a secure-boot backend replaces |
 | `ab-update-commit` + `.service` | commits a candidate after a sustained health window, or records `fallback` |
 | `ab-factory-reset` | root-only request: writes one durable marker and schedules a reboot. It erases nothing itself |
@@ -22,6 +23,7 @@ profile and, so far, its only adopter.
 | `ab-make-payload.sh` | host-side generator for the signed `format=2` `.mpupdate` bundle |
 | `ab-verify-image.sh` | read-only host-side acceptance check for a built image |
 | `ab-release-key.sh` | ed25519 release-key custody (create, sign, verify) |
+| `ab-serve-release.sh` | host-side bench helper: serves a payload directory over HTTP so an over-the-air update can be rehearsed before publishing |
 | `tests/` | host suites (bundle reader, handler policy, commit policy and status, factory reset, and two root-only loopback fixtures); `tests/run-tests.sh` runs them all |
 
 ## The board contract
@@ -41,6 +43,12 @@ AB_HEALTH_UNITS=a.service b.service             # all active, none restarted
 AB_HEALTH_HOOK=/usr/lib/…/update-health         # optional extra predicate, exit 0
 AB_SETTLE_SECONDS=30
 
+# Updates: authenticity, and where releases come from
+AB_SIGNING_KEY=/usr/lib/pi-ab-update/update-signing-key.pub   # pinned, root-owned
+AB_SOURCE_CONFIG=/usr/lib/pi-ab-update/update-source.conf     # MANIFEST_URL, MANIFEST_SIG_URL, BUNDLE_URL
+AB_NETWORK_TIMEOUT=30                           # connect timeout, seconds
+AB_CURL=curl                                    # test seam
+
 # Factory reset
 AB_DATA_MOUNT=/data                             # wiped; refused unless its own rw mount
 AB_APP_ACCOUNT=micropanel-touch                 # passed to the skeleton script
@@ -51,6 +59,25 @@ AB_REBOOT_DELAY_SECONDS=2                       # 0 reboots synchronously
 
 `AB_RUNTIME_DIR` is also read by whatever shows progress to a user, so a board
 with a UI must keep the two in agreement.
+
+### About update authenticity
+
+Every release is authenticated by a **raw ed25519 signature over its manifest**,
+checked against a public key pinned in the image. There is no certificate
+anywhere in that path — no X.509, no validity window — which is deliberate: a
+device with no RTC and no network still verifies a signed release correctly,
+so a permanently offline unit stays updatable from a USB stick forever. The
+signature is a mandatory bundle member and is verified *before* any manifest
+field is parsed, on every route.
+
+That is also why the transport is not a trust boundary here. `BUNDLE_URL` may
+be plain HTTP — as it is when rehearsing against `ab-serve-release.sh` — without
+weakening what a device will accept; TLS buys confidentiality and availability,
+not authenticity. A shipping image should still use https.
+
+An adopting board that overrides `AB_CURL` should point it at a single process:
+the engine stops a download by signalling that process, and a wrapper script
+that lingers as a parent can leave a child holding the engine's lock.
 
 ### About the factory reset
 

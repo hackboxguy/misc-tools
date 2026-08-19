@@ -47,6 +47,15 @@ settle_seconds=$(ab_setting "${AB_SETTLE_SECONDS:-}" AB_SETTLE_SECONDS 30)
 wait_seconds=$(ab_setting "${AB_COMMIT_WAIT_SECONDS:-}" AB_COMMIT_WAIT_SECONDS 120)
 
 die() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
+
+# Elapsed time must never come from the wall clock here. An appliance with no
+# RTC boots in the past and jumps forward when NTP syncs - and a factory reset
+# makes that jump larger, because the wipe removes the saved clock state. A
+# forward jump mid-operation would otherwise look like minutes of elapsed time
+# that never happened. /proc/uptime is monotonic and needs no external time
+# source at all, which is also what a permanently offline device requires.
+monotonic_seconds() { awk '{ printf "%d\n", $1 }' /proc/uptime; }
+
 is_positive_integer() { [[ ${1:-} =~ ^[1-9][0-9]*$ ]]; }
 
 load_state() {
@@ -158,9 +167,9 @@ restarts=$(restart_counts) || exit 0
 for pair in $restarts; do
     [ "${pair#*=}" = 0 ] || exit 0
 done
-deadline=$(( $(date +%s) + wait_seconds ))
+deadline=$(( $(monotonic_seconds) + wait_seconds ))
 while ! candidate_is_healthy "$restarts"; do
-    [ "$(date +%s)" -lt "$deadline" ] || exit 0
+    [ "$(monotonic_seconds)" -lt "$deadline" ] || exit 0
     sleep 1
 done
 for _ in $(seq 1 "$settle_seconds"); do

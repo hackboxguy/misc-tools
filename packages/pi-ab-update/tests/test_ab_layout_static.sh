@@ -151,6 +151,20 @@ marker_line=$(grep -nF 'mv -f "$temporary" "$marker"' "$engine/ab-factory-reset"
 # at whatever unrelated reboot comes next, possibly days later.
 grep -Fq 'scheduled reboot failed' "$engine/ab-factory-reset"
 
+# Elapsed-time checks must be monotonic. An RTC-less appliance boots in the
+# past and jumps forward when NTP syncs - and a factory reset enlarges that
+# jump - which would otherwise look like minutes of elapsed time that never
+# happened: a spurious stall abort mid-write, or a commit deadline that expires
+# early and drops a healthy candidate.
+for timed_script in "$engine/ab-system-update" "$engine/ab-update-commit"; do
+    grep -Fq 'monotonic_seconds()' "$timed_script"
+    grep -Fq '/proc/uptime' "$timed_script"
+    if grep -Fq 'date +%s' "$timed_script"; then
+        echo "wall-clock elapsed time in $timed_script" >&2
+        exit 1
+    fi
+done
+
 # The health predicate is data plus one hook, not hardcoded unit names.
 grep -Fq 'AB_HEALTH_UNITS' "$engine/ab-update-commit"
 grep -Fq 'health_hook' "$engine/ab-update-commit"

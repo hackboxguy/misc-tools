@@ -1,0 +1,185 @@
+#!/bin/bash
+# pi-ab-update: ask the configured release source whether an update exists.
+#
+# This fetches only the manifest and its signature - a few hundred bytes - and
+# never the payload. It verifies the signature against the device's pinned key
+# *before* reading any field, so the answer it reports is an authenticated one:
+# an attacker who controls the network can stop this working, but cannot make
+# it offer a release the key did not sign.
+#
+# The result is published as a bounded, world-readable runtime file for the
+# HMI, in the same shape as the update progress file. All state and authority
+# remain root-only.
+set -Eeuo pipefail
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL=C
+
+ab_config=${AB_UPDATE_CONFIG:-/usr/lib/pi-ab-update/ab-update.conf}
+
+ab_config_value() { # $1=key
+    [ -f "$ab_config" ] && [ ! -L "$ab_config" ] || return 0
+    awk -v key="$1" '
+        /^[[:space:]]*#/ { next }
+        index($0, key "=") == 1 { value = substr($0, length(key) + 2); if (value != "") { print value; found = 1 } }
+        END { exit !found }
+    ' "$ab_config" 2>/dev/null || true
+}
+ab_setting() { # $1=env, $2=key, $3=default
+    if [ -n "$1" ]; then printf '%s\n' "$1"; return; fi
+    local configured; configured=$(ab_config_value "$2")
+    if [ -n "$configured" ]; then printf '%s\n' "$configured"; return; fi
+    printf '%s\n' "$3"
+}
+
+product=$(ab_setting "${AB_PRODUCT:-}" AB_PRODUCT pi-ab-update)
+image_manifest=$(ab_setting "${AB_IMAGE_MANIFEST:-}" AB_MANIFEST /usr/lib/pi-ab-update/image-manifest.env)
+variant_key=$(ab_setting "${AB_VARIANT_KEY:-}" AB_VARIANT_KEY PANEL_VARIANT)
+runtime_dir=$(ab_setting "${AB_RUNTIME_DIR:-}" AB_RUNTIME_DIR /run/ab-update)
+signing_key=$(ab_setting "${AB_SIGNING_KEY:-}" AB_SIGNING_KEY /usr/lib/pi-ab-update/update-signing-key.pub)
+source_config=$(ab_setting "${AB_SOURCE_CONFIG:-}" AB_SOURCE_CONFIG /usr/lib/pi-ab-update/update-source.conf)
+network_timeout=$(ab_setting "${AB_NETWORK_TIMEOUT:-}" AB_NETWORK_TIMEOUT 30)
+curl_command=${AB_CURL:-curl}
+result_file=${AB_CHECK_RESULT_FILE:-$runtime_dir/check}
+manifest_max_bytes=65536
+
+work=""
+cleanup() {
+    local status=$?
+    trap - EXIT HUP INT TERM
+    [ -z "$work" ] || rm -rf -- "$work"
+    exit "$status"
+}
+trap cleanup EXIT HUP INT TERM
+
+log_diagnostic() {
+    printf '[ERROR] %s\n' "$*" >&2
+    command -v logger >/dev/null 2>&1 && \
+        logger -t "ab-update-check[$product]" -p daemon.err -- "$*" || true
+}
+
+publish() { # $1=state, $2=version (may be empty)
+    local temporary
+    install -d -m0755 "$runtime_dir"
+    temporary=$(mktemp "$runtime_dir/.check.XXXXXX")
+    printf 'state=%s\nversion=%s\n' "$1" "${2:-}" > "$temporary"
+    chmod 0644 "$temporary"
+    mv -f "$temporary" "$result_file"
+}
+
+die() { # $1=state, rest=message
+    local state=$1; shift
+    publish "$state" ""
+    log_diagnostic "$*"
+    exit 1
+}
+
+safe_token() { [[ ${1:-} =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]; }
+safe_boards() { [[ ${1:-} =~ ^[a-z0-9]+(,[a-z0-9]+)*$ ]]; }
+contains_board() { case ",$1," in *",$2,"*) return 0 ;; *) return 1 ;; esac; }
+
+read_exact_value() {
+    awk -v wanted="$2" '
+        index($0, wanted "=") == 1 {
+            if (++count != 1) exit 1
+            value = substr($0, length(wanted) + 2)
+            if (value == "") exit 1
+        }
+        END { if (count != 1 || value == "") exit 1; print value }
+    ' "$1"
+}
+
+clock_is_unsynchronized() {
+    command -v timedatectl >/dev/null 2>&1 || return 1
+    [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" = no ]
+}
+
+source_config_value() { # $1=key
+    [ -f "$source_config" ] && [ ! -L "$source_config" ] || return 1
+    awk -v key="$1" '
+        /^[[:space:]]*#/ { next }
+        index($0, key "=") == 1 { value = substr($0, length(key) + 2); if (value != "") { print value; found = 1 } }
+        END { exit !found }
+    ' "$source_config"
+}
+
+fetch() { # $1=url, $2=destination, $3=max bytes
+    local status=0
+    "$curl_command" --fail --location --silent --show-error \
+        --connect-timeout "$network_timeout" --max-filesize "$3" \
+        --output "$2" "$1" 2>/dev/null || status=$?
+    [ "$status" -eq 0 ] && return 0
+    case "$status" in
+        60|77|35)
+            clock_is_unsynchronized && \
+                die clock 'the release server could not be authenticated and this device has no synchronized clock'
+            die network 'the release server could not be authenticated' ;;
+        6|7|28) die network 'the release server could not be reached' ;;
+        22) die network 'the release server has no release for this device' ;;
+        *) die network "the release check failed (curl status $status)" ;;
+    esac
+}
+
+[ "$#" -eq 0 ] || { printf '%s\n' '[ERROR] update check accepts no arguments' >&2; exit 64; }
+for tool in curl openssl awk mktemp install; do
+    command -v "$tool" >/dev/null 2>&1 || die internal "required tool is unavailable: $tool"
+done
+
+publish checking ""
+
+[ -f "$image_manifest" ] && [ ! -L "$image_manifest" ] || die image 'running image manifest is unavailable'
+running_variant=$(read_exact_value "$image_manifest" "$variant_key") || die image 'running image variant is unavailable'
+running_boards=$(read_exact_value "$image_manifest" SLOT_COMPATIBLE_BOARDS) || die image 'running board allow-list is unavailable'
+running_version=$(read_exact_value "$image_manifest" IMAGE_VERSION) || die image 'running image version is unavailable'
+running_board=${AB_BOARD:-}
+if [ -z "$running_board" ]; then
+    case "$(tr -d '\000' < /proc/device-tree/model 2>/dev/null || true)" in
+        Raspberry\ Pi\ 3*) running_board=pi3 ;;
+        Raspberry\ Pi\ 4*) running_board=pi4 ;;
+        Raspberry\ Pi\ 5*) running_board=pi5 ;;
+        *) die compatibility 'unsupported Raspberry Pi board' ;;
+    esac
+fi
+
+manifest_url=$(source_config_value MANIFEST_URL) || die image 'no release manifest URL is configured'
+signature_url=$(source_config_value MANIFEST_SIG_URL) || die image 'no release signature URL is configured'
+for url in "$manifest_url" "$signature_url"; do
+    case "$url" in http://*|https://*) ;; *) die image 'a configured release URL is not an http(s) URL' ;; esac
+done
+
+[ -f "$signing_key" ] && [ ! -L "$signing_key" ] || die image 'the pinned release signing key is unavailable'
+
+work=$(mktemp -d)
+fetch "$manifest_url" "$work/manifest" "$manifest_max_bytes"
+fetch "$signature_url" "$work/manifest.sig" 4096
+[ -s "$work/manifest" ] && [ -s "$work/manifest.sig" ] || die network 'the release server returned an empty manifest'
+
+# Verify before reading a single field. Transport is not trusted here; this
+# signature is, which is why a plain-HTTP release source is as safe as a TLS
+# one for authenticity - it differs only in who can observe or deny the fetch.
+openssl pkeyutl -verify -pubin -inkey "$signing_key" -rawin \
+    -in "$work/manifest" -sigfile "$work/manifest.sig" >/dev/null 2>&1 || \
+    die signature 'the offered release manifest is not signed by this device''s release key'
+
+offered_version=$(read_exact_value "$work/manifest" version) || die payload 'the offered manifest has no version'
+offered_variant=$(read_exact_value "$work/manifest" variant) || die payload 'the offered manifest has no variant'
+offered_boards=$(read_exact_value "$work/manifest" boards) || die payload 'the offered manifest has no board list'
+offered_format=$(read_exact_value "$work/manifest" format) || die payload 'the offered manifest has no format'
+safe_token "$offered_version" || die payload 'the offered release version is unsafe'
+safe_token "$offered_variant" || die payload 'the offered release variant is unsafe'
+safe_boards "$offered_boards" || die payload 'the offered board list is unsafe'
+[ "$offered_format" = 2 ] || die payload 'the offered release uses an unsupported payload format'
+
+[ "$offered_variant" = "$running_variant" ] || die compatibility 'the offered release is for a different panel image'
+contains_board "$offered_boards" "$running_board" || die compatibility 'the offered release does not support this board'
+
+# Same-version semantics: report up to date and stop. A downgrade is a real
+# offer, because rollback is the recovery path the A/B slots exist for.
+if [ "$offered_version" = "$running_version" ]; then
+    publish up-to-date "$offered_version"
+    printf '[SUCCESS] up to date (%s)\n' "$offered_version"
+    exit 0
+fi
+
+publish available "$offered_version"
+printf '[SUCCESS] update available: %s (running %s)\n' "$offered_version" "$running_version"

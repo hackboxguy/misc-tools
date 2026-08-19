@@ -31,8 +31,36 @@ grep -Fq 'e2label "$target_root" "MP_ROOT_${target_slot}"' "$handler"
 grep -Fq 'boot cmdline template must contain exactly one line' "$handler"
 grep -Fq 'write_update_progress "failed-${class}" 0' "$handler"
 grep -Fq 'write_update_progress failed-internal 0' "$handler"
-grep -Fq 'source|integrity|compatibility|payload|version|stall|boot|target|selector|image|internal' "$handler"
+grep -Fq 'source|signature|network|clock|integrity|compatibility|payload|version|stall|boot|target|selector|image|internal' "$handler"
 ! grep -Fq 'failure_class()' "$handler"
+
+# --- Stage 4: signatures and the network source ---------------------------
+# The manifest signature is a mandatory member, and it is verified before a
+# single manifest field is read: an unsigned or foreign-signed bundle must
+# never reach the parser, on USB or over the network alike.
+grep -Fq "die signature 'update bundle carries no manifest signature'" "$handler"
+grep -Fq 'openssl pkeyutl -verify -pubin -inkey "$signing_key" -rawin' "$handler"
+awk '
+    /openssl pkeyutl -verify/ { verified = NR }
+    /^load_payload_manifest "\$manifest_file"/ { parsed = NR }
+    END { exit !(verified && parsed && verified < parsed) }
+' "$handler"
+# Raw ed25519 over the manifest, with no certificate anywhere: signature
+# checking must not depend on the clock, which is what keeps a permanently
+# offline device updatable from USB forever.
+! grep -Eq 'x509|openssl (verify|smime|cms)|-CAfile' "$handler"
+grep -Fq 'signing_key=$(ab_setting "${AB_SIGNING_KEY:-}" AB_SIGNING_KEY /usr/lib/pi-ab-update/update-signing-key.pub)' "$handler"
+# The download streams straight into the reader - the inactive slot stays the
+# only staging area, exactly as it is for USB.
+grep -Fq 'exec 0< <(exec "$curl_command" --fail --location --silent --show-error' "$handler"
+! grep -Eq -- '--output|-o "\$' "$handler"
+# Curl's status comes from `wait`, never from a file the subshell writes:
+# `set -e` kills that subshell before any such write on the failure paths
+# that matter most.
+grep -Fq 'fetch_pid=$!' "$handler"
+grep -Fq 'fetch_exit_status()' "$handler"
+! grep -Fq 'curl_status_file' "$handler"
+
 grep -Fq "die target 'refusing to overwrite a mounted root partition'" "$handler"
 grep -Fq "die image 'running image manifest is unavailable'" "$handler"
 grep -Fq 'ab_setting "${AB_LOWER_ROOT_MOUNT:-}" AB_LOWER_ROOT_MOUNT /media/root-ro' "$handler"
@@ -74,7 +102,8 @@ grep -Fq "die payload 'update bundle contains a non-regular member'" "$handler"
 ! grep -Fq 'MICROPANEL_LOCAL_UPDATE_ROOT' "$handler"
 
 manifest_line=$(grep -nF '[ "$member_name" = "$bundle_manifest_member" ] || die' "$handler" | cut -d: -f1)
-signature_line=$(grep -nF 'if [ "$member_name" = "$bundle_signature_member" ]; then' "$handler" | cut -d: -f1)
+# Mandatory since Stage 4: the signature is no longer an `if` to be skipped.
+signature_line=$(grep -nF '[ "$member_name" = "$bundle_signature_member" ] ||' "$handler" | cut -d: -f1)
 boot_line=$(grep -nF '[ "$member_name" = "$bundle_boot_member" ] || die' "$handler" | cut -d: -f1)
 rootfs_line=$(grep -nF '[ "$member_name" = "$bundle_rootfs_member" ] || die' "$handler" | cut -d: -f1)
 version_line=$(grep -nF 'die version ' "$handler" | cut -d: -f1)

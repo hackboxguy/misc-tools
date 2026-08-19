@@ -1,7 +1,8 @@
 #!/bin/bash
-# Run every pi-ab-update suite. The two loopback fixtures need root and skip
+# Run every pi-ab-update suite. The three loopback fixtures need root and skip
 # themselves without it, so this is useful both as a quick check and as the
-# full pre-flash gate.
+# full pre-flash gate. The update-check suite starts a local HTTP server on
+# the loopback interface; nothing here reaches the network.
 set -uo pipefail
 
 engine=$(cd "$(dirname "$0")/.." && pwd)
@@ -23,6 +24,7 @@ run 'handler policy'         sh "$engine/tests/test_system_update_handler_policy
 run 'bundle reader'          bash "$engine/tests/test_update_bundle_reader.sh" "$engine/ab-system-update"
 run 'commit policy'          sh "$engine/tests/test_update_commit_policy.sh" "$engine/ab-update-commit" "$engine/ab-update-commit.service"
 run 'commit public status'   sh "$engine/tests/test_update_commit_public_status.sh" "$engine/ab-update-commit"
+run 'update check'           bash "$engine/tests/test_ota_check.sh" "$engine/ab-update-check"
 
 if [ "$(id -u)" -eq 0 ]; then
     run 'handler loopback'   bash "$engine/tests/test_system_update_handler_integration.sh" "$engine/ab-system-update"
@@ -31,7 +33,7 @@ if [ "$(id -u)" -eq 0 ]; then
         "$engine/ab-factory-reset" "$engine/ab-factory-reset-boot" \
         "$engine/../../board-configs/micropanel-touch/packages/micropanel-touch-data-skeleton.sh"
 else
-    printf '\nSKIP: the two loopback fixtures need root (re-run with sudo)\n'
+    printf '\nSKIP: the three loopback fixtures need root (re-run with sudo)\n'
 fi
 
 printf '\n'

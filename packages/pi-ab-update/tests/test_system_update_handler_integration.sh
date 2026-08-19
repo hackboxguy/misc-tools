@@ -20,7 +20,7 @@ fi
 
 for tool in truncate sfdisk losetup mkfs.vfat mkfs.ext4 mount umount mountpoint \
             install dd xz sha256sum stat tar awk grep sync e2label findmnt lsblk \
-            blockdev flock sleep seq; do
+            blockdev flock sleep seq openssl; do
     command -v "$tool" >/dev/null 2>&1 || {
         echo "ERROR: missing test tool: $tool" >&2
         exit 1
@@ -42,9 +42,11 @@ unmount_if_mounted() {
     [ -n "$directory" ] && mountpoint -q "$directory" && umount "$directory"
 }
 
+ota_server_pid=""
 cleanup() {
     local status=$?
     trap - EXIT HUP INT TERM
+    [ -z "$ota_server_pid" ] || kill "$ota_server_pid" 2>/dev/null || true
     unmount_if_mounted "$work/runtime/source" || true
     unmount_if_mounted "$usb_stage" || true
     unmount_if_mounted "$target_root_mount" || true
@@ -126,9 +128,12 @@ printf '%s\n' \
     "rootfs_bytes=$rootfs_bytes" \
     "boot_sha256=$boot_sha256" \
     'format=2' > "$work/bundle/manifest"
-# The reserved signature member is present in every published bundle. Stage 2b
-# accepts and ignores it; Stage 4 verifies it against the pinned public key.
-printf 'reserved format=2 signature member\n' > "$work/bundle/manifest.sig"
+# Since Stage 4 the device verifies this against its pinned key, so the fixture
+# signs for real with a disposable one.
+openssl genpkey -algorithm ed25519 -out "$work/release.key" 2>/dev/null
+openssl pkey -in "$work/release.key" -pubout -out "$work/release.pub" 2>/dev/null
+openssl pkeyutl -sign -inkey "$work/release.key" -rawin \
+    -in "$work/bundle/manifest" -out "$work/bundle/manifest.sig"
 chmod 0644 "$work/bundle"/*
 tar --format=ustar --owner=0 --group=0 --numeric-owner --mtime=@0 \
     -C "$work/bundle" -cf "$work/micropanel-touch-luckfox-ctp.mpupdate" \
@@ -138,6 +143,8 @@ bundle="$work/micropanel-touch-luckfox-ctp.mpupdate"
 # A bundle whose decompressed rootfs differs from its manifest digest by one
 # byte, with every other member left untouched.
 install -d "$work/corrupt"
+# Manifest and signature are copied unchanged: this case must fail on the
+# rootfs digest, not on the signature.
 cp "$work/bundle/manifest" "$work/bundle/manifest.sig" "$work/bundle/boot.tar" "$work/corrupt/"
 xz --decompress --stdout "$work/bundle/rootfs.img.xz" > "$work/corrupt/rootfs.img"
 printf 'X' | dd of="$work/corrupt/rootfs.img" bs=1 seek=$((rootfs_bytes / 2)) conv=notrunc status=none
@@ -208,6 +215,7 @@ run_handler() { # $1=source enum; stdin is the bundle for the `stdin` source
     AB_REBOOT_COMMAND="$reboot_command" \
     AB_LSBLK="$fake_lsblk" \
     AB_BOARD=pi4 \
+    AB_SIGNING_KEY="$work/release.pub" \
         /bin/bash "$handler" "$1"
 }
 
@@ -244,6 +252,7 @@ assert_candidate_armed() { # $1=case label
 
 expect_failure() { # $1=case label $2=expected phase $3=source enum [stdin file]
     local label=$1 phase=$2 source=$3 input=${4:-/dev/null}
+    rm -f "$runtime_dir/progress"
     if run_handler "$source" < "$input" >/dev/null 2>&1; then
         echo "ERROR: $label was accepted" >&2
         exit 1
@@ -352,6 +361,95 @@ fd=os.open(sys.argv[1], os.O_RDONLY|os.O_EXCL); os.close(fd)
 }
 printf '  ok  %-46s -> %s\n' 'failed USB update leaves the device free' 'no stranded mount'
 publish_bundle_to_usb "$usb_one" "$bundle"
+
+# --- 3c. OTA: the same reader, fed by curl over a real HTTP server --------
+# Stage 4's network path is `curl | reader`, so this is the USB path with a
+# different first ten metres. Plain HTTP is faithful here rather than a
+# shortcut: authenticity comes from the pinned signature, so the transport is
+# untrusted either way.
+if command -v python3 >/dev/null 2>&1; then
+    ota_serve="$work/ota"; mkdir -p "$ota_serve"
+    install -m0644 "$bundle" "$ota_serve/bundle.mpupdate"
+    ota_port=8732
+    ( cd "$ota_serve" && exec python3 -m http.server "$ota_port" --bind 127.0.0.1 ) >/dev/null 2>&1 &
+    ota_server_pid=$!
+    for _ in $(seq 1 40); do
+        curl -fsS "http://127.0.0.1:$ota_port/" >/dev/null 2>&1 && break
+        sleep 0.25
+    done
+    ota_config="$work/update-source.conf"
+    printf 'BUNDLE_URL=http://127.0.0.1:%s/bundle.mpupdate\n' "$ota_port" > "$ota_config"
+
+    reset_target
+    AB_SOURCE_CONFIG="$ota_config" run_handler ota
+    assert_candidate_armed 'bundle streamed from HTTP armed candidate B'
+
+    # A download cut off mid-stream looks like a malformed bundle to the
+    # reader; it must be reported as the transport failure it actually is.
+    reset_target
+    # Cut three quarters of the way in, which lands inside the rootfs member:
+    # a fixed byte count would silently copy this small fixture whole.
+    head -c "$(( $(stat -c %s "$bundle") * 3 / 4 ))" "$bundle" > "$ota_serve/truncated.mpupdate"
+    printf 'BUNDLE_URL=http://127.0.0.1:%s/truncated.mpupdate\n' "$ota_port" > "$ota_config"
+    if AB_SOURCE_CONFIG="$ota_config" run_handler ota >/dev/null 2>&1; then
+        echo 'ERROR: a truncated download was accepted' >&2; exit 1
+    fi
+    truncated_phase=$(sed -n 's/^phase=//p' "$runtime_dir/progress")
+    case "$truncated_phase" in
+        failed-payload|failed-integrity|failed-network)
+            printf '  ok  %-46s -> %s\n' 'truncated download refused' "$truncated_phase" ;;
+        *) echo "ERROR: truncated download reported $truncated_phase" >&2; exit 1 ;;
+    esac
+
+    # A failure that happens while the download is still in flight must be
+    # reported as itself, not as a transport failure - and must not wait for
+    # the download to finish first. The AB_CURL seam stands in for a slow
+    # release server: it delivers a bundle signed by the wrong key, then
+    # keeps the connection open. The handler should refuse on the signature
+    # within moments; blaming the transport, or blocking for the full
+    # transfer, are both regressions.
+    install -d "$work/foreign"
+    cp "$work/bundle/manifest" "$work/bundle/boot.tar" "$work/bundle/rootfs.img.xz" "$work/foreign/"
+    openssl genpkey -algorithm ed25519 -out "$work/foreign.key" 2>/dev/null
+    openssl pkeyutl -sign -inkey "$work/foreign.key" -rawin \
+        -in "$work/foreign/manifest" -out "$work/foreign/manifest.sig"
+    chmod 0644 "$work/foreign"/*
+    tar --format=ustar --owner=0 --group=0 --numeric-owner --mtime=@0 \
+        -C "$work/foreign" -cf "$work/foreign.mpupdate" \
+        manifest manifest.sig boot.tar rootfs.img.xz
+    cat > "$work/slow-curl" <<SLOW
+#!/bin/sh
+cat "$work/foreign.mpupdate"
+# exec, so this stand-in is a single process like curl is: the handler stops
+# the fetch by signalling it, and a wrapper that lingered as a parent would
+# leave an orphan holding the update lock.
+exec sleep 30
+SLOW
+    chmod 0755 "$work/slow-curl"
+    reset_target
+    slow_started=$SECONDS
+    if AB_CURL="$work/slow-curl" AB_SOURCE_CONFIG="$ota_config" run_handler ota >/dev/null 2>&1; then
+        echo 'ERROR: a bundle signed by an untrusted key was accepted' >&2; exit 1
+    fi
+    slow_elapsed=$((SECONDS - slow_started))
+    slow_phase=$(sed -n 's/^phase=//p' "$runtime_dir/progress")
+    [ "$slow_phase" = failed-signature ] || {
+        echo "ERROR: mid-download signature failure reported $slow_phase" >&2; exit 1; }
+    [ "$slow_elapsed" -lt 20 ] || {
+        echo "ERROR: refusal waited ${slow_elapsed}s for the download to finish" >&2; exit 1; }
+    printf '  ok  %-46s -> %s (%ss)\n' 'mid-download failure not blamed on transport' \
+        "$slow_phase" "$slow_elapsed"
+
+    # Server gone entirely.
+    reset_target
+    kill "$ota_server_pid" 2>/dev/null || true
+    wait "$ota_server_pid" 2>/dev/null || true   # 143 from our own TERM is expected
+    ota_server_pid=""
+    printf 'BUNDLE_URL=http://127.0.0.1:%s/bundle.mpupdate\n' "$ota_port" > "$ota_config"
+    AB_SOURCE_CONFIG="$ota_config" expect_failure 'release server unreachable' failed-network ota
+else
+    echo '  skip  OTA cases: python3 is unavailable'
+fi
 
 # --- 4. FAT32 happy path, zero preparation --------------------------------
 reset_target

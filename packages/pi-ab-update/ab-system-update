@@ -66,6 +66,18 @@ lsblk_command=${AB_LSBLK:-lsblk}
 # phase, so it detects its own stall instead of relying on the caller's
 # ceiling. Every other phase remains covered by that ceiling.
 stall_seconds=$(ab_setting "${AB_STALL_SECONDS:-}" AB_STALL_SECONDS 300)
+# The release public key is pinned in the image at build time. Verification is
+# a raw ed25519 check over the manifest bytes - deliberately not an X.509
+# chain, so it has no validity window and works on a device whose clock is
+# wrong or has never been set. That is what keeps a permanently offline
+# appliance updatable from USB forever. Do not add a certificate or an expiry
+# here; see the plan's §7.
+signing_key=$(ab_setting "${AB_SIGNING_KEY:-}" AB_SIGNING_KEY /usr/lib/pi-ab-update/update-signing-key.pub)
+# Root-owned, written at image build. A URL never comes from a client - the
+# broker's request is a source *kind*, not an address.
+source_config=$(ab_setting "${AB_SOURCE_CONFIG:-}" AB_SOURCE_CONFIG /usr/lib/pi-ab-update/update-source.conf)
+curl_command=${AB_CURL:-curl}
+network_timeout=$(ab_setting "${AB_NETWORK_TIMEOUT:-}" AB_NETWORK_TIMEOUT 30)
 
 # Bundle policy. Names are exact, order is exact, and the two staged members
 # are bounded so a hostile bundle cannot exhaust the tmpfs runtime directory.
@@ -93,6 +105,9 @@ manifest_file=""
 signature_file=""
 boot_archive=""
 bundle_file=""
+fetch_pid=""
+fetch_status=""
+source_kind=""
 failure_reported=0
 lock_fd=""
 lock_held=0
@@ -113,7 +128,7 @@ trap 'internal_failure_context="line ${LINENO}: ${BASH_COMMAND}"' ERR
 
 valid_failure_class() {
     case "$1" in
-        source|integrity|compatibility|payload|version|stall|boot|target|selector|image|internal) return 0 ;;
+        source|signature|network|clock|integrity|compatibility|payload|version|stall|boot|target|selector|image|internal) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -126,6 +141,7 @@ die() {
         class=internal
     fi
     message=$*
+    class=$(transport_class "$class")
     # Publish only a fixed failure class for the unprivileged UI, never device
     # paths or image-controlled text. The detail goes to the root-only journal.
     write_update_progress "failed-${class}" 0 >/dev/null 2>&1 || true
@@ -133,7 +149,63 @@ die() {
     log_diagnostic "$message"
     exit 1
 }
-usage() { printf '%s\n' '[ERROR] system update handler requires one source: usb' >&2; exit 64; }
+usage() { printf '%s\n' '[ERROR] system update handler requires one source: usb|ota' >&2; exit 64; }
+
+source_config_value() { # $1=key
+    [ -f "$source_config" ] && [ ! -L "$source_config" ] || return 1
+    awk -v key="$1" '
+        /^[[:space:]]*#/ { next }
+        index($0, key "=") == 1 { value = substr($0, length(key) + 2); if (value != "") { print value; found = 1 } }
+        END { exit !found }
+    ' "$source_config"
+}
+
+# A TLS failure on a device whose clock has never been set is a clock problem,
+# not a certificate problem, and saying so is the difference between a
+# one-minute diagnosis and an afternoon. Only claim it when both are true.
+clock_is_unsynchronized() {
+    command -v timedatectl >/dev/null 2>&1 || return 1
+    [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" = no ]
+}
+
+# Curl's exit status, but only once it has one. Asking `wait` for it while the
+# download is still running would block until the whole bundle had arrived, so
+# a failure that has nothing to do with the transport - a bad signature, read
+# a few kilobytes in - must not consult it. A process that has exited but not
+# been reaped is a zombie and still answers `kill -0`, hence the state check.
+fetch_terminated() {
+    [ -n "${fetch_pid:-}" ] || return 1
+    kill -0 "$fetch_pid" 2>/dev/null || return 0
+    [ "$(awk '{ n = split($0, after, ") "); split(after[n], f, " "); print f[1] }' \
+         "/proc/$fetch_pid/stat" 2>/dev/null)" = Z
+}
+
+fetch_exit_status() { # prints curl's exit status, or nothing if not knowable
+    if [ -z "$fetch_status" ]; then
+        fetch_terminated || return 1
+        set +e; wait "$fetch_pid" 2>/dev/null; fetch_status=$?; set -e
+    fi
+    printf '%s\n' "$fetch_status"
+}
+
+# A download that dies part way through looks exactly like a malformed bundle
+# to the reader, because that is all the reader can see. When the transport is
+# what failed, report the transport - a "malformed payload" message would send
+# an operator to inspect a release that is perfectly fine.
+transport_class() { # $1=class the reader chose; prints the class to publish
+    local chosen=$1 status
+    [ "${source_kind:-}" = ota ] || { printf '%s\n' "$chosen"; return; }
+    case "$chosen" in
+        payload|integrity|internal|signature) ;;
+        *) printf '%s\n' "$chosen"; return ;;
+    esac
+    status=$(fetch_exit_status) || { printf '%s\n' "$chosen"; return; }
+    [ "$status" -ne 0 ] || { printf '%s\n' "$chosen"; return; }
+    case "$status" in
+        60|77|35) clock_is_unsynchronized && printf 'clock\n' || printf 'network\n' ;;
+        *) printf 'network\n' ;;
+    esac
+}
 
 # `die` inside a command substitution publishes its class from a subshell, so
 # the surrounding `failure_reported` flag never sees it. The published file is
@@ -155,6 +227,12 @@ cleanup() {
     if [ -n "${stream_pid:-}" ] && kill -0 "$stream_pid" 2>/dev/null; then
         kill -TERM "$stream_pid" 2>/dev/null || true
         wait "$stream_pid" 2>/dev/null || true
+    fi
+    # A download still in flight would otherwise keep pulling bytes for as
+    # long as the release server is willing to send them.
+    if [ -n "${fetch_pid:-}" ] && kill -0 "$fetch_pid" 2>/dev/null; then
+        kill -TERM "$fetch_pid" 2>/dev/null || true
+        wait "$fetch_pid" 2>/dev/null || true
     fi
     [ -z "$hash_pid" ] || wait "$hash_pid" 2>/dev/null || true
     [ -z "$count_pid" ] || wait "$count_pid" 2>/dev/null || true
@@ -539,10 +617,10 @@ case "$1" in
     # `usb` is the only source the typed broker can request. `stdin` is the
     # root-only bench and OTA-precursor path: it proves the reader is
     # pipe-capable and is exactly what Stage 4 will feed with `curl |`.
-    usb|stdin) source_kind=$1 ;;
+    usb|ota|stdin) source_kind=$1 ;;
     *) usage ;;
 esac
-for tool in mount umount mountpoint findmnt lsblk blkid blockdev dd od stat date tee sha256sum wc xz tar e2fsck e2label awk sed tr grep install mktemp realpath basename sync flock; do
+for tool in mount umount mountpoint findmnt lsblk blkid blockdev dd od stat date tee sha256sum wc xz tar e2fsck e2label openssl awk sed tr grep install mktemp realpath basename sync flock; do
     command -v "$tool" >/dev/null 2>&1 || die internal "required updater tool is unavailable: $tool"
 done
 acquire_update_lock
@@ -573,6 +651,25 @@ if [ "$source_kind" = usb ]; then
     write_update_progress scanning 0
     discover_usb_bundle
     exec 0< "$bundle_file"
+elif [ "$source_kind" = ota ]; then
+    write_update_progress fetching 0
+    command -v "$curl_command" >/dev/null 2>&1 || die internal 'curl is unavailable for network updates'
+    bundle_url=$(source_config_value BUNDLE_URL) || die image 'no release bundle URL is configured'
+    case "$bundle_url" in
+        http://*|https://*) ;;
+        *) die image 'the configured release bundle URL is not an http(s) URL' ;;
+    esac
+    # Straight into the reader: the bundle is never written to storage or RAM
+    # first. The inactive slot is the only staging area, exactly as on USB, and
+    # an interrupted download leaves the same dirty unlabelled slot a failed
+    # USB write does.
+    # `exec` so the subshell *is* curl: its exit status becomes curl's, which
+    # `wait` below reads directly. An earlier version had the subshell record
+    # the status to a file instead, which could never work - `set -e` is in
+    # force inside it, so a failing curl killed the subshell before the write.
+    exec 0< <(exec "$curl_command" --fail --location --silent --show-error \
+                  --connect-timeout "$network_timeout" "$bundle_url" 2>/dev/null)
+    fetch_pid=$!
 fi
 # Bash assigns /dev/null to the standard input of an asynchronous list unless
 # that list carries an explicit redirection, so the streaming stage below needs
@@ -585,24 +682,37 @@ exec 3<&0
 read_bundle_header || die payload 'update bundle is empty'
 [ "$member_name" = "$bundle_manifest_member" ] || die payload 'update bundle must start with its manifest'
 stage_bounded_member "$manifest_file" "$bundle_manifest_max_bytes"
+
+# --- member 2: manifest.sig (mandatory since Stage 4) ---------------------
+read_bundle_header || die payload 'update bundle ends before its manifest signature'
+[ "$member_name" = "$bundle_signature_member" ] || \
+    die signature 'update bundle carries no manifest signature'
+stage_bounded_member "$signature_file" "$bundle_signature_max_bytes"
+[ -s "$signature_file" ] || die signature 'update bundle carries an empty manifest signature'
+
+# Verify *before* parsing: an unverified manifest is attacker-controlled input,
+# and every later check - variant, board, version, and both payload digests -
+# derives its authority from this one signature. Enforced identically for every
+# source: a signature checked only on the network path would leave USB, the
+# path a physically present attacker uses, as the way around it.
+[ -f "$signing_key" ] && [ ! -L "$signing_key" ] || \
+    die image 'the pinned release signing key is unavailable'
+openssl pkeyutl -verify -pubin -inkey "$signing_key" -rawin \
+    -in "$manifest_file" -sigfile "$signature_file" >/dev/null 2>&1 || \
+    die signature 'the update manifest is not signed by this device''s release key'
+
 load_payload_manifest "$manifest_file"
 
 # Manifest-first early abort: a wrong or already-installed release costs a few
-# kilobytes, whether the source is a stick or an OTA stream.
+# hundred bytes, whether the source is a stick or an OTA stream.
 [ "${payload[variant]}" = "$running_variant" ] || die compatibility 'payload variant does not match this panel image'
 contains_board "${payload[boards]}" "$running_board" || die compatibility 'payload does not support this Raspberry Pi board'
+# Downgrades are deliberately permitted (owner decision): only an identical
+# version is refused, so a signed older release remains installable and
+# rollback stays available.
 [ "${payload[version]}" != "$running_version" ] || die version 'the running system already has this release version'
 
-# --- member 2: manifest.sig (optional, reserved for Stage 4) --------------
 read_bundle_header || die payload 'update bundle ends before its boot archive'
-if [ "$member_name" = "$bundle_signature_member" ]; then
-    stage_bounded_member "$signature_file" "$bundle_signature_max_bytes"
-    [ -s "$signature_file" ] || die payload 'update bundle carries an empty manifest signature'
-    # Reserved member: builds sign from the first format=2 release so that no
-    # migration release is needed when Stage 4 turns verification on here.
-    printf '[INFO] manifest signature present; device-side verification lands with Stage 4\n' >&2
-    read_bundle_header || die payload 'update bundle ends before its boot archive'
-fi
 
 # --- member 3: boot.tar ---------------------------------------------------
 [ "$member_name" = "$bundle_boot_member" ] || die payload 'update bundle members are out of order'
@@ -697,6 +807,12 @@ skip_member_padding "$rootfs_member_bytes"
 # padding may follow it.
 if read_bundle_header; then
     die payload 'update bundle has a member after its root filesystem'
+fi
+if [ "$source_kind" = ota ]; then
+    # The archive read to its end, so curl has closed the pipe and its status
+    # is available without blocking.
+    curl_status=$(fetch_exit_status) || curl_status=0
+    [ "$curl_status" = 0 ] || die network "the release download did not complete (curl status $curl_status)"
 fi
 rootfs_sha256=$(tr -d '[:space:]' < "$hash_output")
 rootfs_bytes=$(tr -d '[:space:]' < "$count_output")

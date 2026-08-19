@@ -122,7 +122,11 @@ fetch() { # $1=url, $2=destination, $3=max bytes
     # Curl's own words go to the root-only journal. They are the difference
     # between "network failed" and "this name does not resolve", and they are
     # never shown to the unprivileged client.
-    detail=$(printf '%s' "$detail" | tail -n 1)
+    # curl's first stderr line is its "curl: (N) message" summary; everything
+    # after it is boilerplate. Taking the last line logged "how to fix it,
+    # please visit the webpage mentioned above" instead of "certificate is not
+    # yet valid" - which is the one line that names the actual problem.
+    detail=$(printf '%s' "$detail" | head -n 1)
     # curl prefixes its own messages with "curl: ", so do not add a second.
     case "$detail" in curl:*) ;; *) detail="curl: $detail" ;; esac
     [ -z "$detail" ] || log_diagnostic "$detail"

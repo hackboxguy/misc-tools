@@ -192,7 +192,9 @@ fetch_exit_status() { # prints curl's exit status, or nothing if not knowable
         # host" and "certificate has expired" are both `network` to the UI, and
         # both send an operator somewhere completely different.
         if [ "$fetch_status" -ne 0 ] && [ -s "${fetch_stderr_file:-/nonexistent}" ]; then
-            detail=$(tail -n 1 "$fetch_stderr_file")
+            # The first line is curl's "curl: (N) message" summary; the rest is
+            # boilerplate that names nothing.
+            detail=$(head -n 1 "$fetch_stderr_file")
             # curl prefixes its own messages with "curl: "; do not double it.
             case "$detail" in curl:*) ;; *) detail="curl: $detail" ;; esac
             [ -z "$detail" ] || log_diagnostic "$detail"

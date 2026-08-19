@@ -64,7 +64,9 @@ grep -Fq -- '--speed-time "$network_stall_seconds"' "$handler"
 grep -Fq -- "--proto '=http,https' --proto-redir '=http,https'" "$handler"
 # Curl's own words reach the root-only journal; they are the difference between
 # an unresolvable name and an expired certificate, which are one class to the UI.
-grep -Fq 'log_diagnostic "curl: $detail"' "$handler"
+grep -Fq 'log_diagnostic "$detail"' "$handler"
+# curl already prefixes its own messages; the bench showed "curl: curl: (7) ...".
+grep -Fq 'case "$detail" in curl:*) ;; *) detail="curl: $detail" ;; esac' "$handler"
 # An unreadable certificate store is an image defect. Reporting it as a clock
 # problem would send an operator somewhere there is nothing to fix.
 grep -Fq "77) printf 'image" "$handler"

@@ -328,9 +328,13 @@ install_update_source_config() { # $1=root mount
     asset_bundle="${ab_product}-${variant}.mpupdate"
     install -d -m0755 "$root$engine_lib_dir"
     cat > "$root$engine_lib_dir/update-source.conf" <<EOF
-# Reserved Stage 4 OTA source. Root-owned and unused by the Stage 2b updater;
-# it exists now so enabling OTA needs no new image contract. The URLs are
-# deliberately version-less: the release version lives inside the manifest.
+# Where this device fetches releases. Root-owned: the update engine reads it,
+# and a client can never supply a URL. The asset names are deliberately
+# version-less because the release version lives inside the signed manifest, so
+# publishing a new release needs no change here. A release is trusted because of
+# that signature and not because of how it arrived, which is why a plain-http
+# source is usable for a bench rehearsal - though a shipping image should not
+# carry one.
 MANIFEST_URL=${update_release_url_template//@ASSET@/$asset_manifest}
 MANIFEST_SIG_URL=${update_release_url_template//@ASSET@/$asset_signature}
 BUNDLE_URL=${update_release_url_template//@ASSET@/$asset_bundle}

@@ -1047,6 +1047,24 @@ run_post_image_hook() {
 }
 
 # ------------------------------------------------------------------------------
+# Stage: verify the A/B image
+# ------------------------------------------------------------------------------
+# The image written to a card was the one nobody checked: this verifier ran only
+# inside run_payload, so a build without --payload - exactly the one you flash -
+# shipped unverified. Running it here also means a bad image is caught before a
+# payload is cut from it.
+run_verify_ab_image() {
+    [ "$DRY_RUN" = "1" ] && return 0
+    [ "$AB_LAYOUT" = "1" ] || return 0
+    [ -f "$FINAL_IMG" ] || return 0
+    [ -x "$PAYLOAD_IMAGE_VERIFIER" ] || die "A/B image verifier is unavailable: $PAYLOAD_IMAGE_VERIFIER"
+    stage_banner "Stage 4b: Verify A/B image"
+    MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" \
+        AB_MANIFEST_PATH="${AB_MANIFEST_PATH:-}" AB_ASSERTIONS="$AB_ASSERTIONS_PATH" \
+        "$PAYLOAD_IMAGE_VERIFIER" "$FINAL_IMG"
+}
+
+# ------------------------------------------------------------------------------
 # Stage: unsigned A/B update payload
 # ------------------------------------------------------------------------------
 run_payload() {
@@ -1170,6 +1188,7 @@ main() {
         run_stage_kernel
     fi
     run_stage_apps
+    run_verify_ab_image
     run_payload
 
     stage_banner "Build complete"

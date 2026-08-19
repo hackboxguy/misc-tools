@@ -193,7 +193,9 @@ fetch_exit_status() { # prints curl's exit status, or nothing if not knowable
         # both send an operator somewhere completely different.
         if [ "$fetch_status" -ne 0 ] && [ -s "${fetch_stderr_file:-/nonexistent}" ]; then
             detail=$(tail -n 1 "$fetch_stderr_file")
-            [ -z "$detail" ] || log_diagnostic "curl: $detail"
+            # curl prefixes its own messages with "curl: "; do not double it.
+            case "$detail" in curl:*) ;; *) detail="curl: $detail" ;; esac
+            [ -z "$detail" ] || log_diagnostic "$detail"
         fi
     fi
     printf '%s\n' "$fetch_status"

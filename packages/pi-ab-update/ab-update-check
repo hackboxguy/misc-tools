@@ -122,7 +122,10 @@ fetch() { # $1=url, $2=destination, $3=max bytes
     # Curl's own words go to the root-only journal. They are the difference
     # between "network failed" and "this name does not resolve", and they are
     # never shown to the unprivileged client.
-    [ -z "$detail" ] || log_diagnostic "curl: $(printf '%s' "$detail" | tail -n 1)"
+    detail=$(printf '%s' "$detail" | tail -n 1)
+    # curl prefixes its own messages with "curl: ", so do not add a second.
+    case "$detail" in curl:*) ;; *) detail="curl: $detail" ;; esac
+    [ -z "$detail" ] || log_diagnostic "$detail"
     case "$status" in
         # 77 is an unreadable CA bundle - an image defect, not a clock problem.
         # Telling the operator to set the time would send them somewhere there

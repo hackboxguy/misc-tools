@@ -257,6 +257,7 @@ install_update_source_config() { # $1=root mount
     install -D -m0644 -o root -g root "$update_signing_public_key" \
         "$root/usr/lib/micropanel-touch/update-signing-key.pub"
     asset_manifest="micropanel-touch-${variant}.manifest"
+    asset_signature="micropanel-touch-${variant}.manifest.sig"
     asset_bundle="micropanel-touch-${variant}.mpupdate"
     install -d -m0755 "$root/usr/lib/micropanel-touch"
     cat > "$root/usr/lib/micropanel-touch/update-source.conf" <<EOF
@@ -264,6 +265,7 @@ install_update_source_config() { # $1=root mount
 # it exists now so enabling OTA needs no new image contract. The URLs are
 # deliberately version-less: the release version lives inside the manifest.
 MANIFEST_URL=${update_release_url_template//@ASSET@/$asset_manifest}
+MANIFEST_SIG_URL=${update_release_url_template//@ASSET@/$asset_signature}
 BUNDLE_URL=${update_release_url_template//@ASSET@/$asset_bundle}
 EOF
     chmod 0644 "$root/usr/lib/micropanel-touch/update-source.conf"

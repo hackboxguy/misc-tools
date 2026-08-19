@@ -125,6 +125,7 @@ MICROPANEL_TOUCH_REVISION="$fixture_app_revision" "$verifier" "$image"
 asset_prefix="$work/payload/micropanel-touch-luckfox-ctp"
 bundle="$asset_prefix.mpupdate"
 manifest="$asset_prefix.manifest"
+manifest_signature="$asset_prefix.manifest.sig"
 failing_bin="$work/failing-bin"
 install -d "$failing_bin"
 printf '%s\n' '#!/bin/sh' 'exit 1' > "$failing_bin/xz"
@@ -157,10 +158,12 @@ printf '%s\n' 'obsolete payload artifact' > "$manifest"
 printf '%s\n' 'obsolete payload artifact' > "$bundle"
 "$payload_generator" --image="$image" --output-dir="$work/payload" \
     --version=fixture-1 --variant=luckfox-ctp --boards=pi4 --signing-key="$release_key"
-[ -f "$bundle" ] && [ -f "$manifest" ]
-# The retired format=1 triplet must not reappear beside the published assets.
-[ "$(find "$work/payload" -maxdepth 1 -type f | wc -l)" -eq 2 ] || {
-    echo 'ERROR: the payload directory holds more than the two published assets' >&2
+[ -f "$bundle" ] && [ -f "$manifest" ] && [ -f "$manifest_signature" ]
+# Exactly three published assets: bundle, standalone manifest, and the detached
+# signature Stage 4's check step needs beside it. The retired format=1 triplet
+# must not reappear.
+[ "$(find "$work/payload" -maxdepth 1 -type f | wc -l)" -eq 3 ] || {
+    echo 'ERROR: the payload directory does not hold exactly the three published assets' >&2
     ls -1 "$work/payload" >&2
     exit 1
 }
@@ -192,6 +195,16 @@ MICROPANEL_RELEASE_KEY="$release_key" "$release_key_tool" \
     echo 'ERROR: the published bundle signature does not verify' >&2
     exit 1
 }
+# The detached asset must be the same signature, and must verify against the
+# standalone manifest on its own - that is exactly what Stage 4's check step
+# will do before it offers an update.
+cmp "$work/unbundled/manifest.sig" "$manifest_signature"
+MICROPANEL_RELEASE_KEY="$release_key" "$release_key_tool" \
+    verify "$manifest" "$manifest_signature" || {
+    echo 'ERROR: the detached signature does not verify the standalone manifest' >&2
+    exit 1
+}
+
 boot_tar="$work/unbundled/boot.tar"
 rootfs="$work/unbundled/rootfs.img.xz"
 
@@ -261,4 +274,24 @@ if tar -tf "$boot_tar" | grep -Fqx './cmdline.txt'; then
 fi
 tar -xOf "$boot_tar" ./cmdline.txt.template | tr ' ' '\n' | \
     grep -Fqx 'root=LABEL=@MICROPANEL_SLOT@'
+
+# O-05: version-less asset names mean a second release in the same directory
+# would silently replace the first. Run this last: a republish legitimately
+# changes the artifact digests (e2label bumps the superblock write time), so it
+# would invalidate the extracted copies the assertions above compare against.
+if "$payload_generator" --image="$image" --output-dir="$work/payload" \
+    --version=fixture-2 --variant=luckfox-ctp --boards=pi4 \
+    --signing-key="$release_key" >/dev/null 2>&1; then
+    echo 'ERROR: a different release was published over an existing one' >&2
+    exit 1
+fi
+grep -Fqx 'version=fixture-1' "$manifest" || {
+    echo 'ERROR: the refused publish damaged the existing release' >&2
+    exit 1
+}
+# Republishing the same version stays intentional and allowed.
+"$payload_generator" --image="$image" --output-dir="$work/payload" \
+    --version=fixture-1 --variant=luckfox-ctp --boards=pi4 --signing-key="$release_key"
+grep -Fqx 'version=fixture-1' "$manifest"
+[ "$(find "$work/payload" -maxdepth 1 -type f | wc -l)" -eq 3 ]
 echo "A/B finalizer integration test passed"

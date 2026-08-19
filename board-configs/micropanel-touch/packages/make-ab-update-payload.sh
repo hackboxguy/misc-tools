@@ -8,12 +8,20 @@
 # `releases/latest/download/` URLs are stable; the real version lives inside
 # the manifest):
 #
-#   micropanel-touch-<variant>.mpupdate   outer ustar bundle, fixed order:
-#                                           1 manifest
-#                                           2 manifest.sig
-#                                           3 boot.tar
-#                                           4 rootfs.img.xz   (last, streamed)
-#   micropanel-touch-<variant>.manifest   standalone copy for cheap checks
+#   micropanel-touch-<variant>.mpupdate      outer ustar bundle, fixed order:
+#                                              1 manifest
+#                                              2 manifest.sig
+#                                              3 boot.tar
+#                                              4 rootfs.img.xz  (last, streamed)
+#   micropanel-touch-<variant>.manifest      standalone copy for cheap checks
+#   micropanel-touch-<variant>.manifest.sig  its detached signature
+#
+# The standalone signature is published from the first format=2 release for the
+# same reason the bundle carries one: Stage 4's check step verifies the tiny
+# manifest *before* offering an update, so it needs a signature it can fetch
+# alongside it. Publishing it only when Stage 4 lands would leave every release
+# in between unverifiable by that step — exactly the migration gap that signing
+# from day one exists to avoid.
 #
 # The former format=1 triplet is now a build intermediate only.
 set -euo pipefail
@@ -82,6 +90,7 @@ boot_mount=""
 work=""
 bundle_publish=""
 manifest_publish=""
+signature_publish=""
 hash_fifo=""
 count_fifo=""
 hash_pid=""
@@ -119,7 +128,7 @@ cleanup() {
         fi
     fi
     [ -z "$loop" ] || losetup -d "$loop" 2>/dev/null || true
-    rm -f -- "$bundle_publish" "$manifest_publish"
+    rm -f -- "$bundle_publish" "$signature_publish" "$manifest_publish"
     rm -f -- "$hash_fifo" "$count_fifo"
     [ -z "$work" ] || rm -rf "$work"
     exit "$status"
@@ -189,12 +198,29 @@ asset_prefix="micropanel-touch-${variant}"
 mkdir -p "$output_dir"
 bundle="$output_dir/${asset_prefix}.mpupdate"
 manifest="$output_dir/${asset_prefix}.manifest"
-for destination in "$bundle" "$manifest"; do
+manifest_signature="$output_dir/${asset_prefix}.manifest.sig"
+for destination in "$bundle" "$manifest" "$manifest_signature"; do
     [ ! -d "$destination" ] || {
         echo "ERROR: payload destination is a directory: $destination" >&2
         exit 1
     }
 done
+
+# O-05: version-less asset names mean a second release in the same directory
+# silently replaces the first. Republishing the same version is intentional and
+# still allowed; replacing a different one is almost always a forgotten
+# --payload-dir.
+if [ -f "$manifest" ]; then
+    existing_version=$(awk -F= '$1 == "version" { print $2; exit }' "$manifest" 2>/dev/null || true)
+    if [ -n "$existing_version" ] && [ "$existing_version" != "$version" ]; then
+        cat >&2 <<EOF
+ERROR: $output_dir already holds release $existing_version.
+       Publishing $version here would silently replace it, because asset names
+       are deliberately version-less. Use a per-version --payload-dir.
+EOF
+        exit 1
+    fi
+fi
 
 rootfs_tmp="$work/bundle/rootfs.img.xz"
 rootfs_digest="$work/rootfs.sha256"
@@ -299,14 +325,20 @@ tar --format=ustar --owner=0 --group=0 --numeric-owner --mtime=@0 \
 # checked. Publishing the standalone manifest last makes a partially
 # interrupted publish fail closed for a future "check for updates" reader.
 bundle_publish=$(mktemp "$output_dir/.${asset_prefix}.mpupdate.XXXXXX")
+signature_publish=$(mktemp "$output_dir/.${asset_prefix}.manifest.sig.XXXXXX")
 manifest_publish=$(mktemp "$output_dir/.${asset_prefix}.manifest.XXXXXX")
 install -m0644 "$work/bundle.mpupdate" "$bundle_publish"
+install -m0644 "$work/bundle/manifest.sig" "$signature_publish"
 install -m0644 "$work/bundle/manifest" "$manifest_publish"
-sync "$bundle_publish" "$manifest_publish"
+sync "$bundle_publish" "$signature_publish" "$manifest_publish"
+# Publish the manifest last: a reader that finds it can rely on the bundle and
+# the detached signature beside it already being complete.
 mv -f -- "$bundle_publish" "$bundle"
 bundle_publish=""
+mv -f -- "$signature_publish" "$manifest_signature"
+signature_publish=""
 mv -f -- "$manifest_publish" "$manifest"
 manifest_publish=""
-sync "$bundle" "$manifest"
+sync "$bundle" "$manifest_signature" "$manifest"
 
 echo "Created update payload: $bundle"

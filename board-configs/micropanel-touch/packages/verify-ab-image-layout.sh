@@ -165,6 +165,8 @@ require grep -Eq '^BUNDLE_URL=https://[^[:space:]]+\.mpupdate$' \
     "$root_a_mount/usr/lib/micropanel-touch/update-source.conf"
 require grep -Eq '^MANIFEST_URL=https://[^[:space:]]+\.manifest$' \
     "$root_a_mount/usr/lib/micropanel-touch/update-source.conf"
+require grep -Eq '^MANIFEST_SIG_URL=https://[^[:space:]]+\.manifest\.sig$' \
+    "$root_a_mount/usr/lib/micropanel-touch/update-source.conf"
 require test "$(stat -c '%u:%g:%a' "$root_a_mount/usr/lib/micropanel-touch/update-source.conf")" = '0:0:644'
 if [ -n "$expected_micropanel_touch_revision" ]; then
     require grep -Fqx "MICROPANEL_TOUCH_REVISION=$expected_micropanel_touch_revision" \

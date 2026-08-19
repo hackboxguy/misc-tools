@@ -65,7 +65,9 @@
 #   --flash=/dev/sdX    Write the final image to a block device (asks first)
 #   --payload           Create the signed Stage 2b `.mpupdate` update bundle
 #                       beside an A/B image (bundle + standalone manifest)
-#   --payload-dir=DIR   Directory for --payload (default: <output>/payloads)
+#   --payload-dir=DIR   Directory for --payload
+#                       (default: <output>/payloads/<version>; assets are
+#                       version-less, so releases must not share a directory)
 #   --signing-key=FILE  ed25519 release signing key for --payload (default:
 #                       /etc/micropanel-touch/release-signing/ed25519-release.key,
 #                       created on first use)
@@ -361,7 +363,10 @@ fi
 KERNEL_DIR="$WORKSPACE/kernel/$BUILD_ID"
 OUT_DIR="${ARG_OUTPUT_DIR:-$WORKSPACE/out/$ARTIFACT_ID}"
 [[ "$OUT_DIR" != /* ]] && OUT_DIR="$(pwd)/$OUT_DIR"
-PAYLOAD_DIR="${ARG_PAYLOAD_DIR:-$OUT_DIR/payloads}"
+# Asset names are deliberately version-less, so releases must not share a
+# directory. Default to a per-version one rather than relying on the operator
+# remembering --payload-dir; an explicit --payload-dir is still honoured as-is.
+PAYLOAD_DIR="${ARG_PAYLOAD_DIR:-$OUT_DIR/payloads/$VERSION}"
 [[ "$PAYLOAD_DIR" != /* ]] && PAYLOAD_DIR="$(pwd)/$PAYLOAD_DIR"
 TMP_DIR="$WORKSPACE/tmp"
 
@@ -411,6 +416,7 @@ PAYLOAD_VARIANT="${VARIANT:-${DEFAULT_PANEL_VARIANT:-default}}"
 # releases/latest/download/ URLs are stable; the version lives in the manifest.
 PAYLOAD_PREFIX="micropanel-touch-${PAYLOAD_VARIANT}"
 PAYLOAD_BUNDLE="$PAYLOAD_DIR/$PAYLOAD_PREFIX.mpupdate"
+PAYLOAD_SIGNATURE="$PAYLOAD_DIR/$PAYLOAD_PREFIX.manifest.sig"
 PAYLOAD_MANIFEST="$PAYLOAD_DIR/$PAYLOAD_PREFIX.manifest"
 PAYLOAD_GENERATOR="$BOARD_DIR/packages/make-ab-update-payload.sh"
 PAYLOAD_IMAGE_VERIFIER="$BOARD_DIR/packages/verify-ab-image-layout.sh"

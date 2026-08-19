@@ -117,6 +117,16 @@ grep -Fq 'IMAGE_VERSION="$VERSION"' "$builder"
 grep -Fq 'tar --format=ustar --owner=0 --group=0 --numeric-owner --mtime=@0 \' "$payload_generator"
 grep -Fq '    manifest manifest.sig boot.tar rootfs.img.xz' "$payload_generator"
 grep -Eq '^format=2$' "$payload_generator"
+# O-02: the detached signature is published as its own asset from the first
+# format=2 release, so Stage 4's check step has something to verify the tiny
+# manifest against without fetching the bundle.
+grep -Fq 'manifest_signature="$output_dir/${asset_prefix}.manifest.sig"' "$payload_generator"
+grep -Fq 'mv -f -- "$signature_publish" "$manifest_signature"' "$payload_generator"
+grep -Fq 'MANIFEST_SIG_URL=' "$finalizer"
+grep -Fq 'MANIFEST_SIG_URL=' "$verifier"
+# O-05: releases cannot silently share a payload directory.
+grep -Fq 'PAYLOAD_DIR="${ARG_PAYLOAD_DIR:-$OUT_DIR/payloads/$VERSION}"' "$builder"
+grep -Fq 'already holds release' "$payload_generator"
 grep -Fq 'asset_prefix="micropanel-touch-${variant}"' "$payload_generator"
 grep -Fq '"$release_key_tool" sign "$work/bundle/manifest" "$work/bundle/manifest.sig"' "$payload_generator"
 grep -Fq '"$release_key_tool" verify "$work/bundle/manifest" "$work/bundle/manifest.sig"' "$payload_generator"

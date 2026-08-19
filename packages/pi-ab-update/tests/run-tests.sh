@@ -28,6 +28,12 @@ run 'update check'           bash "$engine/tests/test_ota_check.sh" "$engine/ab-
 
 if [ "$(id -u)" -eq 0 ]; then
     run 'handler loopback'   bash "$engine/tests/test_system_update_handler_integration.sh" "$engine/ab-system-update"
+    # These fixtures allocate loop devices back to back. Letting udev finish
+    # with the ones just released costs a moment and removes the most likely
+    # explanation for the layout fixture's rare failures inside a full pass.
+    # Unproven as a fix - the failure has never reproduced on demand - but it
+    # is free, and the fixture now reports where it died if it recurs.
+    command -v udevadm >/dev/null 2>&1 && udevadm settle || true
     run 'layout loopback'    bash "$engine/tests/test_ab_layout_integration.sh"
     run 'factory reset'      bash "$engine/tests/test_factory_reset.sh" \
         "$engine/ab-factory-reset" "$engine/ab-factory-reset-boot" \

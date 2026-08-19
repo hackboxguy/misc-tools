@@ -2,7 +2,15 @@
 # Exercise the A/B finalizer and its verifier using a deliberately tiny,
 # self-contained two-partition apps-image fixture. Run on a Linux host with
 # loop-device and mount privileges: sudo tests/test_ab_layout_integration.sh
-set -euo pipefail
+set -Eeuo pipefail
+
+# This fixture has failed twice inside a full run-tests.sh pass and never once
+# standalone, across a dozen-plus runs - most likely loop-device or udev
+# contention just after the handler fixture releases its own loops, but that is
+# a guess and guessing at a fix would be worse than knowing. `set -e` kills the
+# script silently at whatever command failed, so the next occurrence says where.
+trap 'status=$?; echo "FIXTURE FAILED: line ${LINENO}: ${BASH_COMMAND} (exit ${status})" >&2; \
+      echo "--- loop devices at failure:" >&2; losetup -a >&2 || true' ERR
 
 repo_root=$(cd "$(dirname "$0")/../../.." && pwd)
 engine="$repo_root/packages/pi-ab-update"

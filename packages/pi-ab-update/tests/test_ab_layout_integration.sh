@@ -9,8 +9,11 @@ set -Eeuo pipefail
 # contention just after the handler fixture releases its own loops, but that is
 # a guess and guessing at a fix would be worse than knowing. `set -e` kills the
 # script silently at whatever command failed, so the next occurrence says where.
+# dmesg too: a loop-device teardown race usually leaves a kernel line that
+# `losetup -a` cannot show, and that is the leading hypothesis here.
 trap 'status=$?; echo "FIXTURE FAILED: line ${LINENO}: ${BASH_COMMAND} (exit ${status})" >&2; \
-      echo "--- loop devices at failure:" >&2; losetup -a >&2 || true' ERR
+      echo "--- loop devices at failure:" >&2; losetup -a >&2 || true; \
+      echo "--- kernel tail:" >&2; dmesg 2>/dev/null | tail -20 >&2 || true' ERR
 
 repo_root=$(cd "$(dirname "$0")/../../.." && pwd)
 engine="$repo_root/packages/pi-ab-update"

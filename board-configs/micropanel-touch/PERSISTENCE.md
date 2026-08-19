@@ -52,7 +52,10 @@ older data volume.
   machine-ID restoration so current-boot lookup works), package-manager state,
   cloud-init state, temporary files, NetworkManager DHCP lease database,
   dnsmasq leases, and the system time-sync cache (the Pi has no assumed
-  durable RTC).
+  durable RTC). A factory reset therefore leaves the device booting **in the
+  past** until NTP syncs, and the reset boot's own journal carries stale
+  timestamps — expected, not a fault, but it means anything doing TLS early
+  must expect a clock that is not yet correct.
 - Kernel backlight state, framebuffer/DRM state, and the running application
   process.
 - Removable-media mount state and USB-export bookkeeping. The appliance has no

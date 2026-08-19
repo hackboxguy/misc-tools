@@ -136,6 +136,20 @@ skeleton_line=$(grep -nF 'unable to recreate the durable skeleton' "$engine/ab-f
 # The request writes a marker and reboots; it never wipes anything itself.
 ! grep -Fq 'rm -rf' "$engine/ab-factory-reset"
 grep -Fq '"$reboot_command"' "$engine/ab-factory-reset"
+# The marker is durable the moment it is written, so a request cancelled before
+# the reboot is committed to must withdraw it rather than leave a reset armed.
+# The window is milliseconds wide - too small to drive from outside without
+# wedging the script open with test-only plumbing - so it is pinned here.
+grep -Fq 'withdraw_marker()' "$engine/ab-factory-reset"
+grep -Fq 'trap withdraw_marker HUP INT TERM' "$engine/ab-factory-reset"
+withdraw_line=$(grep -nF 'trap withdraw_marker HUP INT TERM' "$engine/ab-factory-reset" | cut -d: -f1)
+disarm_line=$(grep -nFx 'trap - HUP INT TERM' "$engine/ab-factory-reset" | tail -1 | cut -d: -f1)
+marker_line=$(grep -nF 'mv -f "$temporary" "$marker"' "$engine/ab-factory-reset" | cut -d: -f1)
+[ "$withdraw_line" -lt "$marker_line" ]
+[ "$marker_line" -lt "$disarm_line" ]
+# A detached reboot that fails must leave a trace: otherwise the device resets
+# at whatever unrelated reboot comes next, possibly days later.
+grep -Fq 'scheduled reboot failed' "$engine/ab-factory-reset"
 
 # The health predicate is data plus one hook, not hardcoded unit names.
 grep -Fq 'AB_HEALTH_UNITS' "$engine/ab-update-commit"

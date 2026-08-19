@@ -58,21 +58,46 @@ install -d -m0700 -o root -g root "$state_dir" || die 'durable state directory i
 findmnt -rn -T "$state_dir" -o OPTIONS | grep -Eq '(^|,)rw(,|$)' || \
     die 'durable state is not mounted read-write'
 
+# F-05: between writing the marker and scheduling the reboot there is a brief
+# window where a caller can cancel us. The marker is already durable by then,
+# so without this the reset would still happen next boot while the caller was
+# told it had been cancelled. Withdraw it if we are interrupted before the
+# reboot is committed to; once it is, the reset is going to happen and the
+# marker must stay.
+marker_written=0
+withdraw_marker() {
+    trap - HUP INT TERM
+    [ "$marker_written" -eq 1 ] && rm -f -- "$marker" && sync -f "$state_dir" || true
+    exit 1
+}
+trap withdraw_marker HUP INT TERM
+
 temporary=$(mktemp "$state_dir/.factory-reset.XXXXXX")
 printf 'requested=1\n' > "$temporary"
 chmod 0600 "$temporary"
 sync -f "$temporary"
 mv -f "$temporary" "$marker"
 sync -f "$state_dir"
+marker_written=1
 
 [[ $reboot_delay =~ ^[0-9]+$ ]] || die 'reboot delay must be a whole number of seconds'
+
+# Past this point the reset is committed: cancelling must not withdraw it.
+trap - HUP INT TERM
 
 printf '[SUCCESS] factory reset requested; rebooting to perform it\n'
 if [ "$reboot_delay" -eq 0 ]; then
     "$reboot_command"
 else
     # Detached, so this process can exit and be reaped normally; the marker is
-    # already durable, so nothing depends on this surviving.
-    setsid sh -c 'sleep "$1"; shift; exec "$@"' _ "$reboot_delay" "$reboot_command" \
-        >/dev/null 2>&1 < /dev/null &
+    # already durable, so nothing depends on this surviving. If the reboot
+    # itself fails, say so in the journal: otherwise the device would sit with
+    # a live marker and reset at whatever unrelated reboot came next, possibly
+    # days later, surprising whoever performed it.
+    setsid sh -c '
+        sleep "$1"; shift
+        product="$1"; shift
+        "$@" && exit 0
+        command -v logger >/dev/null 2>&1 &&             logger -t "ab-factory-reset[$product]" -p daemon.err --                 "scheduled reboot failed; the factory reset marker is still set and will run at the next boot"
+    ' _ "$reboot_delay" "$product" "$reboot_command" >/dev/null 2>&1 < /dev/null &
 fi

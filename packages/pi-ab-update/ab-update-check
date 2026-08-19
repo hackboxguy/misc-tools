@@ -185,7 +185,7 @@ fetch "$signature_url" "$work/manifest.sig" 4096
 # one for authenticity - it differs only in who can observe or deny the fetch.
 openssl pkeyutl -verify -pubin -inkey "$signing_key" -rawin \
     -in "$work/manifest" -sigfile "$work/manifest.sig" >/dev/null 2>&1 || \
-    die signature 'the offered release manifest is not signed by this device''s release key'
+    die signature "the offered release manifest is not signed by this device's release key"
 
 offered_version=$(read_exact_value "$work/manifest" version) || die payload 'the offered manifest has no version'
 offered_variant=$(read_exact_value "$work/manifest" variant) || die payload 'the offered manifest has no variant'

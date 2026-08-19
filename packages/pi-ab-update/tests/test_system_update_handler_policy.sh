@@ -39,6 +39,10 @@ grep -Fq 'source|signature|network|clock|integrity|compatibility|payload|version
 # single manifest field is read: an unsigned or foreign-signed bundle must
 # never reach the parser, on USB or over the network alike.
 grep -Fq "die signature 'update bundle carries no manifest signature'" "$handler"
+# The bench showed "this devices release key": `''` inside a single-quoted
+# shell string closes and reopens the quote rather than escaping an apostrophe.
+grep -Fq "not signed by this device's release key" "$handler"
+! grep -Fq "device''s" "$handler"
 grep -Fq 'openssl pkeyutl -verify -pubin -inkey "$signing_key" -rawin' "$handler"
 awk '
     /openssl pkeyutl -verify/ { verified = NR }

@@ -729,7 +729,7 @@ stage_bounded_member "$signature_file" "$bundle_signature_max_bytes"
     die image 'the pinned release signing key is unavailable'
 openssl pkeyutl -verify -pubin -inkey "$signing_key" -rawin \
     -in "$manifest_file" -sigfile "$signature_file" >/dev/null 2>&1 || \
-    die signature 'the update manifest is not signed by this device''s release key'
+    die signature "the update manifest is not signed by this device's release key"
 
 load_payload_manifest "$manifest_file"
 

@@ -199,6 +199,25 @@ private mount namespace, so an SSH-side `mountpoint` check on
 `/run/micropanel-touch-update/source` is meaningless — read
 `/proc/<handler-pid>/mounts` instead.
 
+#### Fix-forward re-check — complete, 2026-08-19
+
+`00.27`/`00.28` (app revision `7c15e30780fb9c07ff00b36a992198f220063e42`) added
+explicit failure classes to the two previously unguarded mounts on the USB
+discovery path, and mirrored handler diagnostics into the root-only journal.
+On the bench: no media reported `failed-source`, a stick without a bundle
+reported `failed-payload`, and a normal `00.27`→`00.28` update from an
+unlabelled exFAT stick committed as usual. `journalctl -t
+micropanel-touch-system-update` now names the cause of a refusal, and stays
+silent on a successful update.
+
+Reading the handler back out of a built image and comparing it to the source is
+a cheap check worth keeping:
+
+```sh
+sudo losetup --find --show --partscan --read-only <image>   # then mount p5 ro
+sha256sum <mount>/opt/micropanel-touch/usr/bin/micropanel-touch-system-update
+```
+
 #### Latest Stage 2 bench evidence — complete, 2026-08-18
 
 `misc-tools` commit `bde05af` generated the checksum-safe Luckfox CTP

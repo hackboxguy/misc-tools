@@ -190,6 +190,25 @@ printf '%s\n' 'obsolete payload artifact' > "$bundle"
     exit 1
 }
 
+# The device refuses a bundle whose second member is not the manifest
+# signature, so the generator's member order is a contract between the two
+# halves and not an implementation detail. Read it back off the real bundle
+# rather than trusting that both sides were edited together, and verify the
+# embedded signature with the same public key the image pins.
+read_member_name() { # $1=bundle, $2=zero-based member index
+    dd if="$1" bs=512 skip="$2" count=1 status=none | dd bs=100 count=1 status=none 2>/dev/null |
+        tr -d '\0'
+}
+[ "$(read_member_name "$bundle" 0)" = manifest ] || {
+    echo 'ERROR: the bundle does not start with its manifest' >&2; exit 1; }
+embedded_manifest_blocks=$(( ( $(stat -c %s "$manifest") + 511 ) / 512 ))
+[ "$(read_member_name "$bundle" $((1 + embedded_manifest_blocks)))" = manifest.sig ] || {
+    echo 'ERROR: the bundle does not carry its signature as the second member' >&2; exit 1; }
+openssl pkeyutl -verify -pubin -inkey "$release_key.pub" -rawin \
+    -in "$manifest" -sigfile "$manifest_signature" >/dev/null 2>&1 || {
+    echo 'ERROR: the published manifest signature does not verify' >&2; exit 1; }
+echo '  ok  generator emits manifest then manifest.sig, and it verifies'
+
 grep -Fqx 'version=fixture-1' "$manifest"
 grep -Fqx 'variant=luckfox-ctp' "$manifest"
 grep -Fqx 'boards=pi4' "$manifest"

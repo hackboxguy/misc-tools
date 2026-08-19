@@ -1,0 +1,124 @@
+#!/bin/bash
+# pi-ab-update: perform a requested factory reset, early in boot.
+#
+# Ordered after the durable filesystem is mounted and before anything that
+# reads it, so the wipe never races a consumer. The marker is cleared last:
+# every step before that is idempotent, so a power cut at any point simply
+# leaves the marker in place and the whole reset runs again next boot.
+#
+# What this restores is exactly what the image build authored - the same
+# skeleton script runs in both places, so a reset device and a freshly flashed
+# one cannot drift apart.
+set -Eeuo pipefail
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL=C
+
+ab_config=${AB_UPDATE_CONFIG:-/usr/lib/pi-ab-update/ab-update.conf}
+
+ab_config_value() { # $1=key; empty when absent
+    [ -f "$ab_config" ] && [ ! -L "$ab_config" ] || return 0
+    awk -v key="$1" '
+        /^[[:space:]]*#/ { next }
+        index($0, key "=") == 1 {
+            value = substr($0, length(key) + 2)
+            if (value != "") { print value; found = 1 }
+        }
+        END { exit !found }
+    ' "$ab_config" 2>/dev/null || true
+}
+ab_setting() { # $1=env value, $2=config key, $3=default
+    if [ -n "$1" ]; then printf '%s\n' "$1"; return; fi
+    local configured; configured=$(ab_config_value "$2")
+    if [ -n "$configured" ]; then printf '%s\n' "$configured"; return; fi
+    printf '%s\n' "$3"
+}
+
+product=$(ab_setting "${AB_PRODUCT:-}" AB_PRODUCT pi-ab-update)
+state_dir=$(ab_setting "${AB_STATE_DIR:-}" AB_STATE_DIR /data/pi-ab-update)
+data_mount=$(ab_setting "${AB_DATA_MOUNT:-}" AB_DATA_MOUNT /data)
+account=$(ab_setting "${AB_APP_ACCOUNT:-}" AB_APP_ACCOUNT '')
+skeleton=${AB_DATA_SKELETON:-/usr/local/sbin/ab-data-skeleton}
+# Optional "source:relative-destination" pairs re-seeded after the wipe. The
+# shipped NetworkManager profiles are the reason this exists: the image seeds
+# them into /data, where the running system bind-mounts over them, so the
+# pristine copies survive only in the read-only lower root.
+reset_seed=$(ab_setting "${AB_RESET_SEED:-}" AB_RESET_SEED '')
+marker=${AB_RESET_MARKER:-$state_dir/factory-reset-requested}
+
+log_note() {
+    printf '%s\n' "$*"
+    command -v logger >/dev/null 2>&1 && \
+        logger -t "ab-factory-reset[$product]" -p daemon.notice -- "$*" || true
+}
+die() {
+    printf '[ERROR] %s\n' "$*" >&2
+    command -v logger >/dev/null 2>&1 && \
+        logger -t "ab-factory-reset[$product]" -p daemon.err -- "$*" || true
+    exit 1
+}
+
+[ -f "$marker" ] && [ ! -L "$marker" ] || exit 0
+
+log_note "factory reset requested; wiping $data_mount"
+
+# Refuse anything that is not a real, writable mount of its own. Wiping a
+# directory that turned out to be part of the root filesystem - because the
+# durable partition failed to mount - would destroy the running system.
+[ -n "$data_mount" ] && [ "$data_mount" != / ] || die 'refusing an unsafe data mount path'
+mountpoint -q "$data_mount" || die "refusing to wipe $data_mount: it is not a mount point"
+findmnt -rn -T "$data_mount" -o OPTIONS | grep -Eq '(^|,)rw(,|$)' || \
+    die "refusing to wipe $data_mount: it is not mounted read-write"
+[ "$(findmnt -rn -T "$state_dir" -o TARGET)" = "$data_mount" ] || \
+    die 'durable state directory is not on the data mount'
+
+[ -x "$skeleton" ] || die "data skeleton tool is unavailable: $skeleton"
+
+# Delete the contents, never the mount point itself. `lost+found` is the
+# filesystem's, not the product's.
+shopt -s dotglob nullglob
+for entry in "$data_mount"/*; do
+    case "$(basename "$entry")" in
+        .|..|lost+found) continue ;;
+    esac
+    rm -rf -- "$entry"
+done
+shopt -u dotglob nullglob
+
+# The same script the image build runs, so the two cannot drift.
+if [ -n "$account" ]; then
+    "$skeleton" --root "$data_mount" --account "$account" || die 'unable to recreate the durable skeleton'
+else
+    "$skeleton" --root "$data_mount" || die 'unable to recreate the durable skeleton'
+fi
+
+# AB_STATE_DIR is the engine's own directory, so the engine guarantees it
+# rather than assuming a board's skeleton happens to create it. Where a board's
+# skeleton already does, this is a no-op.
+install -d -m0700 -o root -g root "$state_dir" || die 'unable to recreate the durable state directory'
+
+# Re-seed whatever the image seeded but the skeleton cannot know about.
+for pair in $reset_seed; do
+    source_path=${pair%%:*}
+    destination=${pair#*:}
+    [ -n "$source_path" ] && [ -n "$destination" ] && [ "$source_path" != "$pair" ] || {
+        log_note "ignoring malformed AB_RESET_SEED entry: $pair"
+        continue
+    }
+    [ -d "$source_path" ] || continue
+    shopt -s dotglob nullglob
+    for seed in "$source_path"/*; do
+        [ -f "$seed" ] || continue
+        install -m0600 -o root -g root "$seed" "$data_mount/$destination/$(basename "$seed")"
+    done
+    shopt -u dotglob nullglob
+    log_note "re-seeded $destination from $source_path"
+done
+
+sync
+
+# Last, and only now: a power cut before this point repeats the whole reset,
+# which is safe because every step above is idempotent.
+rm -f -- "$marker"
+sync
+log_note 'factory reset complete; the next services start on a fresh durable state'

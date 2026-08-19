@@ -37,6 +37,9 @@ script_dir=$(cd "$(dirname "$0")" && pwd)
 data_skeleton_script=${DATA_SKELETON_SCRIPT:-}
 selector_script=${SLOT_SELECTOR_SCRIPT:-$script_dir/ab-slot-selector}
 update_script=${AB_UPDATE_SCRIPT:-$script_dir/ab-system-update}
+reset_script=${AB_RESET_SCRIPT:-$script_dir/ab-factory-reset}
+reset_boot_script=${AB_RESET_BOOT_SCRIPT:-$script_dir/ab-factory-reset-boot}
+reset_unit=${AB_RESET_UNIT:-$script_dir/ab-factory-reset.service}
 commit_script=${AB_COMMIT_SCRIPT:-$script_dir/ab-update-commit}
 commit_unit=${AB_COMMIT_UNIT:-$script_dir/ab-update-commit.service}
 engine_lib_dir=/usr/lib/pi-ab-update
@@ -166,7 +169,7 @@ install_data_skeleton_tool() { # $1=root mount
 # The engine ships with the image, so an adopting board carries no copy of the
 # updater, the selector, the commit service or their unit.
 install_update_engine() { # $1=root mount
-    local root=$1 unit=lib/systemd/system/ab-update-commit.service health_units
+    local root=$1 unit=lib/systemd/system/ab-update-commit.service health_units reset_before
     install -Dm0755 "$update_script" "$root/usr/local/sbin/ab-system-update"
     install -Dm0755 "$commit_script" "$root/usr/local/sbin/ab-update-commit"
     install -Dm0644 "$commit_unit" "$root/$unit"
@@ -175,6 +178,12 @@ install_update_engine() { # $1=root mount
     install -d -m0755 "$root/etc/systemd/system/multi-user.target.wants"
     ln -sf "/$unit" \
         "$root/etc/systemd/system/multi-user.target.wants/ab-update-commit.service"
+    install -Dm0755 "$reset_script" "$root/usr/local/sbin/ab-factory-reset"
+    install -Dm0755 "$reset_boot_script" "$root/usr/local/sbin/ab-factory-reset-boot"
+    install -Dm0644 "$reset_unit" "$root/lib/systemd/system/ab-factory-reset.service"
+    install -d -m0755 "$root/etc/systemd/system/sysinit.target.wants"
+    ln -sf /lib/systemd/system/ab-factory-reset.service \
+        "$root/etc/systemd/system/sysinit.target.wants/ab-factory-reset.service"
     [ -n "$ab_update_conf" ] && [ -f "$ab_update_conf" ] || {
         echo "ERROR: AB_UPDATE_CONF must name the board's ab-update.conf" >&2
         exit 1
@@ -189,6 +198,16 @@ install_update_engine() { # $1=root mount
         install -d -m0755 "$root/etc/systemd/system/ab-update-commit.service.d"
         printf '[Unit]\nWants=%s\nAfter=%s\n' "$health_units" "$health_units" \
             > "$root/etc/systemd/system/ab-update-commit.service.d/10-health-units.conf"
+    fi
+    # The reset must finish before anything reads the durable state it is about
+    # to erase. Which units those are is the board's business, so the ordering
+    # is generated the same way.
+    reset_before=$(awk -F= '$1 == "AB_RESET_BEFORE" { print $2; exit }' \
+        "$ab_update_conf" 2>/dev/null || true)
+    if [ -n "$reset_before" ]; then
+        install -d -m0755 "$root/etc/systemd/system/ab-factory-reset.service.d"
+        printf '[Unit]\nBefore=%s\n' "$reset_before" \
+            > "$root/etc/systemd/system/ab-factory-reset.service.d/10-before-consumers.conf"
     fi
 }
 

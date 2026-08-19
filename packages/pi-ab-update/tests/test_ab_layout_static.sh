@@ -113,6 +113,30 @@ grep -Fq '/usr/local/sbin/ab-system-update' "$finalizer"
 grep -Fq '/usr/local/sbin/ab-update-commit' "$finalizer"
 grep -Fq 'multi-user.target.wants/ab-update-commit.service' "$finalizer"
 grep -Fq 'ab-update.conf' "$finalizer"
+# Stage 3: the reset is part of the engine and installs itself with it.
+bash -n "$engine/ab-factory-reset" "$engine/ab-factory-reset-boot"
+[ -x "$engine/ab-factory-reset" ] && [ -x "$engine/ab-factory-reset-boot" ] || {
+    echo 'factory reset scripts are missing or not executable' >&2; exit 1; }
+grep -Fq '/usr/local/sbin/ab-factory-reset' "$finalizer"
+grep -Fq 'sysinit.target.wants/ab-factory-reset.service' "$finalizer"
+grep -Fq 'AB_RESET_BEFORE' "$finalizer"
+grep -Fq 'ab-factory-reset' "$verifier"
+grep -Fq 'AB_RESET_BEFORE=' "$board/ab-update.conf"
+grep -Fq 'AB_RESET_SEED=' "$board/ab-update.conf"
+# The wipe refuses anything that is not its own writable mount: a durable
+# partition that failed to mount would otherwise take the running root with it.
+grep -Fq 'it is not a mount point' "$engine/ab-factory-reset-boot"
+grep -Fq 'it is not mounted read-write' "$engine/ab-factory-reset-boot"
+grep -Fq 'refusing an unsafe data mount path' "$engine/ab-factory-reset-boot"
+# The marker is cleared last, so an interrupted reset repeats rather than
+# leaving half a device.
+marker_clear_line=$(grep -nF 'rm -f -- "$marker"' "$engine/ab-factory-reset-boot" | cut -d: -f1)
+skeleton_line=$(grep -nF 'unable to recreate the durable skeleton' "$engine/ab-factory-reset-boot" | head -1 | cut -d: -f1)
+[ "$skeleton_line" -lt "$marker_clear_line" ]
+# The request writes a marker and reboots; it never wipes anything itself.
+! grep -Fq 'rm -rf' "$engine/ab-factory-reset"
+grep -Fq '"$reboot_command"' "$engine/ab-factory-reset"
+
 # The health predicate is data plus one hook, not hardcoded unit names.
 grep -Fq 'AB_HEALTH_UNITS' "$engine/ab-update-commit"
 grep -Fq 'health_hook' "$engine/ab-update-commit"

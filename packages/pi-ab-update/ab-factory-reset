@@ -1,0 +1,64 @@
+#!/bin/bash
+# pi-ab-update: request a factory reset.
+#
+# This does not wipe anything. It writes one root-owned marker and reboots; the
+# early-boot service does the work, before any consumer of /data has started.
+# Doing it that way is what makes the reset safe to interrupt: the marker
+# survives a power cut, so an incomplete wipe simply runs again on the next
+# boot rather than leaving half a device.
+set -Eeuo pipefail
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL=C
+
+ab_config=${AB_UPDATE_CONFIG:-/usr/lib/pi-ab-update/ab-update.conf}
+
+ab_config_value() { # $1=key; empty when absent
+    [ -f "$ab_config" ] && [ ! -L "$ab_config" ] || return 0
+    awk -v key="$1" '
+        /^[[:space:]]*#/ { next }
+        index($0, key "=") == 1 {
+            value = substr($0, length(key) + 2)
+            if (value != "") { print value; found = 1 }
+        }
+        END { exit !found }
+    ' "$ab_config" 2>/dev/null || true
+}
+ab_setting() { # $1=env value, $2=config key, $3=default
+    if [ -n "$1" ]; then printf '%s\n' "$1"; return; fi
+    local configured; configured=$(ab_config_value "$2")
+    if [ -n "$configured" ]; then printf '%s\n' "$configured"; return; fi
+    printf '%s\n' "$3"
+}
+
+product=$(ab_setting "${AB_PRODUCT:-}" AB_PRODUCT pi-ab-update)
+state_dir=$(ab_setting "${AB_STATE_DIR:-}" AB_STATE_DIR /data/pi-ab-update)
+marker=${AB_RESET_MARKER:-$state_dir/factory-reset-requested}
+reboot_command=${AB_REBOOT_COMMAND:-/usr/sbin/reboot}
+
+log_diagnostic() {
+    printf '[ERROR] %s\n' "$*" >&2
+    command -v logger >/dev/null 2>&1 && \
+        logger -t "ab-factory-reset[$product]" -p daemon.err -- "$*" || true
+}
+die() { log_diagnostic "$*"; exit 1; }
+
+[ "$#" -eq 0 ] || { printf '%s\n' '[ERROR] factory reset accepts no arguments' >&2; exit 64; }
+[ "$(id -u)" -eq 0 ] || die 'factory reset must run as root'
+[ -x "$reboot_command" ] || die 'reboot command is unavailable'
+
+# The marker must land on the durable filesystem it is about to erase; if that
+# is not writable there is nothing to reset and nothing would survive anyway.
+install -d -m0700 -o root -g root "$state_dir" || die 'durable state directory is unavailable'
+findmnt -rn -T "$state_dir" -o OPTIONS | grep -Eq '(^|,)rw(,|$)' || \
+    die 'durable state is not mounted read-write'
+
+temporary=$(mktemp "$state_dir/.factory-reset.XXXXXX")
+printf 'requested=1\n' > "$temporary"
+chmod 0600 "$temporary"
+sync -f "$temporary"
+mv -f "$temporary" "$marker"
+sync -f "$state_dir"
+
+printf '[SUCCESS] factory reset requested; rebooting to perform it\n'
+"$reboot_command"

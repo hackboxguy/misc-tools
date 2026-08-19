@@ -27,6 +27,9 @@ run 'commit public status'   sh "$engine/tests/test_update_commit_public_status.
 if [ "$(id -u)" -eq 0 ]; then
     run 'handler loopback'   bash "$engine/tests/test_system_update_handler_integration.sh" "$engine/ab-system-update"
     run 'layout loopback'    bash "$engine/tests/test_ab_layout_integration.sh"
+    run 'factory reset'      bash "$engine/tests/test_factory_reset.sh" \
+        "$engine/ab-factory-reset" "$engine/ab-factory-reset-boot" \
+        "$engine/../../board-configs/micropanel-touch/packages/micropanel-touch-data-skeleton.sh"
 else
     printf '\nSKIP: the two loopback fixtures need root (re-run with sudo)\n'
 fi

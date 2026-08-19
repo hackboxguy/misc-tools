@@ -1,0 +1,19 @@
+[Unit]
+Description=Perform a requested pi-ab-update factory reset
+DefaultDependencies=no
+Wants=data.mount
+After=data.mount
+# The units that must not see the old durable state are added by a drop-in the
+# image finalizer generates from AB_RESET_BEFORE, so this shared unit names no
+# product of its own.
+ConditionPathExists=/usr/local/sbin/ab-data-skeleton
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/sbin/ab-factory-reset-boot
+RemainAfterExit=yes
+TimeoutStartSec=3min
+
+[Install]
+WantedBy=sysinit.target

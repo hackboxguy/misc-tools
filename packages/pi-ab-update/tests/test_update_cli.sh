@@ -96,6 +96,33 @@ else
         || ok 'unprivileged install' 'never reaches the engine'
 fi
 
+# --- the pre-install warning names the units that would block a commit ----
+# Pinned statically elsewhere; exercised here, because the value of this
+# warning is entirely in what it says to a person about to wait out a long
+# download for an update that cannot stick.
+# Only observable as root: the privilege check runs first, and rightly so -
+# there is no point warning about a commit predicate to someone who cannot
+# start the install at all.
+if [ "$(id -u)" -eq 0 ]; then
+    rm -f "$work/calls"
+    warn=$(AB_UPDATE_CONFIG=/nonexistent AB_IMAGE_MANIFEST="$work/image-manifest.env" \
+        AB_STATE_DIR="$work/state" AB_RUNTIME_DIR="$work/run" \
+        AB_SLOT_SELECTOR="$work/bin/selector" AB_UPDATE_SCRIPT="$work/bin/updater" \
+        AB_HEALTH_UNITS="definitely-absent-unit.service" \
+        /bin/bash "$cli" install ota 2>&1 </dev/null)
+    if printf '%s' "$warn" | grep -Fq 'definitely-absent-unit.service' &&
+       printf '%s' "$warn" | grep -Fq 'fall back'; then
+        ok 'install warns about a down commit unit' 'names the unit and the consequence'
+    else
+        fail "install did not warn about a down commit unit: $warn"
+    fi
+    # ...and warns without blocking: someone recovering a half-broken device
+    # has to be able to install into it.
+    grep -q "called with: ota" "$work/calls" 2>/dev/null \
+        && ok 'the warning does not block the install' 'engine still invoked' \
+        || fail 'the warning blocked the install'
+fi
+
 # --- bad input is refused, not guessed ------------------------------------
 run install >/dev/null 2>&1 && fail 'install with no source succeeded' \
     || ok 'install with no source' 'refused'

@@ -173,7 +173,11 @@ install_data_skeleton_tool() { # $1=root mount
 install_update_engine() { # $1=root mount
     local root=$1 unit=lib/systemd/system/ab-update-commit.service health_units reset_before
     install -Dm0755 "$update_script" "$root/usr/local/sbin/ab-system-update"
-    install -Dm0755 "$cli_script" "$root/usr/local/sbin/ab-update"
+    # /usr/local/bin, not sbin: this is the front end, not an engine. Debian
+    # keeps sbin out of a non-root PATH, so in sbin its unprivileged queries
+    # were unreachable without typing the full path - which defeats the point
+    # of having a front end at all. The engines it calls stay in sbin.
+    install -Dm0755 "$cli_script" "$root/usr/local/bin/ab-update"
     install -Dm0755 "$check_script" "$root/usr/local/sbin/ab-update-check"
     install -Dm0755 "$commit_script" "$root/usr/local/sbin/ab-update-commit"
     install -Dm0644 "$commit_unit" "$root/$unit"

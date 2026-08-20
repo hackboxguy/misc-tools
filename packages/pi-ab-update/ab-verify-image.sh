@@ -155,7 +155,10 @@ image_manifest="$root_a_mount$ab_manifest_path"
 require test -x "$root_a_mount/usr/local/sbin/ab-data-skeleton"
 require test -x "$root_a_mount/usr/local/sbin/ab-slot-selector"
 require test -x "$root_a_mount/usr/local/sbin/ab-system-update"
-require test -x "$root_a_mount/usr/local/sbin/ab-update"
+require test -x "$root_a_mount/usr/local/bin/ab-update"
+# In bin, and specifically not in sbin: sbin is absent from a non-root PATH, so
+# the unprivileged queries would be unreachable by name.
+require test ! -e "$root_a_mount/usr/local/sbin/ab-update"
 require test -x "$root_a_mount/usr/local/sbin/ab-update-check"
 require test -x "$root_a_mount/usr/local/sbin/ab-update-commit"
 require test -x "$root_a_mount/usr/local/sbin/ab-factory-reset"

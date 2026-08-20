@@ -160,7 +160,7 @@ grep -Fq 'scheduled reboot failed' "$engine/ab-factory-reset"
 bash -n "$engine/ab-update-check"
 bash -n "$engine/ab-update"
 [ -x "$engine/ab-update" ] || { echo "missing or non-executable: $engine/ab-update" >&2; exit 1; }
-grep -Fq '/usr/local/sbin/ab-update"' "$finalizer"
+grep -Fq '/usr/local/bin/ab-update"' "$finalizer"
 grep -Fq 'sbin/ab-update"' "$verifier"
 # The front end composes and delegates; policy stays in the engine. A second
 # copy of it here would drift, and the copy people run would be the untested one.

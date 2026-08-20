@@ -87,6 +87,18 @@ done <<EOF
 $(sed -e 's/#.*//' -e 's/[[:space:]]//g' "$board/runtime-deps.txt" | sed '/^$/d')
 EOF
 
+# The Wi-Fi radio's baked default. Stock Lite ships WirelessEnabled=false, the
+# file is in the read-only lower root, and a runtime `nmcli radio wifi on` is
+# forgotten at the next boot - so without this the panel's join feature is
+# unreachable on every boot, with no on-screen way out. Found on the bench;
+# assert it here so it cannot be lost in a hook edit.
+app_hook="$board/packages/micropanel-touch-hook.sh"
+grep -Fq "printf '%s\\n' '[main]' 'WirelessEnabled=true' > /var/lib/NetworkManager/NetworkManager.state" \
+    "$app_hook" || {
+    echo 'the app hook does not bake the Wi-Fi radio on' >&2
+    exit 1
+}
+
 grep -Fqx 'AB_LAYOUT=0' "$board/board.conf"
 grep -Fqx 'SLOT_COMPATIBLE_BOARDS="pi4"' "$board/board.conf"
 grep -Fqx 'xz-utils' "$board/runtime-deps.txt"

@@ -177,6 +177,29 @@ rootfs, and each flavour's payload has to fit the same 2 GiB. With the base at
 system before either ceiling is in view — which is exactly the headroom this
 diet was for.
 
+### The Wi-Fi radio's baked default — bench finding, 2026-08-20
+
+Stock Raspberry Pi OS Lite ships `/var/lib/NetworkManager/NetworkManager.state`
+containing `WirelessEnabled=false`. On this image that file is in the
+**read-only lower root**, so `nmcli radio wifi on` writes to the tmpfs upper
+layer and is forgotten at the next boot. `phy0` comes up soft-blocked every
+time.
+
+The visible effect on the panel is that Network → Wi-Fi reports the radio state
+rather than a list of networks, on every boot, **with no on-screen way out of
+it** — the join feature is simply unreachable. Nothing in the test suite could
+have caught this: the file is stock content the build never touched, and the
+only way to see it is to boot the image and look.
+
+The app hook now bakes `WirelessEnabled=true` into the image, and
+`test_ab_layout_static.sh` asserts it so a hook edit cannot quietly drop it. An
+operator can still turn the radio off at runtime; that choice is deliberately
+volatile, because the baked default is what keeps the feature reachable after a
+reflash or a factory reset.
+
+Confirmed on the bench: with the radio enabled, `nmcli device wifi list` on the
+panel returns eight access points, so the scan screen has real rows to render.
+
 ### Release signing key custody
 
 Stage 2b signs on the build side even though the device does not yet verify.

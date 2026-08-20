@@ -44,6 +44,24 @@ install -Dm0644 "$destination/usr/lib/sysctl.d/micropanel-touch-console.conf" \
     /etc/sysctl.d/49-micropanel-touch-console.conf
 install -Dm0644 "$destination/share/micropanel-touch/polkit/49-micropanel-touch-network-manager.rules" \
     /etc/polkit-1/rules.d/49-micropanel-touch-network-manager.rules
+# Stock Raspberry Pi OS Lite ships NetworkManager's saved state with
+# WirelessEnabled=false, and on this image that file lives in the read-only
+# lower root - so `nmcli radio wifi on` writes to the tmpfs upper layer and is
+# forgotten at the next boot. The effect on the panel is that Network -> Wi-Fi
+# reports the radio state instead of a network list, every boot, with no
+# on-screen way out of it: the join feature is simply unreachable.
+#
+# A Wi-Fi-capable lab tool boots with its radio on. The panel's Wi-Fi screen is
+# the control surface for it; an operator who wants the radio off can still
+# turn it off at runtime, and that choice is deliberately volatile, because the
+# baked default is what makes the feature reachable after a factory reset or a
+# reflash.
+#
+# Found on the bench, 2026-08-20: no fixture could have caught it, because the
+# file is stock content that the build never touched.
+install -d -m0755 /var/lib/NetworkManager
+printf '%s\n' '[main]' 'WirelessEnabled=true' > /var/lib/NetworkManager/NetworkManager.state
+
 # This helper owns all PiScreen overlay lines and masks the panel getty. It
 # preserves the known-good native portrait mapping and never adds speed=.
 "$destination/usr/share/micropanel-touch/tools/enable-piscreen.sh"

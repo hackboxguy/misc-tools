@@ -61,6 +61,16 @@ AB_REBOOT_DELAY_SECONDS=2                       # 0 reboots synchronously
 `AB_RUNTIME_DIR` is also read by whatever shows progress to a user, so a board
 with a UI must keep the two in agreement.
 
+**If you are looking for the status file and it is not there, you are probably
+looking in the default.** `AB_RUNTIME_DIR` defaults to `/run/ab-update`, but a
+board may point it elsewhere and micropanel-touch does — at
+`/run/micropanel-touch-update`, kept at its historical path because the HMI
+reads progress from it. An absent `/run/ab-update/status` on such a board is
+the board config working, not a publish regression. `ab-update status` resolves
+the configured location for you, which is the reason the front end exists;
+reach for it before reaching for a path. This has now cost two readers the same
+detour, which is why it is written down.
+
 ### About the front end
 
 `ab-update` exists because operating this engine otherwise means remembering

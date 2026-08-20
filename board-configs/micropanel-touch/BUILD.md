@@ -104,6 +104,79 @@ safe to write to either inactive slot. The generator clears that label with
 `e2label` (preserving ext4 metadata checksums), streams the artifact, then
 restores `MP_ROOT_A` on the source image before it publishes the bundle.
 
+### The image diet — measured, 2026-08-20
+
+The bundle used to be **1.46 GiB against two independent 2 GiB ceilings**: the
+GitHub release-asset limit and the reserved `MP_FACTORY` partition. 73 % of
+both, which is uncomfortable for a Pi OS Lite appliance and would have been hit
+without warning as the rootfs grew.
+
+Two changes, in order of how much they returned:
+
+**1. The payload carried the slot's freed blocks.** `ab-make-payload.sh`
+streams the whole 5 GiB slot partition through `xz`, so every block the build
+had written and then deleted — purged build dependencies, apt caches, the
+application's own build tree — travelled into the release compressing like the
+data it used to be. `ab-finalize-layout.sh` now fills the slot's free space
+with zeros before the image is sealed, and hands the blocks back with `fstrim`
+so the authored `.img` stays sparse on the build host. This removes nothing
+from the running system.
+
+**2. Stock Raspberry Pi OS Lite, declined in part.** The measurement that
+motivated the trim is worth stating, because it is not what one would guess: a
+*pristine* Lite rootfs is 1860 MiB and this appliance's was 1958 MiB. Almost
+none of the weight was ours. `slim-remove.txt` carries the per-entry reasoning;
+the shape of it is the C toolchain and kernel headers that stock Lite ships,
+a second kernel flavour for a board this image refuses to install on, the
+superseded kernel the base stage's `apt upgrade` leaves behind, firmware for
+radios this board cannot have, and — genuinely — `mkvtoolnix`, which drags in
+Qt and ICU on an image whose PRD rejects Qt. Documentation, translations and
+apt's package indexes go with them, since a read-only root cannot apt and
+nothing on the device reads a man page.
+
+Measured on the same source tree, `00.39` before and `00.40` after:
+
+| | rootfs used | boot | `rootfs.img.xz` | bundle | of a 2 GiB ceiling |
+|---|---|---|---|---|---|
+| `00.39` | 1958 MiB | 67 MiB | 1,501,804,636 B | **1,571,543,040 B** (1.46 GiB) | **73.2 %** |
+| free-space zeroing only | 1958 MiB | 67 MiB | 561,675,028 B | ~631 MB (0.59 GiB) | ~29 % |
+| `00.40` (both) | **764 MiB** | **46 MiB** | — | **229,580,800 B** (0.21 GiB) | **10.7 %** |
+
+A 6.8× reduction, and about 40 % of it is the free-space pass alone — the
+change that removes nothing.
+
+**What was measured but not taken.** The Python 3 stack is a further ~180 MiB,
+but removing it takes `cloud-init`, `netplan.io` and `rpicam-apps` with it.
+That is a different kind of risk from removing a compiler, and it belongs in
+its own slice with its own bench boot rather than riding along with this one.
+
+**The gate is the size, not the list.** `SLIM_MAX_ROOT_MB` in `board.conf`
+fails the build if the trimmed rootfs exceeds it. That matters because a
+base-image bump can silently stop matching a pinned kernel version in
+`slim-remove.txt`; a missed removal then shows up as a build failure rather
+than as a quietly fatter release.
+
+### Does the 2 GiB `MP_FACTORY` reservation still stand? Yes — 2026-08-20
+
+`pi-in-system-update-plan.md` §7 left this open. The measured answer:
+
+The factory payload is the same signed bundle artifact, so the reservation has
+to hold one bundle: **0.21 GiB today, against 2 GiB reserved** — about 9× the
+payload, where it used to be 1.4×.
+
+Keep the 2 GiB. The reasoning is asymmetry, not headroom. Partition sizes are
+frozen at flash time, so an oversized factory payload cannot be fixed on units
+already in the field, while an over-generous reservation costs only `/data`
+space on a card that has ~2.1 GiB of it and no growth plan. Recovering 1.8 GiB
+of that would be worth doing if `/data` were under pressure. It is not.
+
+The number that would reopen this is a Tier-2 pack stack: the fpga/mcu-flash
+and camera/gstreamer flavours (PRD §6.7) add toolchains and bitstreams to the
+rootfs, and each flavour's payload has to fit the same 2 GiB. With the base at
+0.21 GiB there is room for a pack an order of magnitude larger than the base
+system before either ceiling is in view — which is exactly the headroom this
+diet was for.
+
 ### Release signing key custody
 
 Stage 2b signs on the build side even though the device does not yet verify.

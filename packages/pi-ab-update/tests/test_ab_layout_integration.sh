@@ -115,6 +115,21 @@ printf '%s\n' '[connection]' 'id=fixture' > "$source_root_mount/etc/NetworkManag
 chmod 0600 "$source_root_mount/etc/NetworkManager/system-connections/fixture.nmconnection"
 chmod 0700 "$source_root_mount/etc/NetworkManager/system-connections"
 
+# Residue of the kind a real build leaves behind: a file written and deleted
+# before the image is sealed. Its blocks are free but still hold its bytes, and
+# the payload generator streams the whole partition, so without the finalizer's
+# free-space pass this string travels into every release.
+freed_marker=AB-FREED-BLOCK-RESIDUE-MARKER
+freed_line=$(printf '%s\n' "$freed_marker")
+: > "$source_root_mount/freed-residue"
+i=0
+while [ "$i" -lt 2000 ]; do
+    printf '%s\n' "$freed_line" >> "$source_root_mount/freed-residue"
+    i=$((i + 1))
+done
+sync
+rm -f "$source_root_mount/freed-residue"
+
 sync
 unmount_if_mounted "$source_root_mount"
 unmount_if_mounted "$source_boot_mount"
@@ -149,6 +164,13 @@ env -u DATA_PARTITION_MB \
     AB_UPDATE_CONF="$ab_update_conf" \
     DATA_SKELETON_SCRIPT="$skeleton" \
     "$finalizer"
+
+# The finalizer zeroes the slot's free space before sealing, so the deleted
+# fixture file's bytes must not survive anywhere in the finished image.
+if grep -aqF "$freed_marker" "$image"; then
+    echo 'ERROR: freed-block residue survived into the finalized image' >&2
+    exit 1
+fi
 
 MICROPANEL_TOUCH_REVISION="$fixture_app_revision" \
     AB_MANIFEST_PATH="$ab_manifest_path" AB_ASSERTIONS="$ab_assertions" "$verifier" "$image"

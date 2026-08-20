@@ -87,7 +87,7 @@ fi
 
 for tool in sfdisk fdisk losetup mkfs.ext4 mkfs.vfat e2fsck resize2fs \
             e2label blkid blockdev mount umount mountpoint cp install awk sed \
-            truncate stat sync; do
+            truncate stat sync dd; do
     command -v "$tool" >/dev/null 2>&1 || {
         echo "ERROR: required host tool is missing: $tool" >&2
         exit 1
@@ -434,9 +434,36 @@ finalize_single_layout() {
     data_partuuid=$(blkid -s PARTUUID -o value "$data_device")
     [ -n "$data_partuuid" ] || { echo "ERROR: unable to resolve data PARTUUID" >&2; exit 1; }
     replace_data_fstab_single "$root_mount" "$data_partuuid"
+    zero_free_space "$root_mount"
 
     sync
     echo "Created ${data_partition_mb}MiB persistent data partition: $data_device ($data_partuuid)"
+}
+
+zero_free_space() { # $1=mounted filesystem root
+    # The payload generator streams the whole slot partition through xz, so
+    # every block the build freed - purged packages, apt caches, the app's own
+    # build tree - is carried into the release as noise that compresses like
+    # the data it used to be. Overwriting the free space with zeros before the
+    # image is sealed costs one pass and removes nothing from the running
+    # system; on the 00.39 rootfs it took the compressed slot from 1.40 GiB to
+    # 0.52 GiB on its own, before a single package was trimmed.
+    local mount=$1 filler="$1/.ab-zero-fill"
+    mountpoint -q "$mount" || {
+        echo "ERROR: zero_free_space needs a mounted filesystem: $mount" >&2
+        exit 1
+    }
+    # A full filesystem is the expected end state here, so dd's ENOSPC is the
+    # success condition rather than a failure.
+    dd if=/dev/zero of="$filler" bs=4M status=none 2>/dev/null || true
+    sync
+    rm -f "$filler"
+    sync
+    # Hand the blocks back to the backing file so the authored .img stays
+    # sparse on the build host. A punched hole still reads as zeros, so the
+    # payload is unaffected either way; this only keeps the working image from
+    # growing to its full partition size.
+    fstrim "$mount" >/dev/null 2>&1 || true
 }
 
 copy_slot_boot_tree() { # $1=source boot mount; $2=destination boot mount; $3=slot
@@ -591,6 +618,7 @@ EOF
     append_ab_manifest "$root_mount"
     install_update_source_config "$root_mount"
     verify_installed_app_revision "$root_mount"
+    zero_free_space "$root_mount"
 
     sync
     unmount_if_mounted "$data_mount"

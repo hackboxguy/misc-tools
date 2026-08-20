@@ -45,6 +45,48 @@ if "$builder" --board=micropanel-touch --layout=invalid --dry-run >/dev/null 2>&
     echo 'invalid --layout was accepted' >&2
     exit 1
 fi
+# The free-space pass is what makes a payload reflect what the rootfs holds
+# rather than everything the build ever wrote into it. Both finalizers run it,
+# and both run it last: anything written afterwards would be in freed blocks
+# again.
+grep -Fqx '    zero_free_space "$root_mount"' "$finalizer"
+[ "$(grep -Fc '    zero_free_space "$root_mount"' "$finalizer")" -eq 2 ] || {
+    echo 'both layout paths must zero free space before sealing' >&2
+    exit 1
+}
+grep -Fq '            truncate stat sync dd; do' "$finalizer"
+
+# Image slimming: the board declares the policy, build-image.sh runs it on the
+# authored image after the imager's last apt command and before the layout
+# hook. Both orderings are load-bearing, so assert the call site, not just the
+# files.
+slim_hook="$board/packages/micropanel-touch-slim.sh"
+slim_list="$board/slim-remove.txt"
+bash -n "$slim_hook"
+[ -x "$slim_hook" ] || { echo "slim hook is not executable: $slim_hook" >&2; exit 1; }
+grep -Fqx 'IMAGE_SLIM_HOOK=packages/micropanel-touch-slim.sh' "$board/board.conf"
+grep -Fqx 'SLIM_REMOVE=slim-remove.txt' "$board/board.conf"
+grep -Eq '^SLIM_MAX_ROOT_MB=[1-9][0-9]*$' "$board/board.conf"
+grep -Fq '    run_image_slim_hook
+    run_post_image_hook' "$builder"
+grep -Fq 'in+=("file:$IMAGE_SLIM_HOOK" "slim-max-root-mb:$SLIM_MAX_ROOT_MB")' "$builder"
+# firmware-brcm80211 drives the Pi 4 radio the WiFi feature needs; removing it
+# would take the hotspot-join milestone with it.
+if grep -Eq '^firmware-brcm80211$' "$slim_list"; then
+    echo 'the slim list removes the onboard WiFi firmware' >&2
+    exit 1
+fi
+# Nothing the board declared as a runtime dependency may be named for removal.
+while read -r runtime_package; do
+    [ -n "$runtime_package" ] || continue
+    if grep -Eq "^$runtime_package\$" "$slim_list"; then
+        echo "the slim list removes a declared runtime package: $runtime_package" >&2
+        exit 1
+    fi
+done <<EOF
+$(sed -e 's/#.*//' -e 's/[[:space:]]//g' "$board/runtime-deps.txt" | sed '/^$/d')
+EOF
+
 grep -Fqx 'AB_LAYOUT=0' "$board/board.conf"
 grep -Fqx 'SLOT_COMPATIBLE_BOARDS="pi4"' "$board/board.conf"
 grep -Fqx 'xz-utils' "$board/runtime-deps.txt"

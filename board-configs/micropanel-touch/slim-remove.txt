@@ -1,0 +1,93 @@
+# Packages removed from the authored image after the apps stage.
+#
+# The base is stock Raspberry Pi OS Lite, and the measurement that produced
+# this list (2026-08-20, image 00.39) found that almost none of the weight is
+# ours: a pristine Lite rootfs is 1860 MiB and this appliance's was 1958 MiB.
+# So the diet is not "clean up after the build" - it is "decline the parts of
+# a general-purpose desktop-adjacent OS that an appliance with a read-only
+# root can never use".
+#
+# Two rules govern what may appear here:
+#   1. Nothing the running appliance invokes. Every entry is either a build
+#      tool, a duplicate kernel, or a driver for hardware this image does not
+#      support.
+#   2. Every entry is deliberate. apt's own cascade removes more than this
+#      list names (BUILD.md records the full removed set); anything the
+#      cascade takes that we would miss belongs in runtime-deps.txt, which is
+#      re-asserted before this hook runs.
+#
+# Lines are apt package names or apt glob patterns, one per line.
+
+# --- Kernel build machinery -------------------------------------------------
+# The appliance compiles nothing. Headers alone are ~105 MiB across the two
+# kernel series the base stage leaves installed.
+linux-headers-*
+linux-kbuild-*
+
+# --- The superseded kernel --------------------------------------------------
+# The base stage runs apt upgrade, which installs 6.18.39 and leaves 6.12.47
+# in place. Nothing boots it; it survives only because apt keeps the running
+# kernel of the build host's chroot, which is not a real constraint here.
+linux-image-6.12.47+rpt-rpi-v8
+linux-image-6.12.47+rpt-rpi-2712
+
+# --- The Pi 5 kernel flavour ------------------------------------------------
+# SLOT_COMPATIBLE_BOARDS is pi4: the updater refuses to install this image on
+# anything else, and the panel overlay is Pi 4-verified. Carrying a 2712
+# kernel makes the payload larger for a board the image already declines.
+# Re-adding Pi 5 means re-adding these lines together with its own bench
+# acceptance, which is the point at which the cost is worth paying.
+linux-image-6.18.39+rpt-rpi-2712
+linux-image-rpi-2712
+linux-base-6.18.39+rpt-rpi-2712
+linux-base-rpi-2712
+
+# --- The C toolchain --------------------------------------------------------
+# Stock Lite ships gcc, binutils and gdb. micropanel-touch is built in the
+# chroot during the apps stage and installed as binaries; build-deps.txt is
+# purged after that, but these were never in build-deps.txt because they came
+# with the base image. ~190 MiB.
+gcc
+gcc-14
+gcc-aarch64-linux-gnu
+gcc-14-for-host
+cpp-14
+cpp-aarch64-linux-gnu
+cpp-14-for-host
+binutils
+binutils-aarch64-linux-gnu
+binutils-common
+libc6-dev
+libgcc-14-dev
+linux-libc-dev
+dpkg-dev
+make
+gdb
+manpages-dev
+
+# --- A Matroska muxer, in an appliance --------------------------------------
+# mkvtoolnix is in stock Lite and pulls libqt6core6t64, which pulls libicu76:
+# 70 MiB of Qt and Unicode tables in an image whose PRD explicitly rejects Qt.
+mkvtoolnix
+
+# --- Firmware for radios this board cannot have -----------------------------
+# firmware-brcm80211 stays: it drives the Pi 4's onboard WiFi and Bluetooth,
+# which the hotspot-join feature needs. firmware-realtek stays too, because
+# Realtek is what the cheap USB dongles a lab tool meets are built on.
+# Atheros, MediaTek and Libertas are 190 MiB of firmware for PCIe cards and
+# dongles that have never been on this bench - and if one turns up, it belongs
+# in a pack, with its own row in the capability matrix.
+firmware-atheros
+firmware-mediatek
+firmware-libertas
+
+# --- Bootloader self-update tooling -----------------------------------------
+# rpi-eeprom updates the Pi's SPI bootloader EEPROM from a systemd unit. This
+# appliance updates through the signed A/B chain and nothing else; EEPROM
+# updates are explicitly out of A/B scope (pi-in-system-update-plan.md SS9),
+# so a unit that rewrites firmware behind the update engine's back is a
+# liability rather than a feature. The EEPROM already on the bench Pi is the
+# one that boots tryboot, and it stays untouched. rpi-update (the unsupported
+# firmware-from-github script) goes for the same reason.
+rpi-eeprom
+rpi-update

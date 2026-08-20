@@ -32,6 +32,9 @@
 #   --app-revision=SHA  Required full 40-character micropanel-touch commit
 #                       for MicroPanel Touch images; it is embedded and
 #                       verified in the resulting image before release
+#   --app-repo=URL      Clone the application from URL instead of the pinned
+#                       production repository. For image-testing a commit that
+#                       has not been pushed yet; never for a release build.
 #   --app-ref=REF       Resolve a MicroPanel Touch branch or tag (for example
 #                       main) to its current immutable commit before building
 #   --password=PASS     'pi' user password (default: DEFAULT_PASSWORD)
@@ -113,7 +116,7 @@ stage_banner() { echo ""; echo "================================================
 BOARD="" VARIANT="" VERSION="" PASSWORD="" WORKSPACE=""
 ARG_BASEIMAGE="" ARG_IMAGE_URL="" ARG_START_FROM="" ARG_REPOBINS="" ARG_FLASH=""
 ARG_SOURCES_DIR="" ARG_OUTPUT_DIR="" ARG_EXTEND_SIZE="" ARG_BASE_PROFILE="" ARG_LAYOUT=""
-ARG_PAYLOAD_DIR="" ARG_APP_REVISION="" ARG_APP_REF="" ARG_SIGNING_KEY=""
+ARG_PAYLOAD_DIR="" ARG_APP_REVISION="" ARG_APP_REF="" ARG_SIGNING_KEY="" ARG_APP_REPO=""
 ARG_RELEASE_URL_TEMPLATE=""
 SKIP_BASE=0 SKIP_KERNEL=0 SKIP_APPS=0
 FORCE_BASE=0 FORCE_KERNEL=0 FORCE_APPS=0
@@ -129,6 +132,7 @@ for arg in "$@"; do
         --version=*)    VERSION="${arg#*=}" ;;
         --app-revision=*) ARG_APP_REVISION="${arg#*=}" ;;
         --app-ref=*)    ARG_APP_REF="${arg#*=}" ;;
+        --app-repo=*)   ARG_APP_REPO="${arg#*=}" ;;
         --password=*)   PASSWORD="${arg#*=}" ;;
         --workspace=*)  WORKSPACE="${arg#*=}" ;;
         --sources-dir=*) ARG_SOURCES_DIR="${arg#*=}" ;;
@@ -194,6 +198,7 @@ RUNTIME_DEPS="none" BUILD_DEPS="none" HOOK_LIST=""
 KERNEL=0 KERNEL_BRANCH="" KERNEL_CONFIG="" DRIVERS_DIR="" SOURCES=""
 BASE_PROFILE="" APPS_EXTEND_SIZE_MB=0 EXPAND_ROOT=1 REQUIRE_PASSWORD=0
 DATA_PARTITION_MB=0 POST_IMAGE_HOOK=""
+IMAGE_SLIM_HOOK="" SLIM_REMOVE="" SLIM_MAX_ROOT_MB=0
 AB_LAYOUT=0 AB_IMAGE_SIZE_MB=15000 AB_BOOT_PARTITION_MB=256
 AB_ROOT_PARTITION_MB=5120 AB_FACTORY_PARTITION_MB=2048
 SLOT_COMPATIBLE_BOARDS="pi4"
@@ -230,6 +235,9 @@ EXPAND_ROOT="$(resolve_cfg EXPAND_ROOT)"
 REQUIRE_PASSWORD="$(resolve_cfg REQUIRE_PASSWORD)"
 DATA_PARTITION_MB="$(resolve_cfg DATA_PARTITION_MB)"
 POST_IMAGE_HOOK="$(resolve_cfg POST_IMAGE_HOOK)"
+IMAGE_SLIM_HOOK="$(resolve_cfg IMAGE_SLIM_HOOK)"
+SLIM_REMOVE="$(resolve_cfg SLIM_REMOVE)"
+SLIM_MAX_ROOT_MB="$(resolve_cfg SLIM_MAX_ROOT_MB)"
 AB_LAYOUT="$(resolve_cfg AB_LAYOUT)"
 AB_IMAGE_SIZE_MB="$(resolve_cfg AB_IMAGE_SIZE_MB)"
 AB_BOOT_PARTITION_MB="$(resolve_cfg AB_BOOT_PARTITION_MB)"
@@ -275,6 +283,17 @@ fi
 [ -n "$ARG_IMAGE_URL" ] && IMAGE_URL_CFG="$ARG_IMAGE_URL"
 [ -n "$ARG_APP_REVISION" ] && MICROPANEL_TOUCH_REVISION="$ARG_APP_REVISION"
 [ -n "$ARG_APP_REF" ] && MICROPANEL_TOUCH_REF="$ARG_APP_REF"
+# Overriding where the application comes from. board.conf pins the production
+# repository and is sourced above, so this has to be applied after it.
+#
+# It exists for one situation, and it is a situation this project is in
+# routinely: the working agreement is that sessions commit to main and the
+# owner pushes, and the build clones from the remote - so a commit that has not
+# been pushed cannot be image-tested at all. Pointing this at a local mirror
+# closes that gap without anyone publishing anything. A release build must not
+# use it: the image manifest records the revision either way, but only the
+# pinned repository makes that revision findable.
+[ -n "$ARG_APP_REPO" ] && MICROPANEL_TOUCH_APP_REPO="$ARG_APP_REPO"
 if [ -n "$ARG_LAYOUT" ]; then
     case "$ARG_LAYOUT" in
         single) AB_LAYOUT=0 ;;
@@ -296,6 +315,8 @@ RUNTIME_DEPS="$(resolve_board_file "$RUNTIME_DEPS")"
 BUILD_DEPS="$(resolve_board_file "$BUILD_DEPS")"
 HOOK_LIST="$(resolve_board_file "$HOOK_LIST")"
 POST_IMAGE_HOOK="$(resolve_board_file "$POST_IMAGE_HOOK")"
+IMAGE_SLIM_HOOK="$(resolve_board_file "$IMAGE_SLIM_HOOK")"
+SLIM_REMOVE="$(resolve_board_file "$SLIM_REMOVE")"
 [ -n "$KERNEL_CONFIG" ] && [[ "$KERNEL_CONFIG" != /* ]] && KERNEL_CONFIG="$SCRIPT_DIR/$KERNEL_CONFIG"
 
 case "$EXPAND_ROOT" in
@@ -600,6 +621,10 @@ apps_stamp_inputs() {
     [ "$RUNTIME_DEPS" != "none" ] && in+=("file:$RUNTIME_DEPS")
     [ "$BUILD_DEPS" != "none" ] && in+=("file:$BUILD_DEPS")
     [ "$POST_IMAGE_HOOK" != "none" ] && [ -n "$POST_IMAGE_HOOK" ] && in+=("file:$POST_IMAGE_HOOK")
+    if [ "$IMAGE_SLIM_HOOK" != "none" ] && [ -n "$IMAGE_SLIM_HOOK" ]; then
+        in+=("file:$IMAGE_SLIM_HOOK" "slim-max-root-mb:$SLIM_MAX_ROOT_MB")
+        [ -n "$SLIM_REMOVE" ] && [ "$SLIM_REMOVE" != "none" ] && in+=("file:$SLIM_REMOVE")
+    fi
     printf '%s\n' "${in[@]}"
 }
 
@@ -651,6 +676,15 @@ preflight() {
     fi
     if [ "$POST_IMAGE_HOOK" != "none" ] && [ -n "$POST_IMAGE_HOOK" ]; then
         [ -f "$POST_IMAGE_HOOK" ] && pf_ok "post-image hook: $POST_IMAGE_HOOK" || pf_fail "post-image hook missing: $POST_IMAGE_HOOK"
+    fi
+    if [ "$IMAGE_SLIM_HOOK" != "none" ] && [ -n "$IMAGE_SLIM_HOOK" ]; then
+        [ -f "$IMAGE_SLIM_HOOK" ] && pf_ok "image slim hook: $IMAGE_SLIM_HOOK" || pf_fail "image slim hook missing: $IMAGE_SLIM_HOOK"
+        [ -f "$SLIM_REMOVE" ] && pf_ok "slim removal list: $SLIM_REMOVE" || pf_fail "slim removal list missing: $SLIM_REMOVE"
+        # The hook applies an aarch64 removal list through a chroot; without
+        # the interpreter the purge would run the build host's own dpkg.
+        [ -x "${QEMU_STATIC:-/usr/bin/qemu-aarch64-static}" ] \
+            && pf_ok "slim interpreter: ${QEMU_STATIC:-/usr/bin/qemu-aarch64-static}" \
+            || pf_fail "slim interpreter missing: ${QEMU_STATIC:-/usr/bin/qemu-aarch64-static}"
     fi
     if [ "$AB_LAYOUT" = "1" ]; then
         for tool in sfdisk fdisk mkfs.ext4 mkfs.vfat e2fsck resize2fs e2label blkid blockdev mount; do
@@ -1011,10 +1045,29 @@ run_stage_apps() {
         die "apps stage produced no image; see the imager output above"
     mv "$work/$(basename "$APPS_INPUT")" "$FINAL_IMG"
     rm -rf "$work"
+    run_image_slim_hook
     run_post_image_hook
     echo "$hash" > "$OUT_DIR/.stamp"
     own_by_user "$OUT_DIR"
     log "Final image ready: $FINAL_IMG"
+}
+
+# ------------------------------------------------------------------------------
+# Stage: image slimming
+#
+# Runs on the authored two-partition image, after the imager's last apt command
+# and before the layout hook turns it into slots. Both of those orderings are
+# load-bearing: the runtime re-assert repopulates the apt indexes this removes,
+# and the layout hook clones the boot tree that a kernel removal rewrites.
+# ------------------------------------------------------------------------------
+run_image_slim_hook() {
+    [ "$IMAGE_SLIM_HOOK" = "none" ] || [ -z "$IMAGE_SLIM_HOOK" ] && return 0
+    [ -f "$IMAGE_SLIM_HOOK" ] || die "Image slim hook missing: $IMAGE_SLIM_HOOK"
+    stage_banner "Stage 3b: Image slimming"
+    IMAGE_PATH="$FINAL_IMG" BOARD="$BOARD" BOARD_DIR="$BOARD_DIR" \
+        SLIM_REMOVE="$SLIM_REMOVE" RUNTIME_DEPS="$RUNTIME_DEPS" \
+        SLIM_MAX_ROOT_MB="$SLIM_MAX_ROOT_MB" \
+        bash "$IMAGE_SLIM_HOOK"
 }
 
 # ------------------------------------------------------------------------------

@@ -200,6 +200,32 @@ reflash or a factory reset.
 Confirmed on the bench: with the radio enabled, `nmcli device wifi list` on the
 panel returns eight access points, so the scan screen has real rows to render.
 
+### The Wi-Fi regulatory domain is unset — known, not fixed
+
+Related to the above, and worth knowing before anyone spends time on a failing
+join: the panel's regulatory domain is **`00` (world)**, because no Wi-Fi
+country has ever been set on this image.
+
+`cat /sys/module/cfg80211/parameters/ieee80211_regdom` returns `00` on the
+bench, and `iw` is not installed to say more. Under the world domain the 5 GHz
+channels are conventionally passive-scan-only, so an access point on them is
+*visible but not joinable*; 2.4 GHz channels 1–11 are unrestricted. **This has
+not been verified by attempting a join** — it is stated here as the likely
+explanation if a 5 GHz join fails, and as a reason to test with a 2.4 GHz
+network first. The bench scan sees both: `ADAV_FRITZ_BOX_7390` and
+`ADAV_Guest1` are 2.4 GHz; `Turmberg` and `ADAV_ASUS_RT_AC_66U_5GHZ` are 5 GHz.
+
+It is deliberately **not** fixed the way the radio default was. Which country
+this panel transmits under is a deployment and regulatory decision, not
+something an image build should guess — Raspberry Pi OS leaves it to the user
+for exactly that reason. The options, when the owner wants to decide: a
+`board.conf` default baked per image flavour, or a country selector on the
+Wi-Fi screen. The second is the better product answer and the more work.
+
+What *is* confirmed is that the join path's dependencies survived the diet:
+`wpasupplicant` 2:2.10-24 is installed and `wpa_supplicant` is on the image, so
+WPA association has everything it needs.
+
 ### Release signing key custody
 
 Stage 2b signs on the build side even though the device does not yet verify.

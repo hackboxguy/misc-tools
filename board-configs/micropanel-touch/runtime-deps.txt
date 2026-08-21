@@ -18,3 +18,10 @@ xz-utils
 curl
 openssl
 ca-certificates
+# Network diagnostics (base-features slice 3e). iperf3 is the throughput test
+# itself; avahi-utils is how a client finds a server without anyone typing an
+# address - the panel publishes _iperf3._tcp while its server runs and browses
+# for the same service as a client, which is what the OLED build does and the
+# single most useful thing about the feature in a room full of sockets.
+iperf3
+avahi-utils

@@ -241,6 +241,13 @@ seed_network_connections() { # $1=root mount; $2=data mount
     install -d -m0700 -o root -g root "$2/NetworkManager/system-connections"
 }
 
+# The bind mount is ordered *after* the factory reset as well as before
+# NetworkManager. A reset wipes the directory this mount attaches to and the
+# skeleton creates a new one; a mount established before that runs is left
+# holding the deleted inode, and NetworkManager can no longer save a profile.
+# The reset re-establishes orphaned mounts itself, so this ordering is the
+# belt rather than the braces - but it is the half that keeps the mount from
+# ever being wrong in the first place.
 replace_data_fstab_single() { # $1=root mount; $2=data PARTUUID
     local data_partuuid=$2 fstab="$1/etc/fstab" temporary
     temporary="$fstab.ab-update"
@@ -250,7 +257,7 @@ replace_data_fstab_single() { # $1=root mount; $2=data PARTUUID
         printf '\n# Persistent state (must not block boot if damaged).\n'
         printf 'PARTUUID=%s /data ext4 defaults,nofail,x-systemd.device-timeout=5s 0 2\n' \
             "$data_partuuid"
-        printf '%s\n' '/data/NetworkManager/system-connections /etc/NetworkManager/system-connections none bind,nofail,x-systemd.requires=data.mount,x-systemd.before=NetworkManager.service 0 0'
+        printf '%s\n' '/data/NetworkManager/system-connections /etc/NetworkManager/system-connections none bind,nofail,x-systemd.requires=data.mount,x-systemd.after=ab-factory-reset.service,x-systemd.before=NetworkManager.service 0 0'
     } >> "$temporary"
     mv "$temporary" "$fstab"
 }
@@ -264,7 +271,7 @@ replace_ab_fstab() { # $1=root mount
     printf '%s\n' \
         'LABEL=MP_BOOT_A /boot/firmware vfat defaults,ro,nofail,x-systemd.device-timeout=5s 0 2' \
         'LABEL=MICROPANEL_DATA /data ext4 defaults,nofail,x-systemd.device-timeout=5s 0 2' \
-        '/data/NetworkManager/system-connections /etc/NetworkManager/system-connections none bind,nofail,x-systemd.requires=data.mount,x-systemd.before=NetworkManager.service 0 0' \
+        '/data/NetworkManager/system-connections /etc/NetworkManager/system-connections none bind,nofail,x-systemd.requires=data.mount,x-systemd.after=ab-factory-reset.service,x-systemd.before=NetworkManager.service 0 0' \
         >> "$temporary"
     mv "$temporary" "$fstab"
 }

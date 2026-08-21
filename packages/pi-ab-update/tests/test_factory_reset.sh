@@ -155,6 +155,39 @@ ok 'pristine skeleton recreated'
 [ ! -f "$data/fixture-system/factory-reset-requested" ] && ok 'marker cleared last' || fail 'marker survived'
 [ -d "$data/lost+found" ] && ok 'filesystem lost+found preserved' || fail 'lost+found was deleted'
 
+# --- a mount attached to what the wipe deletes ----------------------------
+# The real shape of this: the running system bind-mounts
+# /data/NetworkManager/system-connections onto /etc, and the wipe deletes the
+# directory that mount is attached to. A bind mount holds an inode, not a
+# path, so it keeps pointing at the deleted one - which presents as an empty
+# directory that cannot be written to at all, and NetworkManager silently
+# stops being able to save a profile. The panel scans, accepts a password and
+# never joins. Found on the bench; asserted here.
+bind_target=$work/bound-connections
+mkdir -p "$bind_target"
+if mount --bind "$data/NetworkManager/system-connections" "$bind_target" 2>/dev/null; then
+    seed_user_state
+    run_request >/dev/null 2>&1
+    run_boot >/dev/null 2>&1
+    if findmnt -rn -o SOURCE --target "$bind_target" 2>/dev/null | grep -q '//deleted'; then
+        fail 'the wipe left a mount attached to a deleted directory'
+    else
+        ok 'mounts attached to wiped directories are re-established'
+    fi
+    # The property that actually matters is not the absence of a marker in
+    # findmnt output - it is that the thing can be written to again.
+    if touch "$bind_target/probe.nmconnection" 2>/dev/null; then
+        ok 'a profile can still be written through the mount after a reset'
+        rm -f "$bind_target/probe.nmconnection"
+    else
+        fail 'nothing can be written through the mount after a reset'
+    fi
+    umount "$bind_target" 2>/dev/null || true
+else
+    echo '  --  skipped: this fixture cannot create a bind mount'
+fi
+rmdir "$bind_target" 2>/dev/null || true
+
 # --- safety refusals ------------------------------------------------------
 # The reset must refuse a data path that is not a mount of its own: that is
 # what a failed durable-partition mount looks like, and wiping it would take

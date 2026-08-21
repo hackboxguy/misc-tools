@@ -114,6 +114,42 @@ for pair in $reset_seed; do
     log_note "re-seeded $destination from $source_path"
 done
 
+# Whatever was mounted from inside the data mount is now attached to a
+# directory that no longer exists.
+#
+# A bind mount holds an inode, not a path. The wipe above deletes
+# /data/NetworkManager/system-connections and the skeleton makes a new one, so
+# a bind mount established earlier in this same boot still points at the old,
+# now-unlinked directory - which presents as an empty directory that cannot be
+# written to at all, not even by root. NetworkManager then cannot save a
+# profile: a factory-reset panel scans for Wi-Fi, shows the networks, accepts
+# the password and never joins, with nothing in any log saying why.
+#
+# Found on the bench, on a reset boot, by an owner who could not rejoin his
+# own access point. The declarative half of the fix orders such mounts after
+# this service; this is the half that does not depend on every future mount
+# remembering to say so.
+remount_orphaned() {
+    local target source orphans=0
+    # findmnt marks exactly these: the source path gains a "//deleted" suffix.
+    while read -r target source; do
+        case "$source" in
+            *'//deleted'*) ;;
+            *) continue ;;
+        esac
+        orphans=$((orphans + 1))
+        log_note "re-establishing $target: the wipe replaced the directory it was attached to"
+        umount "$target" 2>/dev/null || {
+            log_note "could not detach $target; it will be correct after the next boot"
+            continue
+        }
+        # The entry is in fstab - that is how it came to be mounted at all.
+        mount "$target" 2>/dev/null ||             log_note "could not re-attach $target; it will be correct after the next boot"
+    done < <(findmnt -rn -o TARGET,SOURCE 2>/dev/null || true)
+    [ "$orphans" -eq 0 ] || log_note "re-established $orphans mount(s) orphaned by the wipe"
+}
+remount_orphaned
+
 sync
 
 # Last, and only now: a power cut before this point repeats the whole reset,

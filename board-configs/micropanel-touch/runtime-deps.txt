@@ -25,3 +25,10 @@ ca-certificates
 # single most useful thing about the feature in a room full of sockets.
 iperf3
 avahi-utils
+# The port check connects with nc. It was in the image already - stock Pi OS
+# ships it - but by inheritance rather than declaration, and the first base
+# rebuild after this file changed was enough to make that worth noticing: an
+# undeclared package is one autoremove away from taking a declared feature
+# with it, and the slim step's runtime-dependency guard can only protect what
+# is named here.
+netcat-openbsd

@@ -101,6 +101,51 @@ grep -q rebooted "$reboot_log" 2>/dev/null && ok 'request reboots' || fail 'requ
     || fail 'request wiped state before the reboot'
 run_request extra-argument >/dev/null 2>&1 && fail 'request accepted an argument' \
     || ok 'request refuses arguments'
+rm -f "$data/fixture-system/factory-reset-requested"
+: > "$reboot_log"
+run_request --yes >/dev/null 2>&1
+[ -f "$data/fixture-system/factory-reset-requested" ] && ok 'request accepts --yes' \
+    || fail 'request refused --yes'
+
+# --- a person at a terminal is asked first ---------------------------------
+# This tool sits in root's PATH and used to erase the device with one command
+# and no question; a reviewer proved the gap by running it on the bench
+# expecting a refusal that did not apply. The broker has no terminal and is
+# unaffected, which is why the confirmation is gated on one rather than on a
+# flag the UI would have to remember to pass.
+if command -v script >/dev/null 2>&1; then
+    ask_on_a_terminal() { # $1=what to type; prints nothing, returns the exit status
+        rm -f "$data/fixture-system/factory-reset-requested"
+        : > "$reboot_log"
+        printf '%s\n' "$1" | AB_UPDATE_CONFIG="$conf" AB_APP_ACCOUNT="$(id -un)" \
+            AB_REBOOT_COMMAND="$reboot_command" REBOOT_LOG="$reboot_log" \
+            AB_REBOOT_DELAY_SECONDS=0 \
+            script -qec "/bin/bash $request" /dev/null >/dev/null 2>&1
+    }
+    ask_on_a_terminal 'no'
+    [ ! -f "$data/fixture-system/factory-reset-requested" ] \
+        && ok 'a terminal is asked, and "no" means no' \
+        || fail 'the confirmation armed a reset anyway'
+    grep -q rebooted "$reboot_log" 2>/dev/null && fail 'a cancelled reset rebooted' \
+        || ok 'a cancelled reset does not reboot'
+    ask_on_a_terminal 'erase'
+    [ -f "$data/fixture-system/factory-reset-requested" ] \
+        && ok 'a terminal that types "erase" gets one' \
+        || fail 'the confirmation refused a confirmed reset'
+    # ...and the flag skips the question even at a terminal, which is what a
+    # script wants.
+    rm -f "$data/fixture-system/factory-reset-requested"
+    printf '' | AB_UPDATE_CONFIG="$conf" AB_APP_ACCOUNT="$(id -un)" \
+        AB_REBOOT_COMMAND="$reboot_command" REBOOT_LOG="$reboot_log" \
+        AB_REBOOT_DELAY_SECONDS=0 \
+        script -qec "/bin/bash $request --yes" /dev/null >/dev/null 2>&1
+    [ -f "$data/fixture-system/factory-reset-requested" ] \
+        && ok '--yes skips the question at a terminal' \
+        || fail '--yes still asked'
+else
+    echo '  --  skipped: no script(1) to allocate a terminal with'
+fi
+rm -f "$data/fixture-system/factory-reset-requested"
 
 # --- a reset must not eat an update that is on trial ----------------------
 # A tryboot candidate gets one boot, and the reset's own reboot spends it -

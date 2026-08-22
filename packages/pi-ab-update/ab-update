@@ -60,9 +60,19 @@ checker=${AB_CHECK_SCRIPT:-/usr/local/sbin/ab-update-check}
 progress_file=$runtime_dir/progress
 check_file=${AB_CHECK_RESULT_FILE:-$runtime_dir/check}
 update_state_file=$state_dir/update-state
+# The durable state is root-only by design; the commit service publishes a
+# bounded summary of it for readers that are not root - which is what the HMI
+# uses. This tool reads it for the same reason: run unprivileged it used to
+# answer "no update state recorded" on a device that had plainly been updated,
+# and that is not a smaller answer, it is a wrong one.
+public_status_file=${AB_PUBLIC_STATUS_FILE:-$runtime_dir/status}
 lock_file=${AB_LOCK_FILE:-$runtime_dir/private/update.lock}
 
 die() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
+update_state_value() { # $1=key; the durable record first, then the public summary
+    published_value "$update_state_file" "$1" 2>/dev/null && return 0
+    published_value "$public_status_file" "$1" 2>/dev/null
+}
 usage() { sed -n '/^# Usage:/,/^set -/p' "$0" | sed -e 's/^# \{0,1\}//' -e '$d'; exit "${1:-0}"; }
 need_root() { [ "$(id -u)" -eq 0 ] || die "this needs root: try sudo $(basename "$0") $*"; }
 
@@ -140,8 +150,11 @@ show_status() {
     printf '  version            %s\n' "$(inactive_version 2>/dev/null || echo 'unknown')"
 
     printf '\nUpdate state\n'
-    if state=$(published_value "$update_state_file" state 2>/dev/null); then
+    if state=$(update_state_value state 2>/dev/null); then
         printf '  state              %s\n' "$state"
+        # Only the durable record carries these. An unprivileged reader gets
+        # the state and not the detail, which is the honest shape of what it
+        # is allowed to see.
         for k in candidate_slot version variant; do
             published_value "$update_state_file" "$k" >/dev/null 2>&1 && \
                 printf '  %-18s %s\n' "$k" "$(published_value "$update_state_file" "$k")"
@@ -237,7 +250,7 @@ case "${1:-status}" in
     --active-partition)  active_partition || die 'running root partition unavailable' ;;
     --inactive-partition) inactive_partition || die 'inactive partition unavailable' ;;
     --inactive-version)  need_root --inactive-version; inactive_version ;;
-    --state|--update-state) published_value "$update_state_file" state || die 'no update state recorded' ;;
+    --state|--update-state) update_state_value state || die 'no update state recorded' ;;
     --check-state)       published_value "$check_file" state || die 'no check has run' ;;
     --progress)          [ -f "$progress_file" ] && cat "$progress_file" || die 'no update has run' ;;
 

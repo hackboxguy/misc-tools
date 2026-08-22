@@ -58,6 +58,34 @@ out=$(run --state)
 out=$(run --check-state)
 [ "$out" = available ] && ok 'query: --check-state' "$out" || fail "--check-state gave '$out'"
 
+# --- a reader that cannot see the durable record still gets the truth ------
+# The durable state is root-only by design, and the commit service publishes a
+# bounded summary of it for everyone else. Read unprivileged, this tool used to
+# answer "no update state recorded" on a device that had plainly been updated -
+# not a smaller answer than root's, a wrong one. An absent durable file
+# exercises the same branch as an unreadable one: both fail the same read.
+mv "$work/state/update-state" "$work/state/update-state.hidden"
+printf '%s\n' 'state=committed' > "$work/run/status"
+out=$(run --state 2>/dev/null)
+[ "$out" = committed ] && ok 'query: --state without the durable record' "$out" \
+    || fail "--state fell back to '$out'"
+# Captured, not piped into grep -q: this suite runs with `set -o pipefail`,
+# and grep -q exits on the first match, so the command under test is killed
+# mid-write and the pipeline reports 141 (SIGPIPE) however well it matched.
+status_output=$(run status 2>/dev/null || true)
+case "$status_output" in
+    *"state              committed"*) ok 'status: reads the public summary too' 'committed' ;;
+    *) fail 'status still says no update has run' ;;
+esac
+# The durable record wins when it is readable: it is the authority, and it
+# carries detail the summary does not.
+mv "$work/state/update-state.hidden" "$work/state/update-state"
+printf '%s\n' 'state=fallback' > "$work/run/status"
+out=$(run --state)
+[ "$out" = committed ] && ok 'query: the durable record outranks the summary' "$out" \
+    || fail "--state preferred the summary and gave '$out'"
+rm -f "$work/run/status"
+
 # --- status is a superset, and mentions what a person needs ---------------
 out=$(run status)
 for want in '00.36' 'committed' 'available' 'writing'; do

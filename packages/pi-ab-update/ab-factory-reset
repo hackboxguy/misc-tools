@@ -33,6 +33,9 @@ ab_setting() { # $1=env value, $2=config key, $3=default
 
 product=$(ab_setting "${AB_PRODUCT:-}" AB_PRODUCT pi-ab-update)
 state_dir=$(ab_setting "${AB_STATE_DIR:-}" AB_STATE_DIR /data/pi-ab-update)
+# Named here only so the confirmation can say what it is about to erase; the
+# wipe itself is the boot service's, and resolves this the same way.
+data_mount=$(ab_setting "${AB_DATA_MOUNT:-}" AB_DATA_MOUNT /data)
 marker=${AB_RESET_MARKER:-$state_dir/factory-reset-requested}
 reboot_command=${AB_REBOOT_COMMAND:-/usr/sbin/reboot}
 # Rebooting immediately kills the caller before it can be told the request
@@ -48,9 +51,40 @@ log_diagnostic() {
 }
 die() { log_diagnostic "$*"; exit 1; }
 
-[ "$#" -eq 0 ] || { printf '%s\n' '[ERROR] factory reset accepts no arguments' >&2; exit 64; }
+# One flag, and only one: --yes skips the interactive confirmation below.
+# Anything else is still refused outright, because every other word a caller
+# might pass here is a word this tool does not have.
+assume_yes=0
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --yes|-y) assume_yes=1; shift ;;
+        *) printf '%s\n' '[ERROR] factory reset accepts no arguments' >&2; exit 64 ;;
+    esac
+done
 [ "$(id -u)" -eq 0 ] || die 'factory reset must run as root'
 [ -x "$reboot_command" ] || die 'reboot command is unavailable'
+
+# A person at a root shell gets one chance to change their mind.
+#
+# The panel gates this behind a PIN and two deliberate presses, and the broker
+# is reached only through that UI - but this tool sits in root's PATH and used
+# to erase the device with one command and no question. A reviewer proved the
+# gap by running it on the bench, expecting a refusal that did not apply, and
+# the owner's Wi-Fi credential went with it.
+#
+# Only when someone is there to answer: the broker has no terminal, fixtures
+# have no terminal, and neither is asked. Root can always bypass a seatbelt;
+# this one is against habit, not against intent.
+if [ "$assume_yes" -eq 0 ] && [ -t 0 ]; then
+    printf 'This erases all settings, credentials and identity on %s.\n' "$data_mount"
+    printf 'The device restarts and comes back as if freshly flashed.\n'
+    printf 'Type "erase" to continue: '
+    read -r answer || answer=''
+    [ "$answer" = erase ] || {
+        printf '%s\n' '[ERROR] factory reset cancelled; nothing was erased' >&2
+        exit 1
+    }
+fi
 
 # Refuse while an update is on trial.
 #
@@ -68,6 +102,13 @@ die() { log_diagnostic "$*"; exit 1; }
 #
 # The way out is always available and needs no flag: let the candidate commit,
 # or reboot once to let it fall back. Either leaves a state this refuses on.
+#
+# Only an armed candidate is refused. A reset requested while an update is
+# still *writing* is accepted, deliberately: the half-written slot is the
+# inactive one, which is exactly the state a power cut leaves behind and which
+# the next install overwrites from the start. The asymmetry is between "an
+# update is waiting to be judged" and "an update is being written", and only
+# the first has something to lose.
 update_state_file=$state_dir/update-state
 if [ -f "$update_state_file" ] && [ ! -L "$update_state_file" ]; then
     pending_state=$(awk -F= '$1 == "state" { print $2; exit }' "$update_state_file" 2>/dev/null || true)

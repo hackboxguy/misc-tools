@@ -102,6 +102,51 @@ grep -q rebooted "$reboot_log" 2>/dev/null && ok 'request reboots' || fail 'requ
 run_request extra-argument >/dev/null 2>&1 && fail 'request accepted an argument' \
     || ok 'request refuses arguments'
 
+# --- a reset must not eat an update that is on trial ----------------------
+# A tryboot candidate gets one boot, and the reset's own reboot spends it -
+# then the wipe erases the record that a candidate existed, so nothing commits
+# and the device falls back to the image it came from. The update vanishes and
+# the reset runs on the old one. An owner hit exactly this on the bench.
+rm -f "$data/fixture-system/factory-reset-requested"
+: > "$reboot_log"
+printf 'state=candidate-armed\ncandidate_slot=A\nversion=00.48\n' > "$data/fixture-system/update-state"
+run_request >/dev/null 2>&1
+refusal_status=$?
+if [ "$refusal_status" -eq 0 ]; then
+    fail 'the reset was requested while an update was on trial'
+else
+    ok 'refuses to reset while an update is on trial'
+fi
+# The broker never forwards handler output, so the reason travels as a code:
+# 75 is EX_TEMPFAIL, and the screen turns it into words. A plain failure would
+# reach the panel as "could not be started", which is true and useless.
+[ "$refusal_status" -eq 75 ] && ok 'the refusal is distinguishable from a failure' \
+    || fail "the refusal exits $refusal_status, which no caller can tell from a failure"
+[ ! -f "$data/fixture-system/factory-reset-requested" ] && ok 'a refused reset leaves no marker' \
+    || fail 'a refused reset armed itself anyway'
+grep -q rebooted "$reboot_log" 2>/dev/null && fail 'a refused reset rebooted' \
+    || ok 'a refused reset does not reboot'
+# Captured, not piped: the request exits non-zero by design, and under
+# `set -o pipefail` a pipeline inherits that even when grep matched.
+refusal=$(run_request 2>&1 || true)
+case "$refusal" in
+    *'on trial'*) ok 'the refusal says why' ;;
+    *) fail "the refusal does not say why: $refusal" ;;
+esac
+
+# ...and the states that are not a trial in progress do not block it. A
+# candidate that already fell back is finished, not pending.
+for finished in committed fallback; do
+    printf 'state=%s\ncandidate_slot=A\n' "$finished" > "$data/fixture-system/update-state"
+    rm -f "$data/fixture-system/factory-reset-requested"
+    run_request >/dev/null 2>&1
+    [ -f "$data/fixture-system/factory-reset-requested" ] \
+        && ok "a reset is allowed after an update is $finished" \
+        || fail "a reset was refused after an update is $finished"
+done
+rm -f "$data/fixture-system/factory-reset-requested"
+printf 'state=committed\ncandidate_slot=B\n' > "$data/fixture-system/update-state"
+
 # --- the deferred reboot lets the caller hear the answer -------------------
 # An immediate reboot kills the caller mid-reply, so a broker-mediated UI
 # reports a failure for a request that already succeeded. The request must

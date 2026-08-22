@@ -52,6 +52,35 @@ die() { log_diagnostic "$*"; exit 1; }
 [ "$(id -u)" -eq 0 ] || die 'factory reset must run as root'
 [ -x "$reboot_command" ] || die 'reboot command is unavailable'
 
+# Refuse while an update is on trial.
+#
+# A tryboot candidate gets exactly one boot, and this request spends it: the
+# reset reboots for its own reasons, so the candidate never gets the boot it
+# was armed for. Worse, the wipe erases the record that a candidate was being
+# tried at all, so the commit service finds nothing to commit and the device
+# falls back to the slot it came from. An update that was downloaded, written,
+# signed-checked and booted is discarded without a word, and the reset then
+# runs on the old image.
+#
+# That is not hypothetical. On the bench an owner updated and reset
+# immediately, and got the old version back - along with the defect the update
+# had just fixed, which made the fix look like it had not worked.
+#
+# The way out is always available and needs no flag: let the candidate commit,
+# or reboot once to let it fall back. Either leaves a state this refuses on.
+update_state_file=$state_dir/update-state
+if [ -f "$update_state_file" ] && [ ! -L "$update_state_file" ]; then
+    pending_state=$(awk -F= '$1 == "state" { print $2; exit }' "$update_state_file" 2>/dev/null || true)
+    if [ "$pending_state" = candidate-armed ]; then
+        # 75 is EX_TEMPFAIL: "try again later", which is exactly the advice.
+        # A distinct code rather than a message, because the broker deliberately
+        # never forwards handler output - the wording a person reads is authored
+        # on the screen's side of the socket, and a code is what selects it.
+        log_diagnostic 'an update is on trial; wait for it to finish, then reset'
+        exit 75
+    fi
+fi
+
 # The marker must land on the durable filesystem it is about to erase; if that
 # is not writable there is nothing to reset and nothing would survive anyway.
 install -d -m0700 -o root -g root "$state_dir" || die 'durable state directory is unavailable'

@@ -106,6 +106,25 @@ fi
 # 4. config.txt (Channel A default) + modprobe.d (udc variant)
 #    NB: Pi config.txt has NO inline comments - a comment on a dtoverlay= line
 #    makes the firmware treat it as part of the overlay spec and silently fail.
+#
+#    cam0_reg=on, cam1_reg=off. The two connector regulators are set for the
+#    Channel A layout: the EVK is on CAM/DISP1 and is powered from its own
+#    USB-C, so cam1_reg stays off - but CAM/DISP0 is then FREE, and that is the
+#    port a DSI touch panel goes on. Its bridge and touch controller are fed
+#    from that connector's 3V3 rail, so cam0_reg MUST be on or the panel is
+#    dead: display_auto_detect never sees it, no DSI card appears, and the live
+#    view has nowhere to render.
+#
+#    This one is worth knowing about because the failure LOOKS intermittent. A
+#    cold boot can find the panel on residual rail charge and every warm reboot
+#    afterwards will not, which reads as flaky hardware rather than a config
+#    line - it cost a bring-up session here.
+#
+#    The trade-off: a rig that cables BOTH FFCs to the EVK (Pi CAM0 <-> EVK P2,
+#    the Channel B wiring) must NOT power that rail into the EVK. Selecting
+#    Channel B turns it back off - see vd56g4-select-channel.sh, which owns the
+#    pairing. Channel B and a DSI panel are mutually exclusive anyway: on a Pi 5
+#    they want the same connector.
 #------------------------------------------------------------------------------
 echo "[4/6] Configuring config.txt + modprobe.d ..."
 CFG=/boot/firmware/config.txt
@@ -117,7 +136,7 @@ add_cfg() { grep -qxF "$1" "$CFG" 2>/dev/null || echo "$1" >> "$CFG"; }
 add_cfg "camera_auto_detect=0"
 add_cfg "dtparam=i2c_csi_dsi0=on"
 add_cfg "dtparam=i2c_csi_dsi1=on"
-add_cfg "dtparam=cam0_reg=off"
+add_cfg "dtparam=cam0_reg=on"
 add_cfg "dtparam=cam1_reg=off"
 add_cfg "dtoverlay=vd56g4-max96716a-rpi5"
 
@@ -144,14 +163,20 @@ case "$1" in
   a|A)
     sed -i 's|^#\?dtoverlay=vd56g4-max96716a-rpi5$|dtoverlay=vd56g4-max96716a-rpi5|' "$CFG"
     sed -i 's|^dtoverlay=vd56g4-max96716a-rpi5-cam0$|#dtoverlay=vd56g4-max96716a-rpi5-cam0|' "$CFG"
+    # Camera is on CAM/DISP1, so CAM/DISP0 is free for a DSI touch panel and
+    # its 3V3 rail must be live or the panel never enumerates.
+    sed -i 's|^dtparam=cam0_reg=off$|dtparam=cam0_reg=on|' "$CFG"
     echo 'options vb56g4a vb56g4a_opt=udc' > /etc/modprobe.d/vb56g4a.conf
     systemctl disable vd56g4-chanB-setup.service 2>/dev/null || true
-    echo "Channel A selected (camera on J1). Reboot to apply." ;;
+    echo "Channel A selected (camera on J1, CAM/DISP0 free for a DSI panel). Reboot to apply." ;;
   b|B)
     sed -i 's|^dtoverlay=vd56g4-max96716a-rpi5$|#dtoverlay=vd56g4-max96716a-rpi5|' "$CFG"
+    # Camera moves ONTO CAM/DISP0, which is EVK-powered - do not drive the Pi's
+    # regulator into it. A DSI panel cannot be used on this channel.
+    sed -i 's|^dtparam=cam0_reg=on$|dtparam=cam0_reg=off|' "$CFG"
     echo 'options vb56g4a vb56g4a_opt="udc,link=b"' > /etc/modprobe.d/vb56g4a.conf
     systemctl enable vd56g4-chanB-setup.service 2>/dev/null || true
-    echo "Channel B selected (camera on J2). Reboot to apply." ;;
+    echo "Channel B selected (camera on J2; DSI panel not available). Reboot to apply." ;;
   *) echo "usage: $0 a|b"; exit 1 ;;
 esac
 SEL

@@ -1,4 +1,5 @@
-# pi5-gmsl-vd56g4: VD56G4 GMSL camera (AD-GMSL716MIPI-EVK / MAX96716A) -> Pi 5 HDMI
+# pi5-gmsl-vd56g4: VD56G4 GMSL camera (AD-GMSL716MIPI-EVK / MAX96716A)
+#                  -> Pi 5 DSI touch panel (if fitted) or HDMI
 #
 # Recommended (single command, cached stages, auto-cloned sources):
 #
@@ -36,8 +37,9 @@
 #     vd56g4-max96716a-rpi5-cam0 (csi0 = Channel B).
 #   - config.txt tuned for Channel A + /etc/modprobe.d/vb56g4a.conf (udc variant).
 #   - GStreamer + v4l-utils + i2c-tools + raspi-utils.
-#   - /usr/local/bin/vd56g4-hdmi.sh (gst v4l2src -> kmssink, auto-detects the
-#     HDMI mode) and vd56g4-select-channel.sh helper.
+#   - /usr/local/bin/vd56g4-hdmi.sh (gst v4l2src -> kmssink; picks a connected
+#     DSI panel over HDMI and auto-detects the mode) and the
+#     vd56g4-select-channel.sh helper.
 #   - systemd: vd56g4-camview.service ENABLED (auto-play Channel A on boot);
 #     vd56g4-chanB-setup.service shipped disabled.
 #
@@ -45,9 +47,15 @@
 # Hardware setup on the target Pi 5
 # ==============================================================================
 #   - Power the AD-GMSL716MIPI-EVK from USB-C (switch S1 up).
-#   - Both Pi 5 CSI FFCs cabled to the EVK: Pi CAM1 <-> EVK P1, Pi CAM0 <-> EVK P2.
 #   - VD56G4 camera on FAKRA J1 (= GMSL link A) for the default Channel A.
-#   - HDMI monitor on either Pi 5 HDMI port.
+#   - Camera path: Pi CAM/DISP1 <-> EVK P1.
+#   - Display, EITHER of:
+#       * DSI touch panel (Luckfox 4.3", 800x480) on Pi CAM/DISP0 - preferred
+#         when fitted; the live view is rotated to portrait automatically and a
+#         REC button pops up on a tap.
+#       * HDMI monitor on either Pi 5 HDMI port (landscape, unrotated).
+#   - Channel B (Pi CAM/DISP0 <-> EVK P2) and a DSI panel are MUTUALLY
+#     EXCLUSIVE: on a Pi 5 they need the same connector.
 #
 # ==============================================================================
 # Flash + first boot
@@ -66,6 +74,22 @@
 #   Switch camera channel (they cannot run at once - single deserializer):
 #     sudo vd56g4-select-channel.sh a     # camera on J1 (default), then reboot
 #     sudo vd56g4-select-channel.sh b     # camera on J2, then reboot
+#
+#   Display troubleshooting:
+#     A Pi 5 puts its two outputs on SEPARATE DRM devices - card0 = drm-rp1-dsi
+#     (the panel) and card2 = vc4 (HDMI). kmssink's implicit device probe knows
+#     "vc4" but NOT "drm-rp1-dsi", so anything rendering to the panel MUST pass
+#     bus-id= or it silently opens the HDMI card and dies at PAUSED with
+#     "driver does not provide mode settings configuration". cam-recorder and
+#     vd56g4-hdmi.sh both resolve this automatically; check with:
+#       ls /sys/class/drm/                       # card0-DSI-1 present?
+#       journalctl -u cam-recorder -b | grep display=
+#
+#     Panel not detected at all (no DSI card, no ft5x06 touch node): that is the
+#     CAM/DISP0 3V3 rail, i.e. dtparam=cam0_reg. It must be ON for a DSI panel.
+#     The symptom is deceptive - a COLD boot can find the panel on residual rail
+#     charge while every warm reboot afterwards cannot, which looks like flaky
+#     hardware rather than a config line. Power-cycle (not reboot) after fixing.
 #
 #   Verify / debug:
 #     systemctl status vd56g4-camview.service

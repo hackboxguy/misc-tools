@@ -23,6 +23,16 @@ v4l-utils
 i2c-tools
 raspi-utils
 
+# --- USB recording media: filesystem support for the stick ---
+# The recorder writes clips to a USB stick auto-mounted at /media/usb by
+# cam-recorder's udev rule. vfat needs nothing extra, but anything larger than
+# 32 GB ships formatted exFAT, and a 64 GB+ stick is exFAT unless somebody
+# deliberately reformatted it. The kernel driver does the mounting; exfatprogs
+# is what lets the board fsck a stick after a bad unplug and mkfs a new one.
+# It has been present only as somebody else's transitive dependency - declared
+# here so a lean rebuild cannot quietly drop it.
+exfatprogs
+
 # --- DKMS: keep the driver rebuildable across kernel upgrades ---
 # dkms pulls the build toolchain; linux-headers-rpi-2712 = the Pi 5 kernel
 # headers so a post-upgrade `dkms autoinstall` finds a matching build tree.

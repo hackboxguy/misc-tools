@@ -18,6 +18,12 @@ set -e
 # packets. On the direct cable there is no default route to lean on, so without
 # this the Pi never discovers the AGX and the cluster shows no DMS at all.
 #
+# Validated on hardware 2026-08-25 (image 01.01): NM installs it from the
+# keyfile as `224.0.0.0/4 dev eth0 proto static scope link metric 100`, and the
+# Pi<->AGX pair works on a direct cable AND on DHCP with no hand-editing.
+# qt-cluster-demo.service also does an `ip route replace` for the same prefix at
+# launch, so two entries show up; that is expected and harmless.
+#
 # Timing: carrier + ~5s DHCP timeout -> static active a second later
 # (fast pairing with a direct-cabled static peer, e.g. Jetson Xavier at
 # 192.168.10.2; real DHCP servers answer well within 5s).

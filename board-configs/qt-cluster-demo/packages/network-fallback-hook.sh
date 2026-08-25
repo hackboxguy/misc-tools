@@ -11,6 +11,13 @@ set -e
 #   2. eth0-static-fallback (priority 0): 192.168.10.3/24, no gateway/DNS
 #      (bench-network use; a bogus default route would blackhole traffic)
 #
+# Both profiles carry route1=224.0.0.0/4, and it is load-bearing. vsomeip does
+# not create its SOME/IP-SD endpoint at all unless Linux has an explicit route
+# covering the SD multicast group (239.192.255.251) on the interface that owns
+# the vsomeip `unicast` address -- it silently reports mc=0 and sends no FIND
+# packets. On the direct cable there is no default route to lean on, so without
+# this the Pi never discovers the AGX and the cluster shows no DMS at all.
+#
 # Timing: carrier + ~5s DHCP timeout -> static active a second later
 # (fast pairing with a direct-cabled static peer, e.g. Jetson Xavier at
 # 192.168.10.2; real DHCP servers answer well within 5s).
@@ -43,6 +50,7 @@ autoconnect-retries=1
 [ipv4]
 method=auto
 dhcp-timeout=$DHCP_TIMEOUT
+route1=224.0.0.0/4
 
 [ipv6]
 method=auto
@@ -60,6 +68,7 @@ autoconnect-priority=0
 [ipv4]
 method=manual
 address1=$FALLBACK_IP
+route1=224.0.0.0/4
 
 [ipv6]
 method=link-local

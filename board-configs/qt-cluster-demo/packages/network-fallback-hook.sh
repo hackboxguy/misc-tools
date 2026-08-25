@@ -7,7 +7,13 @@ set -e
 # native two-profile autoconnect-priority mechanism (RaspiOS bookworm/trixie
 # use NM by default - no scripts, no dhcpcd):
 #
-#   1. eth0-dhcp (priority 10): DHCP, 5s timeout, single attempt
+#   1. eth0-dhcp (priority 10): DHCP, 5s timeout, single attempt, may-fail=false
+#      may-fail=false is load-bearing: NM treats an activation as successful if
+#      EITHER address family comes up, so at the default (true) an IPv6 success
+#      keeps this profile active with NO IPv4 and the fallback never fires --
+#      the Pi then sits on a direct cable with no usable address at all. The AGX
+#      profile has always had it; the Pi's did not, which is why the AGX reached
+#      192.168.10.2 on a cable boot while the Pi did not reach 192.168.10.3.
 #   2. eth0-static-fallback (priority 0): 192.168.10.3/24, no gateway/DNS
 #      (bench-network use; a bogus default route would blackhole traffic)
 #
@@ -56,6 +62,7 @@ autoconnect-retries=1
 [ipv4]
 method=auto
 dhcp-timeout=$DHCP_TIMEOUT
+may-fail=false
 route1=224.0.0.0/4
 
 [ipv6]

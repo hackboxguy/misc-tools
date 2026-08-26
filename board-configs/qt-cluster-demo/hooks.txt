@@ -7,3 +7,7 @@ packages/qt-cluster-demo-hook.sh|file://${REPOBINS}/qt-cluster-demo|local|/home/
 
 #eth0: DHCP with static fallback 192.168.10.3/24 (NetworkManager two-profile)
 packages/network-fallback-hook.sh
+
+# Keep the journal across reboots. Stock RaspiOS is Storage=volatile, which
+# destroys the boot-time evidence this board's failures live in.
+packages/persistent-journal-hook.sh

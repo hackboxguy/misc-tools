@@ -52,3 +52,4 @@ kodi
 ddcutil
 libddcutil-dev
 argyll
+python3-usb

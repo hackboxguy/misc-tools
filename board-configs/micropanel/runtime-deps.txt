@@ -39,6 +39,7 @@ kodi
 ddcutil
 libddcutil-dev
 argyll
+python3-usb
 jq
 bc
 dnsmasq

@@ -25,7 +25,7 @@ require test -x "$root_mount/usr/lib/micropanel-touch/update-health"
 
 for directory in micropanel-touch micropanel-touch/logs micropanel-touch/ssh-host-keys \
                  micropanel-touch-system micropanel-touch-network/dhcp-server \
-                 NetworkManager/system-connections; do
+                 NetworkManager/system-connections xmproxy; do
     require test -d "$data_mount/$directory"
 done
 app_account=$(awk -F: '$1 == "micropanel-touch" { print $3 ":" $4; exit }' "$root_mount/etc/passwd")
@@ -41,3 +41,15 @@ require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel-touch-system")" = '0:
 require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel-touch-network")" = "0:${app_group}:750"
 require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel-touch-network/dhcp-server")" = "0:${app_group}:750"
 require test "$(stat -c '%u:%g:%a' "$data_mount/NetworkManager/system-connections")" = '0:0:700'
+# xmproxy (jsonrpc-tcp-srv): binaries, defaults, account, units and manifest key
+require test -x "$root_mount/opt/xmproxy/bin/xmproxysrv"
+require test -x "$root_mount/opt/xmproxy/bin/sysmgr"
+require test -x "$root_mount/opt/xmproxy/bin/xmproxy-seed.sh"
+require test -f "$root_mount/opt/xmproxy/share/xmproxy/etc/manifest.json"
+require test -f "$root_mount/usr/lib/sysusers.d/xmproxy.conf"
+require grep -Eq '^xmproxy:' "$root_mount/etc/passwd"
+for unit in xmproxy-seed sysmgr xmproxysrv; do
+    require test -L "$root_mount/etc/systemd/system/multi-user.target.wants/$unit.service"
+done
+require grep -Eq '^JSONRPC_TCP_SRV_REVISION=[0-9a-f]{40}$' "$image_manifest"
+require test "$(stat -c '%u:%g:%a' "$data_mount/xmproxy")" = '0:0:755'

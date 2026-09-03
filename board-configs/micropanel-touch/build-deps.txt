@@ -9,3 +9,10 @@ libdrm-dev
 libgpiod-dev
 libssl-dev
 nlohmann-json3-dev
+
+# jsonrpc-tcp-srv hook: json-c headers, wget + bzip2 for the gloox tarball,
+# libi2c-dev for the display library it links unconditionally.
+libjson-c-dev
+wget
+bzip2
+libi2c-dev

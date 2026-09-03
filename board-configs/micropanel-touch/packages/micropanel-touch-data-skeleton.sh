@@ -64,5 +64,11 @@ install -d -m0750 -o root -g "$account_gid" "$data_root/micropanel-touch-network
 install -d -m0750 -o root -g "$account_gid" \
     "$data_root/micropanel-touch-network/dhcp-server"
 
+# xmproxy (jsonrpc-tcp-srv): the daemon's etc and state subdirectories are
+# created and seeded by xmproxy-seed.service at boot, because the xmproxy
+# account's uid is only known inside the image. Only the root directory is
+# part of the skeleton so a factory reset leaves a well-defined tree.
+install -d -m0755 -o root -g root "$data_root/xmproxy"
+
 # NetworkManager's keyfile backend requires this restrictive mode.
 install -d -m0700 -o root -g root "$data_root/NetworkManager/system-connections"

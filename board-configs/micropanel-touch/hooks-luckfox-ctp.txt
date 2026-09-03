@@ -2,4 +2,5 @@
 # This variant hook replaces that managed block with the mutually exclusive
 # Luckfox 3.5-RPi-LCD-CTP ST7796S/GT911 configuration.
 packages/micropanel-touch-hook.sh|${MICROPANEL_TOUCH_APP_REPO}|${MICROPANEL_TOUCH_REVISION}|/opt/micropanel-touch|
+packages/jsonrpc-tcp-srv-hook.sh|https://github.com/hackboxguy/jsonrpc-tcp-srv.git|m2m-extension|/opt/xmproxy|
 packages/luckfox-ctp-hook.sh

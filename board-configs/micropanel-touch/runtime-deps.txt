@@ -32,3 +32,7 @@ avahi-utils
 # with it, and the slim step's runtime-dependency guard can only protect what
 # is named here.
 netcat-openbsd
+
+# jsonrpc-tcp-srv (xmproxy): json-c at runtime; gloox is built into
+# /opt/xmproxy/lib and needs libssl3 (already listed above).
+libjson-c5

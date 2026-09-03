@@ -53,8 +53,11 @@ cat > systemd/qt-cluster-demo.env <<EOF
 CLUSTER_ARGS=--demo --dms=focusdrive-v2 --dms-vehicle-speed-floor=30 --dms-someip=on --dms-landmarks --dms-protocol=v2 --dms-host=0.0.0.0 --dms-port=5500 --dms-someip-ids=$DEST/docs/focusdrive-agx-ids.pi4.json
 DMS_ENABLED=1
 SOMEIP_IFACE=eth0
-# Free-form additions, e.g. --dms-ncap-icons=both
-EXTRA_ARGS=
+# Free-form additions, e.g. --dms-ncap-icons=both.
+# --theme=harman: boot into the Harman theme (eco coach ring + ADAS
+# visualiser).  Kept here rather than in CLUSTER_ARGS so that line stays a
+# verbatim copy of what build-and-deploy.sh writes.
+EXTRA_ARGS=--theme=harman
 EOF
 
 echo "[4/4] Enabling service..."

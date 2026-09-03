@@ -10,6 +10,9 @@ libqt5network5
 qml-module-qtquick2
 qml-module-qtquick-window2
 fonts-dejavu
+# The harman theme's design specifies Roboto; without it the cluster falls
+# back to the bundled Lexend Deca.
+fonts-roboto
 
 # vsomeip (in /home/pi/.codex-deps) links against these
 libboost-system1.83.0

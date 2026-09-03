@@ -5,7 +5,7 @@ packages/micropanel-touch-hook.sh|${MICROPANEL_TOUCH_APP_REPO}|${MICROPANEL_TOUC
 
 # xmproxy XMPP IoT endpoint (chat bot, JSON-RPC over XMPP, sysmgr). Builds
 # gloox with OpenSSL in the chroot; state under /data/xmproxy.
-packages/jsonrpc-tcp-srv-hook.sh|${JSONRPC_TCP_SRV_REPO}|${JSONRPC_TCP_SRV_REVISION}|/opt/xmproxy|
+packages/jsonrpc-tcp-srv-hook.sh|https://github.com/hackboxguy/jsonrpc-tcp-srv.git|m2m-extension|/opt/xmproxy|
 
 # Tier-2 domain-pack hooks are added below. Each pack must ship a menu fragment
 # and handlers together and add its capability-matrix rows before it is enabled.

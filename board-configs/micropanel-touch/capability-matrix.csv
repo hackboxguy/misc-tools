@@ -9,4 +9,4 @@ display-standby-piscreen,unavailable-hardware,micropanel-touch,none,PiScreen fix
 display-brightness-piscreen,unavailable-hardware,micropanel-touch,none,PiScreen fixed-on backlight;GPIO 22 is not PWM-capable,
 fpga-and-mcu-packs,pending,Tier-2-pack,pack-defined,pack-defined,pack-defined
 xmproxy-xmpp-endpoint,supported,xmproxy;root(sysmgr),none,127.0.0.1:40001;127.0.0.1:40005,/data/xmproxy/state;/tmp
-xmproxy-configuration,planned,micropanel-touch,typed-broker(apply_xmproxy_config),xmproxysrv.service,/data/xmproxy/etc
+xmproxy-configuration,supported,micropanel-touch;root(broker),typed-broker(iot_agent_config)->micropanel-touch-iot-agent-config,xmproxysrv.service,/data/xmproxy/etc;/data/micropanel-touch/iot-agent.conf

@@ -8,3 +8,5 @@ display-brightness-luckfox-ctp,supported,micropanel-touch,kernel-backlight-sysfs
 display-standby-piscreen,unavailable-hardware,micropanel-touch,none,PiScreen fixed-on backlight;GPIO 22 panel-overlay pin group,
 display-brightness-piscreen,unavailable-hardware,micropanel-touch,none,PiScreen fixed-on backlight;GPIO 22 is not PWM-capable,
 fpga-and-mcu-packs,pending,Tier-2-pack,pack-defined,pack-defined,pack-defined
+xmproxy-xmpp-endpoint,supported,xmproxy;root(sysmgr),none,127.0.0.1:40001;127.0.0.1:40005,/data/xmproxy/state;/tmp
+xmproxy-configuration,planned,micropanel-touch,typed-broker(apply_xmproxy_config),xmproxysrv.service,/data/xmproxy/etc

@@ -5,7 +5,7 @@ set -e
 #
 # Builds the cluster app with the repo's own build script (build-only mode)
 # and then performs the chroot-safe half of its deploy step: the env file for
-# the fixed image variant (--mode=demo --dms=enable, EV theme) plus systemctl
+# the fixed image variant (--mode=demo --dms=enable, Harman theme) plus systemctl
 # enable.
 # daemon-reload/restart are skipped - systemd is not running in a chroot.
 #
@@ -45,20 +45,17 @@ fi
 echo "[2/4] Building (build-and-deploy.sh, build-only)..."
 ./scripts/build-and-deploy.sh --mode=demo --dms=enable --skip-tests --skip-deploy
 
-echo "[3/4] Writing service environment (demo + DMS + EV theme)..."
+echo "[3/4] Writing service environment (demo + DMS + Harman theme)..."
 # Static equivalent of what build-and-deploy.sh --mode=demo --dms=enable
 # writes in its deploy step (kept in sync with that script).
 cat > systemd/qt-cluster-demo.env <<EOF
 # Generated at image-build time by qt-cluster-demo-hook.sh
-#   mode: demo   dms: enable   theme: ev
-CLUSTER_ARGS=--demo --theme=ev --dms=focusdrive-v2 --dms-vehicle-speed-floor=30 --dms-someip=on --dms-landmarks --dms-protocol=v2 --dms-host=0.0.0.0 --dms-port=5500 --dms-someip-ids=$DEST/docs/focusdrive-agx-ids.pi4.json
+#   mode: demo   dms: enable   theme: harman
+CLUSTER_ARGS=--demo --theme=harman --dms=focusdrive-v2 --dms-vehicle-speed-floor=30 --dms-someip=on --dms-landmarks --dms-protocol=v2 --dms-host=0.0.0.0 --dms-port=5500 --dms-someip-ids=$DEST/docs/focusdrive-agx-ids.pi4.json
 DMS_ENABLED=1
 SOMEIP_IFACE=eth0
-# Free-form additions, e.g. --dms-ncap-icons=both.
-# --theme=harman: boot into the Harman theme (eco coach ring + ADAS
-# visualiser).  Kept here rather than in CLUSTER_ARGS so that line stays a
-# verbatim copy of what build-and-deploy.sh writes.
-EXTRA_ARGS=--theme=harman
+# Free-form additions, e.g. --dms-ncap-icons=both
+EXTRA_ARGS=
 EOF
 
 echo "[4/4] Enabling service..."

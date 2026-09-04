@@ -45,13 +45,26 @@ fi
 echo "[2/4] Building (build-and-deploy.sh, build-only)..."
 ./scripts/build-and-deploy.sh --mode=demo --dms=enable --skip-tests --skip-deploy
 
-echo "[3/4] Writing service environment (demo + DMS + Harman theme)..."
-# Static equivalent of what build-and-deploy.sh --mode=demo --dms=enable
+# demo: the cluster's own drive cycle. proxy: the car-can-proxy contract on
+# vcan0, i.e. the bench vehicle the other two hooks install. Set per board in
+# board.conf (CLUSTER_SOURCE) or per build in the environment; build-image.sh
+# forwards it and the apps-stage stamp tracks it, so flipping it rebuilds.
+CLUSTER_SOURCE="${CLUSTER_SOURCE:-demo}"
+case "$CLUSTER_SOURCE" in
+    demo)  SOURCE_ARGS="--demo --theme=harman"; SOURCE_NOTE="demo   theme: harman" ;;
+    proxy) SOURCE_ARGS="--source=proxy --contract-if=vcan0 --theme=auto"
+           SOURCE_NOTE="proxy on vcan0   theme: auto (from the drivetrain)" ;;
+    *)     echo "WARNING: unknown CLUSTER_SOURCE '$CLUSTER_SOURCE', using demo"
+           SOURCE_ARGS="--demo --theme=harman"; SOURCE_NOTE="demo   theme: harman" ;;
+esac
+
+echo "[3/4] Writing service environment ($SOURCE_NOTE, DMS enabled)..."
+# Static equivalent of what build-and-deploy.sh --mode=<source> --dms=enable
 # writes in its deploy step (kept in sync with that script).
 cat > systemd/qt-cluster-demo.env <<EOF
 # Generated at image-build time by qt-cluster-demo-hook.sh
-#   mode: demo   dms: enable   theme: harman
-CLUSTER_ARGS=--demo --theme=harman --dms=focusdrive-v2 --dms-vehicle-speed-floor=30 --dms-someip=on --dms-landmarks --dms-protocol=v2 --dms-host=0.0.0.0 --dms-port=5500 --dms-someip-ids=$DEST/docs/focusdrive-agx-ids.pi4.json
+#   source: $SOURCE_NOTE   dms: enable
+CLUSTER_ARGS=$SOURCE_ARGS --dms=focusdrive-v2 --dms-vehicle-speed-floor=30 --dms-someip=on --dms-landmarks --dms-protocol=v2 --dms-host=0.0.0.0 --dms-port=5500 --dms-someip-ids=$DEST/docs/focusdrive-agx-ids.pi4.json
 DMS_ENABLED=1
 SOMEIP_IFACE=eth0
 # Free-form additions, e.g. --dms-ncap-icons=both

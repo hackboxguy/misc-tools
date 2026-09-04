@@ -226,6 +226,14 @@ resolve_cfg() {
     fi
     printf '%s' "${!var}"
 }
+# The board may pick the cluster's data source; the environment wins so one
+# board config can build either image. Empty for boards that do not use it.
+CLUSTER_SOURCE="${CLUSTER_SOURCE:-$(resolve_cfg CLUSTER_SOURCE)}"
+case "${CLUSTER_SOURCE:-}" in
+    ""|demo|proxy) ;;
+    *) die "CLUSTER_SOURCE must be demo or proxy, got '$CLUSTER_SOURCE'" ;;
+esac
+
 RUNTIME_DEPS="$(resolve_cfg RUNTIME_DEPS)"
 BUILD_DEPS="$(resolve_cfg BUILD_DEPS)"
 HOOK_LIST="$(resolve_cfg HOOK_LIST)"
@@ -607,7 +615,7 @@ git_remote_rev() {
 
 apps_stamp_inputs() {
     parse_hook_list "$HOOK_LIST"
-    local in=("apps-v4" "version:$VERSION" "input:$APPS_INPUT_STAMP" "apps-extend:$APPS_EXTEND_SIZE_MB" "expand-root:$EXPAND_ROOT" "data-partition-mb:$DATA_PARTITION_MB" "ab-layout:$AB_LAYOUT" "ab-image-mb:$AB_IMAGE_SIZE_MB" "ab-boot-mb:$AB_BOOT_PARTITION_MB" "ab-root-mb:$AB_ROOT_PARTITION_MB" "ab-factory-mb:$AB_FACTORY_PARTITION_MB" "slot-boards:$SLOT_COMPATIBLE_BOARDS" "pw:$PASSWORD")
+    local in=("apps-v4" "version:$VERSION" "input:$APPS_INPUT_STAMP" "apps-extend:$APPS_EXTEND_SIZE_MB" "expand-root:$EXPAND_ROOT" "data-partition-mb:$DATA_PARTITION_MB" "ab-layout:$AB_LAYOUT" "ab-image-mb:$AB_IMAGE_SIZE_MB" "ab-boot-mb:$AB_BOOT_PARTITION_MB" "ab-root-mb:$AB_ROOT_PARTITION_MB" "ab-factory-mb:$AB_FACTORY_PARTITION_MB" "slot-boards:$SLOT_COMPATIBLE_BOARDS" "pw:$PASSWORD" "cluster-source:${CLUSTER_SOURCE:-}")
     [ "$HOOK_LIST" != "none" ] && [ -n "$HOOK_LIST" ] && in+=("file:$HOOK_LIST")
     local h d entry url ref
     for h in "${HOOK_SCRIPTS[@]}"; do in+=("file:$h"); done
@@ -1028,7 +1036,8 @@ run_stage_apps() {
     # The imager parses the same hook list in its own process, so every ${VAR}
     # a hook list references has to reach it too, not just this shell.
     MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" \
-    MICROPANEL_TOUCH_APP_REPO="${MICROPANEL_TOUCH_APP_REPO:-}" "$IMAGER" \
+    MICROPANEL_TOUCH_APP_REPO="${MICROPANEL_TOUCH_APP_REPO:-}" \
+    CLUSTER_SOURCE="${CLUSTER_SOURCE:-}" "$IMAGER" \
         --mode=incremental \
         --baseimage="$APPS_INPUT" \
         --output="$work" \

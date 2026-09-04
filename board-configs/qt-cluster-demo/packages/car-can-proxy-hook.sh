@@ -10,8 +10,8 @@ set -e
 #                    interface (vcan1 for the bench, or a real canN's bitrate)
 #   can-proxyd       the proxy itself, plugin from systemd/can-proxyd.env
 #
-# The image default is the bench: emu-ev on vcan1, fed by
-# car-can-emulator.service (car-can-emulator-hook.sh) running --car=ev.
+# The image default is the bench: emu-hybrid on vcan1, fed by
+# car-can-emulator.service (car-can-emulator-hook.sh) running --car=hybrid.
 # This does NOT change what the cluster shows: qt-cluster-demo-hook.sh still
 # writes --demo. To put the image on the proxy path set
 #   CLUSTER_ARGS=--source=proxy --contract-if=vcan0 --theme=auto ...
@@ -48,16 +48,16 @@ cd "$DEST"
 
 echo "[2/4] Building and unit-testing..."
 # Integration tests need vcan interfaces and report SKIP without them.
-./scripts/deploy.sh --plugin=emu-ev --skip-deploy
+./scripts/deploy.sh --plugin=emu-hybrid --skip-deploy
 
-echo "[3/4] Writing service environment (bench: emulator --car=ev on vcan1)..."
+echo "[3/4] Writing service environment (bench: emulator --car=hybrid on vcan1)..."
 cat > systemd/can-proxyd.env <<ENVEOF
 # Generated at image-build time by car-can-proxy-hook.sh. Edit and
 # 'sudo systemctl restart can-proxy-links can-proxyd' to change.
 CONTRACT_IF=vcan0
 VEHICLE_IF=vcan1
 VEHICLE_BITRATE=500000
-PLUGIN=emu-ev
+PLUGIN=emu-hybrid
 PLUGIN_ARGS=--plugin-arg source=emulator
 # e.g. --record=/home/pi/session.log --log-level=debug
 EXTRA_ARGS=

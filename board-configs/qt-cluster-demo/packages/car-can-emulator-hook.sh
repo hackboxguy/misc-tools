@@ -5,9 +5,12 @@ set -e
 #
 # The bench vehicle for car-can-proxy: an OBD-II ECU plus (ev/hybrid) a
 # UDS/ISO-TP battery ECU on vcan1, so the proxy and the cluster can be shown
-# on a Pi with no car attached. Default --car=ev; the control port on 8080
-# changes values at runtime (README). Switch the car type in
-# /home/pi/car-can-emulator/systemd/car-can-emulator.env.
+# on a Pi with no car attached. The image default is --car=hybrid: it
+# exercises the OBD-II ECU, the UDS battery ECU over ISO-TP, the driver
+# assist DID and, through --theme=auto, the third theme's badge and risk
+# glow, all in the boot state (an ev bench reaches everything but the last
+# two). The control port on 8080 changes values at runtime (README).
+# Switch the car type in /home/pi/car-can-emulator/systemd/car-can-emulator.env.
 #
 # Environment (from the hook list): HOOK_GIT_REPO / HOOK_GIT_TAG or
 # HOOK_LOCAL_SOURCE; HOOK_INSTALL_DEST.
@@ -37,8 +40,14 @@ echo "[2/3] Building..."
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release >/dev/null
 cmake --build build -j"$(nproc)"
 
-echo "[3/3] Enabling service (vcan1, --car=ev)..."
-cp systemd/car-can-emulator.env.example systemd/car-can-emulator.env
+echo "[3/3] Enabling service (vcan1, --car=hybrid)..."
+cat > systemd/car-can-emulator.env <<ENVEOF
+# Generated at image-build time by car-can-emulator-hook.sh; edit and
+# 'sudo systemctl restart car-can-emulator' to change.
+EMULATOR_ARGS=--node=vcan1 --car=hybrid
+#EMULATOR_ARGS=--node=vcan1 --car=ev
+#EMULATOR_ARGS=--node=can0 --car=ice --debugprint=true
+ENVEOF
 systemctl enable "$DEST/systemd/car-can-emulator.service"
 
 chown -R 1000:1000 "$DEST"

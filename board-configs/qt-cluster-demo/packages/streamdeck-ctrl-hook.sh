@@ -77,6 +77,7 @@ echo "d /run/streamdeck-ctrl 0755 ${INSTALL_USER} plugdev -" \
 sed -e "s|{INSTALL_DIR}|${INSTALL_DIR}|g" \
     -e "s|{USER}|${INSTALL_USER}|g" \
     -e "s|{CONFIG_PATH}|${CONFIG_FILE}|g" \
+    -e "s|{SCREEN_DIR}|$(dirname "${CONFIG_FILE}")|g" \
     "${INSTALL_DIR}/streamdeck-ctrl.service.in" \
     > /etc/systemd/system/streamdeck-ctrl.service
 

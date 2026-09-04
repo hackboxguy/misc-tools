@@ -15,8 +15,10 @@ set -e
 # This does NOT change what the cluster shows: qt-cluster-demo-hook.sh still
 # writes --demo. To put the image on the proxy path set
 #   CLUSTER_ARGS=--source=proxy --contract-if=vcan0 --theme=auto ...
-# in /home/pi/qt-cluster-demo/systemd/qt-cluster-demo.env (or run
-# scripts/build-and-deploy.sh --mode=proxy there). For a real car edit
+# in /home/pi/qt-cluster-demo/systemd/qt-cluster-demo.env, or run
+#   scripts/build-and-deploy.sh --mode=proxy --deploy-only
+# there (--deploy-only skips the build, which a shipped image cannot do:
+# its toolchain is purged). For a real car edit
 # /home/pi/car-can-proxy/systemd/can-proxyd.env: VEHICLE_IF=can0,
 # PLUGIN=obd2-ice, PLUGIN_ARGS=--plugin-arg source=live.
 #

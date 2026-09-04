@@ -12,6 +12,12 @@ packages/qt-cluster-demo-hook.sh|file://${REPOBINS}/qt-cluster-demo|local|/home/
 packages/car-can-proxy-hook.sh|https://github.com/hackboxguy/car-can-proxy.git|main|/home/pi/car-can-proxy|
 packages/car-can-emulator-hook.sh|https://github.com/hackboxguy/car-can-emulator.git|main|/home/pi/car-can-emulator|
 
+# Stream Deck: four theme keys (legacy / ev / harman / harman+map) and a
+# camera-view toggle, driving qt-cluster-demo.env and restarting the unit so
+# a choice survives a reboot. The screen name is the third field. The service
+# is udev-triggered, so this is inert until a deck is plugged in.
+packages/streamdeck-ctrl-hook.sh|https://github.com/hackboxguy/streamdeck-ctrl.git|qt-cluster-demo|/home/pi/streamdeck-ctrl|socat
+
 #eth0: DHCP with static fallback 192.168.10.3/24 (NetworkManager two-profile)
 packages/network-fallback-hook.sh
 

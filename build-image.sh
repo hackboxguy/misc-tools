@@ -207,6 +207,10 @@ SLOT_COMPATIBLE_BOARDS="pi4"
 # before any cached or expensive stage begins.
 MICROPANEL_TOUCH_REVISION=""
 MICROPANEL_TOUCH_REF=""
+# Sourcing board.conf below overwrites any same-named variable already in the
+# environment, so capture the caller's choice first or the board default
+# silently wins over an explicit CLUSTER_SOURCE=... on the command line.
+CLUSTER_SOURCE_ENV="${CLUSTER_SOURCE:-}"
 if [ $PROFILE_ONLY -eq 0 ]; then
     BOARD_DIR="$BOARD_CONFIGS_DIR/$BOARD"
     BOARD_CONF="$BOARD_DIR/board.conf"
@@ -226,9 +230,9 @@ resolve_cfg() {
     fi
     printf '%s' "${!var}"
 }
-# The board may pick the cluster's data source; the environment wins so one
-# board config can build either image. Empty for boards that do not use it.
-CLUSTER_SOURCE="${CLUSTER_SOURCE:-$(resolve_cfg CLUSTER_SOURCE)}"
+# The board may pick the cluster's data source; the caller's environment wins
+# so one board config can build either image. Empty for boards that ignore it.
+CLUSTER_SOURCE="${CLUSTER_SOURCE_ENV:-$(resolve_cfg CLUSTER_SOURCE)}"
 case "${CLUSTER_SOURCE:-}" in
     ""|demo|proxy) ;;
     *) die "CLUSTER_SOURCE must be demo or proxy, got '$CLUSTER_SOURCE'" ;;

@@ -20,5 +20,6 @@ libboost-thread1.83.0
 libboost-log1.83.0
 libboost-filesystem1.83.0
 
-# --mode=canN support
+# --mode=canN and --mode=proxy support (candump/cansend for bench checks;
+# car-can-proxy and car-can-emulator themselves need only libc/libstdc++)
 can-utils

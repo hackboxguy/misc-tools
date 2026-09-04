@@ -5,6 +5,13 @@
 # re-triggers the stage automatically.
 packages/qt-cluster-demo-hook.sh|file://${REPOBINS}/qt-cluster-demo|local|/home/pi/qt-cluster-demo
 
+# CAN proxy (public repo, in-chroot clone) and its bench vehicle. Both
+# install as enabled services with the bench default (emulator --car=ev on
+# vcan1, proxy plugin emu-ev on vcan0). The cluster keeps its own default
+# above; see car-can-proxy-hook.sh for switching the image to the proxy path.
+packages/car-can-proxy-hook.sh|https://github.com/hackboxguy/car-can-proxy.git|main|/home/pi/car-can-proxy|
+packages/car-can-emulator-hook.sh|https://github.com/hackboxguy/car-can-emulator.git|main|/home/pi/car-can-emulator|
+
 #eth0: DHCP with static fallback 192.168.10.3/24 (NetworkManager two-profile)
 packages/network-fallback-hook.sh
 

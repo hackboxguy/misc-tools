@@ -40,12 +40,14 @@ echo "[2/3] Building..."
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release >/dev/null
 cmake --build build -j"$(nproc)"
 
-echo "[3/3] Enabling service (vcan1, --car=hybrid)..."
+echo "[3/3] Enabling service (vcan1, --car=hybrid, demo drive cycle)..."
 cat > systemd/car-can-emulator.env <<ENVEOF
 # Generated at image-build time by car-can-emulator-hook.sh; edit and
 # 'sudo systemctl restart car-can-emulator' to change.
-EMULATOR_ARGS=--node=vcan1 --car=hybrid
-#EMULATOR_ARGS=--node=vcan1 --car=ev
+# The drive cycle replicates the cluster's built-in demo (44 s lap) so the
+# proxy path moves; drop --drive-cycle for a car that sits at fixed values.
+EMULATOR_ARGS=--node=vcan1 --car=hybrid --drive-cycle=$DEST/cycles/demo.cycle
+#EMULATOR_ARGS=--node=vcan1 --car=ev --drive-cycle=$DEST/cycles/demo.cycle
 #EMULATOR_ARGS=--node=can0 --car=ice --debugprint=true
 ENVEOF
 systemctl enable "$DEST/systemd/car-can-emulator.service"

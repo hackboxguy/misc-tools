@@ -833,7 +833,42 @@ preflight() {
     avail_root=$(df -BM --output=avail / | tail -1 | tr -d ' M')
     avail_ws=$(df -BM --output=avail "$ws_probe" | tail -1 | tr -d ' M')
     [ "$avail_root" -ge 2048 ] && pf_ok "host / free: ${avail_root}MB" || pf_fail "host / has only ${avail_root}MB free (sdm needs >=2GB)"
-    [ "$avail_ws" -ge 15000 ] && pf_ok "workspace free: ${avail_ws}MB" || pf_warn "workspace has only ${avail_ws}MB free (a full build can need ~15GB)"
+
+    # How much the workspace actually needs, rather than a fixed 15GB: the apps
+    # stage copies the whole base image in and then writes an artifact of about
+    # the same size, so the floor is roughly twice the base plus the extension.
+    #
+    # This is a hard failure on purpose. Running out here is not a warning-level
+    # event: sdm reports it as "IMG is nn% full" while printing the free space
+    # *inside* the image on the same line, which sends you looking at the image
+    # when the problem is the host filesystem. Better to refuse up front and say
+    # which disk is short.
+    local need_mb base_mb=0
+    if [ -f "$BASE_IMG" ]; then
+        base_mb=$(( $(stat -c%s "$BASE_IMG") / 1048576 ))
+    fi
+    if [ "$base_mb" -gt 0 ]; then
+        need_mb=$(( base_mb * 2 + APPS_EXTEND_SIZE_MB * 2 + 2048 ))
+    else
+        need_mb=15000   # base not built yet, so fall back to the old estimate
+    fi
+
+    local need_why
+    if [ "$base_mb" -gt 0 ]; then
+        need_why="base ${base_mb}MB copied in, an artifact of about the same size back out"
+    else
+        need_why="estimate; the base image is not built yet so its size is unknown"
+    fi
+    if [ "$avail_ws" -lt "$need_mb" ]; then
+        pf_fail "workspace has ${avail_ws}MB free but this build needs ~${need_mb}MB
+      (${need_why}).
+      Free space under $ws_probe. Note sdm would otherwise fail mid-build with
+      'IMG is nn% full', which refers to this filesystem and not to the image."
+    elif [ "$avail_ws" -lt $(( need_mb + 5000 )) ]; then
+        pf_warn "workspace free: ${avail_ws}MB (need ~${need_mb}MB; little margin)"
+    else
+        pf_ok "workspace free: ${avail_ws}MB (need ~${need_mb}MB)"
+    fi
 
     [ $PREFLIGHT_ERRORS -gt 0 ] && die "Preflight failed with $PREFLIGHT_ERRORS error(s)"
     log "Preflight OK"

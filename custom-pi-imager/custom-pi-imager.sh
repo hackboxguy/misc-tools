@@ -430,15 +430,30 @@ run_sdm() {
         \"${WORK_DIR}/${IMAGE_NAME}\""
 
     if ! eval $sdm_cmd; then
-        # Check if failure was due to host disk space
-        local post_avail_mb
+        # Check if failure was due to host disk space.
+        #
+        # Two filesystems can be short, and sdm names neither: it aborts with
+        # "IMG is nn% full" while printing the free space *inside* the image on
+        # the very same line, which reads as though the image were out of room.
+        # It is not -- that is the host disk under the work directory. The work
+        # directory is often on a different filesystem from /, so both are
+        # checked and whichever is short gets named.
+        local post_avail_mb work_avail_mb
         post_avail_mb=$(df -BM --output=avail / | tail -1 | tr -d ' M')
+        work_avail_mb=$(df -BM --output=avail "$WORK_DIR" 2>/dev/null | tail -1 | tr -d ' M')
+        : "${work_avail_mb:=$post_avail_mb}"
         if [ "$post_avail_mb" -lt 2048 ]; then
             local post_avail
             post_avail=$(df -h --output=avail / | tail -1 | tr -d ' ')
             error "SDM failed - host root filesystem has only ${post_avail} free"
             error "SDM needs free space on the host for systemd-nspawn/qemu temporary files"
             error "Free up disk space on your root filesystem and try again"
+        elif [ "$work_avail_mb" -lt 6144 ]; then
+            error "SDM failed - the work directory's filesystem has only $(df -h --output=avail "$WORK_DIR" | tail -1 | tr -d ' ') free"
+            error "  work dir: $WORK_DIR"
+            error "If sdm printed \"IMG is nn% full\", that is THIS filesystem, not the image;"
+            error "the free space it lists on the same line is the space inside the image."
+            error "Free space under the work directory and try again"
         else
             error "SDM customization failed. Check the output above for details"
         fi

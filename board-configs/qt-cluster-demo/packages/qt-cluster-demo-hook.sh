@@ -74,6 +74,17 @@ EOF
 echo "[4/4] Enabling service..."
 systemctl enable "$DEST/systemd/qt-cluster-demo.service"
 
+# The video unit is linked so "systemctl start cluster-video" resolves it, but
+# deliberately NOT enabled: it must never come up at boot, so the panel always
+# shows the cluster after a power cycle regardless of what was playing before.
+# A plain symlink rather than "systemctl link" because systemd is not running
+# in the chroot.
+if [ -f "$DEST/systemd/cluster-video.service" ]; then
+    ln -sf "$DEST/systemd/cluster-video.service" \
+        /etc/systemd/system/cluster-video.service
+    echo "  cluster-video.service linked (not enabled)"
+fi
+
 # pi user is uid:gid 1000:1000
 chown -R 1000:1000 "$DEST" /home/pi/.codex-deps 2>/dev/null || chown -R 1000:1000 "$DEST"
 

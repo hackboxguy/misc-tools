@@ -228,7 +228,10 @@ resolve_cfg() {
         local vkey="${var}_${VARIANT//-/_}"
         if [ -n "${!vkey+x}" ]; then printf '%s' "${!vkey}"; return; fi
     fi
-    printf '%s' "${!var}"
+    # Some board settings are optional (for example CLUSTER_SOURCE on the
+    # micropanel board).  Keep set -u enabled without requiring every board
+    # config to declare every optional setting.
+    printf '%s' "${!var-}"
 }
 # The board may pick the cluster's data source; the caller's environment wins
 # so one board config can build either image. Empty for boards that ignore it.

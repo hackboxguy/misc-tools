@@ -12,7 +12,7 @@ packages/micropanel-hook.sh
 ../../custom-pi-imager/packages/generic-package-hook.sh|file://${REPOBINS}/rh850-flash-tools|local|/home/pi/micropanel||install -Dm644 /home/pi/micropanel/share/rh850-flash-tools/udev/99-rh850-bluebox.rules /etc/udev/rules.d/99-rh850-bluebox.rules
 
 #xc3sprog hook - this is the generic one
-../../custom-pi-imager/packages/generic-package-hook.sh|https://github.com/hackboxguy/xc3sprog.git|master|/home/pi/micropanel/fpga|libusb-dev,libftdi-dev,libgpiod-dev
+../../custom-pi-imager/packages/generic-package-hook.sh|https://github.com/hackboxguy/xc3sprog.git|master|/home/pi/micropanel/fpga|libusb-dev,libftdi-dev,libgpiod-dev,pkg-config||-DCMAKE_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu
 
 #openFPGALoader hook - this is the generic one
 ../../custom-pi-imager/packages/generic-package-hook.sh|https://github.com/trabucayre/openFPGALoader.git|v1.0.0|/home/pi/micropanel/fpga|libusb-dev,libftdi-dev,libgpiod-dev,libftdi1-dev,libhidapi-dev,zlib1g-dev

@@ -276,6 +276,12 @@ else
     log_warn "himax_mmi.ko not found in $BUILD_OUTPUT/modules/"
 fi
 
+# Install himax_oled (HX8530, OLED-OTS) - optional
+if [[ -f "$BUILD_OUTPUT/modules/himax_oled.ko" ]]; then
+    cp "$BUILD_OUTPUT/modules/himax_oled.ko" "$EXTRA_MOD_DIR/"
+    log_success "Installed himax_oled.ko"
+fi
+
 # ------------------------------------------------------------------------------
 # Install Custom Overlays
 # ------------------------------------------------------------------------------
@@ -292,6 +298,11 @@ fi
 if [[ -f "$BUILD_OUTPUT/overlays/himax-touch.dtbo" ]]; then
     cp "$BUILD_OUTPUT/overlays/himax-touch.dtbo" "$MNT_BOOT/overlays/"
     log_success "Installed himax-touch.dtbo"
+fi
+
+if [[ -f "$BUILD_OUTPUT/overlays/himax-touch-oled.dtbo" ]]; then
+    cp "$BUILD_OUTPUT/overlays/himax-touch-oled.dtbo" "$MNT_BOOT/overlays/"
+    log_success "Installed himax-touch-oled.dtbo"
 fi
 
 # ------------------------------------------------------------------------------

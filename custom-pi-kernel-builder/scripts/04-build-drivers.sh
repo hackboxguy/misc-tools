@@ -100,6 +100,8 @@ if [[ -n "$CUSTOM_DRIVERS" ]]; then
     HH983_DTS="$DRIVER_PKG_DIR/hh983-serializer/src/hh983-serializer-overlay.dts"
     HIMAX_SRC="$DRIVER_PKG_DIR/himax-touch/src"
     HIMAX_DTS="$DRIVER_PKG_DIR/himax-touch/dts/himax-touch-overlay.dts"
+    HIMAX_OLED_SRC="$DRIVER_PKG_DIR/himax-touch-oled/src"
+    HIMAX_OLED_DTS="$DRIVER_PKG_DIR/himax-touch-oled/dts/himax-touch-oled-overlay.dts"
     log_info "Using custom drivers directory: $DRIVER_PKG_DIR"
 fi
 
@@ -253,6 +255,44 @@ if [[ -f "$HIMAX_DTS" ]]; then
     log_success "himax-touch.dtbo built successfully!"
 else
     log_warn "DTS file not found: $HIMAX_DTS"
+fi
+
+# ------------------------------------------------------------------------------
+# Build himax-touch-oled Driver (HX8530, OLED-OTS) - optional
+# ------------------------------------------------------------------------------
+if [[ -d "$HIMAX_OLED_SRC" ]]; then
+    echo "=============================================================================="
+    log_info "Building himax-touch-oled (HX8530) driver..."
+    echo "=============================================================================="
+
+    cd "$HIMAX_OLED_SRC"
+
+    if [[ $DO_CLEAN -eq 1 ]]; then
+        log_info "Cleaning previous build..."
+        make -C "$KERNEL_SRC" M="$(pwd)" clean || true
+    fi
+
+    log_info "Compiling kernel module..."
+    make -C "$KERNEL_SRC" M="$(pwd)" modules
+
+    if [[ ! -f "himax_oled.ko" ]]; then
+        log_error "Failed to build himax_oled.ko"
+        exit 1
+    fi
+    log_success "himax_oled.ko built successfully!"
+    cp himax_oled.ko "$BUILD_OUTPUT/modules/"
+    modinfo himax_oled.ko 2>/dev/null | grep -E "^(filename|version|description|author|vermagic):" || true
+
+    log_info "Compiling device tree overlay..."
+    if [[ -f "$HIMAX_OLED_DTS" ]]; then
+        dtc -@ -I dts -O dtb -o "$BUILD_OUTPUT/overlays/himax-touch-oled.dtbo" "$HIMAX_OLED_DTS"
+        log_success "himax-touch-oled.dtbo built successfully!"
+    else
+        log_warn "DTS file not found: $HIMAX_OLED_DTS"
+    fi
+    echo ""
+else
+    log_info "himax-touch-oled source not present, skipping (optional)"
 fi
 
 # ------------------------------------------------------------------------------

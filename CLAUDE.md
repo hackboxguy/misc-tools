@@ -51,11 +51,17 @@ card sizes). Symptom of getting this wrong: sdm aborts the apps stage
 with "IMG is 99% full" (micropanel uses 1200MB extra - sized to keep the final image 8GB-card compatible; qt-cluster-demo
 fits without).
 
-Known trap this design fixed three times: anything an image build consumes
+Known trap this design fixed four times: anything an image build consumes
 must be in the stamp, or pushed changes silently don't reach the image.
 (Third instance: streamdeck-ctrl's hook uses the branch field for a screen
 name, so its pushes were invisible until git_remote_rev learned to fall
-back to remote HEAD for unresolvable non-SHA refs.) A build that finishes
+back to remote HEAD for unresolvable non-SHA refs. Fourth: micropanel's and
+als-dimmer's hook-list lines were bare while the hook scripts cloned those
+repos themselves, so pushes to either never re-triggered the apps stage -
+fixed by giving both lines a GIT_REPO field and having the hooks read
+HOOK_GIT_REPO/HOOK_GIT_TAG, so the line is the single source of truth.
+A custom hook that clones must carry its repo in the field even if it does
+its own cloning.) A build that finishes
 in 1-3 minutes did NOT rebuild anything - the smallest real rebuild (apps
 stage) takes ~30 min.
 

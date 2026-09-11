@@ -27,10 +27,19 @@ apt-get update -qq
 apt-get install -y cmake g++ make git
 # libudev-dev libi2c-dev i2c-tools libcurl4-openssl-dev nlohmann-json3-dev
 
+# Repo and ref come from the hook-list line, falling back to what this
+# hook has always used. Taking them from the line is what puts micropanel's
+# remote head in the apps-stage stamp, so a push re-triggers the build instead
+# of being silently skipped. The line's INSTALL_DEST field mirrors the prefix
+# below; this hook hardcodes /home/pi/micropanel in a dozen places (config
+# rewriting, unit paths) and is not made relocatable here.
+MP_REPO="${HOOK_GIT_REPO:-https://github.com/hackboxguy/micropanel.git}"
+MP_REF="${HOOK_GIT_TAG:-main}"
+
 # Clone micropanel repository
-echo "[2/5] Cloning micropanel from GitHub..."
+echo "[2/5] Cloning micropanel from GitHub ($MP_REPO @ $MP_REF)..."
 cd /tmp
-git clone https://github.com/hackboxguy/micropanel.git
+git clone --branch "$MP_REF" "$MP_REPO" micropanel
 cd micropanel
 
 # Create build directory and configure micropanel

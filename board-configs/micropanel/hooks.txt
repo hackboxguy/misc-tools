@@ -4,9 +4,16 @@
 # ${VAR} references are expanded from the environment when the list is loaded;
 # ${REPOBINS} points at the directory holding local binary repos (sp6bins,
 # archsp6, ...) and is exported by build-image.sh (workspace sources dir).
+#
+# A hook that clones a repo MUST carry that repo in its GIT_REPO field, even
+# when the hook does the cloning itself and ignores the field otherwise. The
+# apps stamp is built from the GIT_REPO fields on these lines (build-image.sh
+# apps_stamp_inputs -> git_remote_rev), so a bare line means pushes to the repo
+# it builds do not invalidate the stamp: the apps stage is skipped and the
+# image silently keeps the old code.
 
 #micropanel hook - cannot be generic as it has some special cmake flags
-packages/micropanel-hook.sh
+packages/micropanel-hook.sh|https://github.com/hackboxguy/micropanel.git|main|/home/pi/micropanel|
 
 # RH850 Bluebox and Pi-GPIO flashing tools, target profiles, and Bluebox udev rule.
 ../../custom-pi-imager/packages/generic-package-hook.sh|file://${REPOBINS}/rh850-flash-tools|local|/home/pi/micropanel||install -Dm644 /home/pi/micropanel/share/rh850-flash-tools/udev/99-rh850-bluebox.rules /etc/udev/rules.d/99-rh850-bluebox.rules
@@ -28,8 +35,11 @@ packages/micropanel-hook.sh
 #measurement reference video (git-lfs repo), installs to share/sp6bins/config/
 ../../custom-pi-imager/packages/generic-package-hook.sh|file://${REPOBINS}/media-files|local|/home/pi/micropanel
 
-#als-dimmer hook - cannot be generic as it has some special cmake flags
-packages/als-dimmer-hook.sh
+#als-dimmer hook - cannot be generic as it has some special cmake flags.
+#It also installs the config selector from br-wrapper; a line tracks only one
+#repo, but br-wrapper is already tracked by the qt-apps line above, so a push
+#there re-triggers the apps stage and this hook re-clones the selector with it.
+packages/als-dimmer-hook.sh|https://github.com/hackboxguy/als-dimmer.git|main|/home/pi/als-dimmer|
 
 #streamdeck-ctrl hook - screen name passed via HOOK_GIT_TAG field
 packages/streamdeck-ctrl-hook.sh|https://github.com/hackboxguy/streamdeck-ctrl.git|display-control|/home/pi/streamdeck-ctrl|socat

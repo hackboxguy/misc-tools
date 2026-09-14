@@ -144,7 +144,22 @@ if [[ ! -d "$KERNEL_SRC" ]]; then
 
     # Clone with depth=1 for faster download (as per official RPi docs)
     # The official docs recommend: git clone --depth=1 --branch <branch> <repo>
-    git clone --depth="$CLONE_DEPTH" --branch "$KERNEL_BRANCH" "$KERNEL_REPO" linux
+    #
+    # A board may pin KERNEL_BRANCH to a commit SHA to dodge a broken branch
+    # tip.  `git clone --branch` only accepts a branch or tag name, so fetch
+    # the commit explicitly instead - GitHub serves an exact SHA, which is the
+    # same path the update branch above already relies on.
+    if [[ "$KERNEL_BRANCH" =~ ^[0-9a-f]{7,40}$ ]]; then
+        log_info "KERNEL_BRANCH looks like a commit SHA - cloning, then checking it out"
+        git clone --depth="$CLONE_DEPTH" "$KERNEL_REPO" linux
+        (
+            cd linux
+            git fetch origin "$KERNEL_BRANCH" --depth=1
+            git checkout FETCH_HEAD
+        )
+    else
+        git clone --depth="$CLONE_DEPTH" --branch "$KERNEL_BRANCH" "$KERNEL_REPO" linux
+    fi
 
     log_success "Kernel source cloned successfully!"
 fi

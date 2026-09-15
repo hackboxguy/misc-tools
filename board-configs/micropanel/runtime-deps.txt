@@ -12,6 +12,7 @@ fbi
 fxload
 gpiod
 i2c-tools
+evtest
 iperf3
 libcurl4-openssl-dev
 libftdi1

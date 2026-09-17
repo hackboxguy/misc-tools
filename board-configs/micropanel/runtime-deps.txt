@@ -12,6 +12,8 @@ fbi
 fxload
 gpiod
 i2c-tools
+# otsctl.py (archsp6) drives the 983/984 over SMBus; update-iocs.sh needs it
+python3-smbus2
 evtest
 iperf3
 libcurl4-openssl-dev

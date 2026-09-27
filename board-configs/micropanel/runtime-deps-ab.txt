@@ -1,0 +1,79 @@
+# Runtime dependencies of the A/B (--layout=ab) image.
+#
+# This is runtime-deps.txt plus the additions at the bottom; board.conf selects
+# it through RUNTIME_DEPS_ab, so the single-slot image's package set does not
+# change. Keep the two in step: tests/test_ab_layout_static.sh fails if a
+# package in runtime-deps.txt is missing here. The imager re-installs this
+# whole list after the build-dep purge.
+# NOTE: the imager RE-INSTALLS this whole list AFTER purging build deps (see
+# reinstall_runtime_packages in custom-pi-imager.sh), because `apt-get purge <build-deps>`
+# cascade-removes some runtime pkgs (e.g. python3-matplotlib via python3-fonttools).
+# => you MUST also pass --runtime-package=./runtime-deps.txt to the INCREMENTAL build.
+python3-matplotlib
+python3-numpy
+screen
+avahi-daemon
+avahi-utils
+fbi
+fxload
+gpiod
+i2c-tools
+# otsctl.py (archsp6) drives the 983/984 over SMBus; update-iocs.sh needs it
+python3-smbus2
+evtest
+iperf3
+libcurl4-openssl-dev
+libftdi1
+libhidapi-libusb0
+libi2c-dev
+libudev-dev
+nlohmann-json3-dev
+libqt5core5a
+libqt5gui5
+libqt5widgets5
+libqt5network5
+libqt5qml5
+libqt5quick5
+qml-module-qtquick2
+fonts-dejavu
+qtbase5-examples
+qml-module-qtquick-window2
+qml-module-qtquick-layouts
+qml-module-qtquick-controls
+qml-module-qtquick-controls2
+qml-module-qtquick2
+qml-module-qtqml-models2
+qml-module-qt-labs-folderlistmodel
+kodi
+ddcutil
+libddcutil-dev
+argyll
+python3-usb
+jq
+bc
+dnsmasq
+qml-module-qtquick-layouts
+qml-module-qtquick-window2
+qml-module-qtquick-controls2
+sqlite3
+
+# --- A/B additions -----------------------------------------------------------
+# overlayroot: the read-only root the A/B engine requires. It is an
+# initramfs-tools hook, and this board's custom kernel boots without an
+# initramfs today - the appliance hook builds one. Declared here so the
+# build-dep purge cascade cannot take it.
+overlayroot
+# The update path on the device: xz decompresses the slot image, curl fetches
+# a release, openssl verifies the manifest signature (raw ed25519 against the
+# key pinned in the image), and ca-certificates lets curl authenticate an
+# https release server. The signature check needs no certificates, which is
+# why a device with no clock and no network can still install from USB.
+xz-utils
+curl
+openssl
+ca-certificates
+# Present via the base, declared anyway: the engine's slot write and the
+# factory reset use them (lsblk/findmnt, e2label/e2fsck, the vfat boot slots).
+util-linux
+e2fsprogs
+dosfstools

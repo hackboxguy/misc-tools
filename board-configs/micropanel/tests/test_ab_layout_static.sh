@@ -170,6 +170,28 @@ for hook_list in "$board/hooks.txt" "$board/hooks-ab.txt"; do
     done
 done
 
+# --- A/B slimming --------------------------------------------------------------------
+slim_hook="$board/packages/micropanel-slim.sh"
+slim_list="$board/slim-remove.txt"
+grep -Fqx 'IMAGE_SLIM_HOOK_ab=packages/micropanel-slim.sh' "$conf" || fail 'board.conf lacks IMAGE_SLIM_HOOK_ab'
+grep -Fqx 'SLIM_REMOVE_ab=slim-remove.txt' "$conf" || fail 'board.conf lacks SLIM_REMOVE_ab'
+grep -Eq '^SLIM_MAX_ROOT_MB_ab=[1-9][0-9]*([[:space:]]+#.*)?$' "$conf" || fail 'board.conf lacks a numeric SLIM_MAX_ROOT_MB_ab'
+[ -x "$slim_hook" ] || fail "slim hook missing or not executable: $slim_hook"
+bash -n "$slim_hook"
+for package in $(strip_list "$board/runtime-deps-ab.txt"); do
+    if strip_list "$slim_list" | grep -Fqx "$package"; then
+        fail "slim-remove.txt removes a declared runtime package: $package"
+    fi
+done
+grep -Fq 'boot tree $((before_boot_kib / 1024)) MiB -> $((after_boot_kib / 1024)) MiB (x3 =' "$slim_hook" || \
+    fail 'slim hook no longer prints the boot tree size'
+grep -Fq 'AB_BOOT_PARTITION_MB="$([ "$AB_LAYOUT" = "1" ] && printf' "$builder" || \
+    fail 'builder no longer passes the boot slot size to the slim hook'
+# The custom kernel's files must be asserted after the stock-kernel purge.
+for survivor in '"$boot/Image"' '"$boot/initramfs-custom"' '"$root_mount/boot/config-$release"' 'hh983-serializer.ko*'; do
+    grep -Fq "$survivor" "$slim_hook" || fail "slim hook does not assert that $survivor survives"
+done
+
 # --- The appliance hook and its support files --------------------------------------
 appliance="$board/packages/micropanel-appliance-hook.sh"
 support="$board/packages/micropanel-appliance-hook.d"

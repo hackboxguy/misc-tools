@@ -1,0 +1,28 @@
+# Packages removed from the authored A/B image after the apps stage
+# (packages/micropanel-slim.sh; A/B builds only).
+#
+# Rules, as for micropanel-touch: nothing the running appliance invokes, and
+# nothing in runtime-deps-ab.txt (the board static test and the slim hook's
+# runtime guard both enforce that). The slim hook also removes stale module
+# trees, stock-kernel initrds/configs, docs, locales and apt lists, and prunes
+# the boot partition; this list is only the apt part.
+#
+# Lines are apt package names or apt glob patterns, one per line.
+
+# --- Stock kernels -------------------------------------------------------------
+# This board boots the custom kernel (config.txt kernel=Image, modules in
+# /lib/modules/<custom release>), which is not a package. The stock Pi OS
+# kernels - v8 and the Pi 5 2712 flavour, current and superseded - are never
+# booted, and three copies of their boot files do not fit the A/B boot slot.
+linux-image-*
+# Kernel build machinery: the appliance compiles nothing.
+linux-headers-*
+linux-kbuild-*
+
+# --- Deliberately NOT listed: rpi-eeprom, rpi-update ---------------------------
+# Measured on the 01.33 image (2026-09-27): purging rpi-eeprom takes
+# raspi-config, raspberrypi-sys-mods, raspi-utils (vcgencmd, dtoverlay), iw,
+# rfkill, bluez, pi-bluetooth, flashrom and ~20 more with it, and autoremove
+# then took libftdi1-2 - which openFPGALoader links. EEPROM updates are kept
+# out of the A/B chain by the appliance hook disabling rpi-eeprom-update.service
+# instead. The kernel packages above purge alone, with no cascade.

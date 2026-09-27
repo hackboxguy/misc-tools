@@ -1192,6 +1192,7 @@ run_image_slim_hook() {
     IMAGE_PATH="$FINAL_IMG" BOARD="$BOARD" BOARD_DIR="$BOARD_DIR" \
         SLIM_REMOVE="$SLIM_REMOVE" RUNTIME_DEPS="$RUNTIME_DEPS" \
         SLIM_MAX_ROOT_MB="$SLIM_MAX_ROOT_MB" \
+        AB_BOOT_PARTITION_MB="$([ "$AB_LAYOUT" = "1" ] && printf '%s' "$AB_BOOT_PARTITION_MB" || printf 0)" \
         bash "$IMAGE_SLIM_HOOK"
 }
 

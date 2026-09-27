@@ -1,8 +1,10 @@
 # micropanel A/B persistence: directories on /data bound over the paths the
 # applications write. Appended to /etc/fstab by micropanel-appliance-hook.sh;
-# the A/B finalizer keeps these lines (it replaces only the /, /boot/firmware,
-# /data and NetworkManager lines). Each bind waits for the factory reset and
+# the A/B finalizer keeps these lines (it replaces only the root, boot, data
+# and NetworkManager mounts). Each bind waits for the factory reset and
 # precedes its consumer; every consumer is in ab-update.conf AB_RESET_BEFORE.
+# (No line here may have a mount point as its second word: the finalizer
+# drops such a line, comment or not.)
 # PERSISTENCE.md explains each one.
 /data/micropanel-system/var-lib-micropanel /var/lib/micropanel none bind,nofail,x-systemd.requires=data.mount,x-systemd.after=ab-factory-reset.service,x-systemd.before=dip-switch-resolution.service 0 0
 /data/disp-settings /var/lib/disp-settings none bind,nofail,x-systemd.requires=data.mount,x-systemd.after=ab-factory-reset.service,x-systemd.before=disp-settings-dual-display-restore.service 0 0

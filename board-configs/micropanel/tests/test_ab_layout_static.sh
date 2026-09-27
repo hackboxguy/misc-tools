@@ -281,6 +281,17 @@ fixture_root=$(mktemp -d)
 install -d "$fixture_root/etc"
 cp "$fstab_fixture" "$fixture_root/etc/fstab"
 replace_ab_fstab "$fixture_root"
+# Every line of fstab.binds survives the rewrite, comments included (the
+# rewrite matches on the second field, which a comment can hit too).
+cp "$support/fstab.binds" "$fixture_root/etc/fstab"
+replace_ab_fstab "$fixture_root"
+while IFS= read -r bind_file_line; do
+    [ -n "$bind_file_line" ] || continue
+    grep -Fqx -- "$bind_file_line" "$fixture_root/etc/fstab" || \
+        fail "the A/B finalizer drops this fstab.binds line: $bind_file_line"
+done < "$support/fstab.binds"
+cp "$fstab_fixture" "$fixture_root/etc/fstab"
+replace_ab_fstab "$fixture_root"
 printf '%s\n' "$binds" | while IFS= read -r bind_line; do
     grep -Fqx -- "$bind_line" "$fixture_root/etc/fstab" || fail "the A/B finalizer drops the bind: $bind_line"
     case "$bind_line" in

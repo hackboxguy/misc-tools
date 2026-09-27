@@ -100,6 +100,7 @@ install -Dm0644 /dev/null "$manifest"
 printf '%s\n' \
     'root:x:0:0:root:/root:/bin/bash' \
     'micropanel-touch:x:1234:1234:MicroPanel Touch:/nonexistent:/usr/sbin/nologin' \
+    'xmproxy:x:998:998:xmproxy:/nonexistent:/usr/sbin/nologin' \
     > "$source_root_mount/etc/passwd"
 printf '%s\n' \
     'PARTUUID=fixture-root / ext4 defaults 0 1' \
@@ -107,10 +108,23 @@ printf '%s\n' \
     > "$source_root_mount/etc/fstab"
 printf '%s\n' 'IMAGE_VERSION=fixture' \
     "MICROPANEL_TOUCH_REVISION=$fixture_app_revision" \
-    'PANEL_VARIANT=piscreen' > "$manifest"
+    'PANEL_VARIANT=piscreen' \
+    "JSONRPC_TCP_SRV_REVISION=$fixture_app_revision" > "$manifest"
 # The health hook is the application's contribution to the engine's candidate
 # predicate; its own hook installs it, so the fixture stands one in for it.
 install -Dm0755 /dev/null "$source_root_mount/usr/lib/micropanel-touch/update-health"
+# The reference board's xmproxy package (jsonrpc-tcp-srv hook): its board
+# assertions check the installed footprint, so stand one in the same way.
+for xmproxy_tool in xmproxysrv sysmgr xmproxy-seed.sh; do
+    install -Dm0755 /dev/null "$source_root_mount/opt/xmproxy/bin/$xmproxy_tool"
+done
+install -Dm0644 /dev/null "$source_root_mount/opt/xmproxy/share/xmproxy/etc/manifest.json"
+install -Dm0644 /dev/null "$source_root_mount/usr/lib/sysusers.d/xmproxy.conf"
+install -d "$source_root_mount/etc/systemd/system/multi-user.target.wants"
+for xmproxy_unit in xmproxy-seed sysmgr xmproxysrv; do
+    ln -s "/opt/xmproxy/lib/systemd/system/$xmproxy_unit.service" \
+        "$source_root_mount/etc/systemd/system/multi-user.target.wants/$xmproxy_unit.service"
+done
 printf '%s\n' '[connection]' 'id=fixture' > "$source_root_mount/etc/NetworkManager/system-connections/fixture.nmconnection"
 chmod 0600 "$source_root_mount/etc/NetworkManager/system-connections/fixture.nmconnection"
 chmod 0700 "$source_root_mount/etc/NetworkManager/system-connections"

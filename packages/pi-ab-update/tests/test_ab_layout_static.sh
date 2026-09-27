@@ -66,7 +66,8 @@ bash -n "$slim_hook"
 [ -x "$slim_hook" ] || { echo "slim hook is not executable: $slim_hook" >&2; exit 1; }
 grep -Fqx 'IMAGE_SLIM_HOOK=packages/micropanel-touch-slim.sh' "$board/board.conf"
 grep -Fqx 'SLIM_REMOVE=slim-remove.txt' "$board/board.conf"
-grep -Eq '^SLIM_MAX_ROOT_MB=[1-9][0-9]*$' "$board/board.conf"
+# A trailing comment is fine: board.conf is sourced as shell.
+grep -Eq '^SLIM_MAX_ROOT_MB=[1-9][0-9]*([[:space:]]+#.*)?$' "$board/board.conf"
 grep -Fq '    run_image_slim_hook
     run_post_image_hook' "$builder"
 grep -Fq 'in+=("file:$IMAGE_SLIM_HOOK" "slim-max-root-mb:$SLIM_MAX_ROOT_MB")' "$builder"
@@ -117,7 +118,10 @@ grep -Fq -- '--app-ref=REF' "$builder"
 grep -Fq 'resolve_micropanel_touch_revision()' "$builder"
 grep -Fq 'resolved=$(git_remote_rev "$MICROPANEL_TOUCH_APP_REPO" "$MICROPANEL_TOUCH_REF")' "$builder"
 grep -Fq 'MicroPanel Touch builds require --app-revision=<40-character lowercase micropanel-touch commit> or --app-ref=<branch-or-tag>' "$builder"
-grep -Fq 'MICROPANEL_TOUCH_APP_REPO="${MICROPANEL_TOUCH_APP_REPO:-}" "$IMAGER"' "$builder"
+# Other boards' variables share the invocation, so pin the assignment rather
+# than its position; the windowed hook-list check below proves it reaches the
+# imager.
+grep -Fq 'MICROPANEL_TOUCH_APP_REPO="${MICROPANEL_TOUCH_APP_REPO:-}" \' "$builder"
 grep -Fq 'MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" \' "$builder"
 grep -Fq 'AB_MANIFEST_PATH="${AB_MANIFEST_PATH:-}" AB_ASSERTIONS="$AB_ASSERTIONS_PATH" \' "$builder"
 grep -Fq 'MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" \' "$builder"

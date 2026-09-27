@@ -39,6 +39,10 @@ if [ "$(id -u)" -eq 0 ]; then
     run 'factory reset'      bash "$engine/tests/test_factory_reset.sh" \
         "$engine/ab-factory-reset" "$engine/ab-factory-reset-boot" \
         "$engine/../../board-configs/micropanel-touch/packages/micropanel-touch-data-skeleton.sh"
+    # Every adopting board's skeleton must survive the same reset.
+    run 'factory reset (micropanel)' bash "$engine/tests/test_factory_reset.sh" \
+        "$engine/ab-factory-reset" "$engine/ab-factory-reset-boot" \
+        "$engine/../../board-configs/micropanel/packages/micropanel-data-skeleton.sh"
 else
     printf '\nSKIP: the three loopback fixtures need root (re-run with sudo)\n'
 fi

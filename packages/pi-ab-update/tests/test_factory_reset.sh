@@ -232,12 +232,25 @@ run_boot >/dev/null 2>&1
 [ ! -f "$data/NetworkManager/system-connections/user.nmconnection" ] && ok 'user network profile wiped' \
     || fail 'user network profile survived'
 # ...but the skeleton and the shipped profiles come back.
-for directory in micropanel-touch micropanel-touch/logs micropanel-touch/ssh-host-keys \
-                 fixture-system micropanel-touch-network/dhcp-server \
-                 NetworkManager/system-connections; do
-    [ -d "$data/$directory" ] || fail "skeleton directory missing after reset: $directory"
-done
-ok 'pristine skeleton recreated'
+# "Pristine" is whatever this board's skeleton creates on a fresh volume, so
+# derive it from the skeleton rather than naming one board's directories: every
+# directory it makes must be back, with the same owner and mode.
+reference="$work/reference-skeleton"
+mkdir -p "$reference"
+"$skeleton" --root "$reference" --account "$(id -un)" >/dev/null
+skeleton_complete=1
+while IFS= read -r expected; do
+    directory=${expected% *}
+    actual=$(stat -c '%U:%G:%a' "$data/$directory" 2>/dev/null || echo missing)
+    [ "$actual" = "${expected##* }" ] || {
+        fail "skeleton directory after reset: $directory is $actual, a fresh skeleton makes ${expected##* }"
+        skeleton_complete=0
+    }
+done <<EXPECTED
+$(find "$reference" -mindepth 1 -type d -printf '%P %u:%g:%m\n' | sort)
+EXPECTED
+[ -d "$data/fixture-system" ] || { fail 'state directory missing after reset'; skeleton_complete=0; }
+[ "$skeleton_complete" = 1 ] && ok 'pristine skeleton recreated'
 [ -f "$data/NetworkManager/system-connections/shipped.nmconnection" ] && ok 'shipped network profile re-seeded' \
     || fail 'shipped network profile was not re-seeded'
 [ "$(stat -c %a "$data/NetworkManager/system-connections/shipped.nmconnection")" = 600 ] \

@@ -554,6 +554,14 @@ parse_hook_list() {
         IFS='|' read -r hook_script git_repo git_tag rest <<< "$line"
         [[ "$hook_script" != /* ]] && hook_script="$hooks_dir/$hook_script"
         HOOK_SCRIPTS+=("$hook_script")
+        # A hook's support files (<hook>.d/, copied in by the imager) are
+        # image inputs exactly like the hook script itself.
+        if [ -d "${hook_script%.sh}.d" ]; then
+            local support_file
+            while IFS= read -r support_file; do
+                HOOK_SCRIPTS+=("$support_file")
+            done < <(find "${hook_script%.sh}.d" -type f | LC_ALL=C sort)
+        fi
         if [ -n "$git_repo" ]; then
             if [[ "$git_repo" == file://* ]]; then
                 HOOK_LOCAL_DIRS+=("${git_repo#file://}")
@@ -1118,9 +1126,13 @@ run_stage_apps() {
     [ $KEEP_BUILD_DEPS -eq 1 ] && extra+=(--keep-build-deps)
     [ $DEBUG -eq 1 ] && extra+=(--debug)
     # The imager parses the same hook list in its own process, so every ${VAR}
-    # a hook list references has to reach it too, not just this shell.
+    # a hook list references has to reach it too, not just this shell. The
+    # hooks inherit this environment as well: AB_MANIFEST_PATH is set only for
+    # A/B builds, so a hook can record into the image manifest there and leave
+    # a single-slot image untouched.
     MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" \
     MICROPANEL_TOUCH_APP_REPO="${MICROPANEL_TOUCH_APP_REPO:-}" \
+    AB_MANIFEST_PATH="$([ "$AB_LAYOUT" = "1" ] && printf '%s' "${AB_MANIFEST_PATH:-}")" \
     CLUSTER_SOURCE="${CLUSTER_SOURCE:-}" "$IMAGER" \
         --mode=incremental \
         --baseimage="$APPS_INPUT" \

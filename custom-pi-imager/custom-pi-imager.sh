@@ -119,6 +119,10 @@ Hook List File Format (hook-packages.txt):
   # Local source package (will copy from host)
   packages/generic-package-hook.sh|file:///home/user/my-project|local|/home/pi/app|cmake,build-essential
 
+  A hook may ship support files (tools, units) in a sibling directory named
+  after it without .sh: packages/foo-hook.d/ for packages/foo-hook.sh. It is
+  copied into the chroot next to the hook and exported as HOOK_SUPPORT_DIR.
+
   # Package with post-install commands (enable systemd service and copy config)
   packages/generic-package-hook.sh|https://github.com/user/qt-app.git|v1.0|/home/pi/app||systemctl enable /home/pi/app/lib/systemd/system/myapp.service;cp /home/pi/app/config.txt /etc/
 
@@ -825,9 +829,22 @@ run_setup_hooks() {
         local hook_basename=$(basename "$hook_script")
         cp "$hook_script" "${MOUNT_POINT}/tmp/${hook_basename}"
         chmod +x "${MOUNT_POINT}/tmp/${hook_basename}"
+        # Optional support files: <hook-without-.sh>.d/ beside the hook script.
+        local support_dir="${hook_script%.sh}.d" support_basename=""
+        if [ -d "$support_dir" ]; then
+            support_basename=$(basename "$support_dir")
+            rm -rf "${MOUNT_POINT}/tmp/${support_basename}"
+            cp -r "$support_dir" "${MOUNT_POINT}/tmp/${support_basename}"
+            export HOOK_SUPPORT_DIR="/tmp/${support_basename}"
+            info "  HOOK_SUPPORT_DIR=$HOOK_SUPPORT_DIR"
+        fi
 
         chroot "${MOUNT_POINT}" /bin/bash -c "cd /tmp && DEBUG_MODE=$DEBUG_MODE KEEP_BUILD_DEPS=$KEEP_BUILD_DEPS ./${hook_basename}" || error "Setup hook failed: ${hook_script}"
         rm -f "${MOUNT_POINT}/tmp/${hook_basename}"
+        if [ -n "$support_basename" ]; then
+            rm -rf "${MOUNT_POINT}/tmp/${support_basename}"
+            unset HOOK_SUPPORT_DIR
+        fi
 
         # Unset parameterized environment variables
         if [ "$field_count" != "1" ]; then

@@ -45,16 +45,28 @@ Mechanisms, in one place:
 `micropanel-system/`, not under the pi-owned `micropanel/`, so the pi account
 cannot rename them away.
 
-## Device-owned boot configuration (next step)
+## Device-owned boot configuration
 
-The display type chosen by the DIP switches (or the OLED menu's HDMI Timing)
-is written by `pi-config-txt.sh`. On an A/B image it will live in
-`micropanel-display.txt` at the root of `MP_BOOT_A`, shared by both slots and
-included by the release-owned `config.txt`; the kernel-module options derived
-from it are regenerated at every boot. That split is not in the image yet;
-until it is, a display-type change on an A/B image rewrites `config.txt` and
-loses the slot selector. Do not change the display type on an A/B bench image
-built before the include split.
+| Path | Owner | Writer | Survives |
+| --- | --- | --- | --- |
+| `MP_BOOT_A:/micropanel-display.txt` | root (vfat) | `pi-config-txt.sh --type=` (DIP-switch service, OLED HDMI Timing, streamdeck-ctrl, anything passing `--input=/boot/firmware/config.txt`) | reboots, updates, commits; **not** a reflash |
+| `MP_BOOT_A:/micropanel-display.txt.bak` | root | the same, one rolling copy | as above |
+
+The display type (type marker, timings, touch overlay) is the one piece of
+state on the boot partition. `config.txt` there is the slot selector's
+(release-owned, rewritten on every arm and commit) and includes
+`micropanel-display.txt`; `/etc/default/micropanel`
+(`MICROPANEL_BOOT_CONFIG=/boot/firmware/micropanel-display.txt`) is what makes
+`pi-config-txt.sh` read and write that file instead of `config.txt`. The boot
+partition is mounted `ro`; `pi-config-txt.sh` remounts it for the write.
+
+`micropanel-display-derive.service` regenerates, every boot and before the
+DIP-switch service, micropanel, als-dimmer and the launcher start, what the
+type implies in the volatile root - `/etc/modprobe.d/hh983.conf`,
+`/etc/modules-load.d/custom-drivers.conf`,
+`/etc/modprobe.d/blacklist-himax-mmi.conf`, the als-dimmer config link - and
+(re)loads the display drivers to match. A factory reset does not touch the
+display file (it is not on `/data`).
 
 ## Intentionally volatile
 
@@ -64,7 +76,7 @@ built before the include split.
   and `/etc/ssh` host keys are restored copies of `/data` state.
 - `/etc/modprobe.d/hh983.conf`, `/etc/modules-load.d/custom-drivers.conf`,
   `/etc/modprobe.d/blacklist-himax-mmi.conf`: derived from the display type;
-  regenerated at boot once the include split lands.
+  regenerated every boot by `micropanel-display-derive.service`.
 - `/tmp/micropanel.log` (the System → Transfer Logs feature copies it to USB),
   FPGA/RH850/Vivado flash logs, hdmi-patch state, ping output, `/run/als-dimmer`
   and the als-dimmer socket: per-boot diagnostics and scratch.
@@ -80,6 +92,7 @@ built before the include split.
 | --- | --- | --- |
 | `micropanel-machine-id.service` | created, enabled (sysinit) | restore durable identity |
 | `micropanel-ssh-host-keys.service` | created, enabled (wanted by `ssh.service`) | restore durable host keys |
+| `micropanel-display-derive.service` | created, enabled | module configuration of the display type, every boot; the static `custom-drivers.conf` is removed |
 | `regenerate_ssh_host_keys.service`, `sshd-keygen.service` | disabled, masked | would regenerate keys every boot |
 | `dphys-swapfile.service` | disabled | no swap on an overlay root |
 | `rpi-eeprom-update.service` | disabled | EEPROM updates are outside the A/B chain |

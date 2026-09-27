@@ -232,8 +232,55 @@ cp "$initrd" "$boot/initramfs-custom"
 rm -f "$initrd"
 say "initramfs: built for $release ($(du -k "$boot/initramfs-custom" | cut -f1) KiB) -> $boot/initramfs-custom"
 
-# Load it with the custom kernel. The authored config.txt carries the line for
-# now; the include split (next step) moves it into micropanel's template.
+# --- 5. The config.txt include split --------------------------------------------
+# config.txt becomes the slot selector's template: release-owned, and rewritten
+# by the selector on every arm and commit. The display configuration (timings,
+# touch overlay, type marker) moves to micropanel-display.txt at the root of the
+# boot partition - device-owned, shared by both slots, surviving updates - which
+# config.txt includes. /etc/default/micropanel is what tells pi-config-txt.sh (and
+# so every caller that passes --input=/boot/firmware/config.txt) to use it.
+pi_config=/home/pi/micropanel/usr/bin/pi-config-txt.sh
+pi_configs=/home/pi/micropanel/usr/share/micropanel/configs/
+display_file=$boot/micropanel-display.txt
+[ -x "$pi_config" ] || die "$pi_config is missing"
+grep -q -- '--emit-base' "$pi_config" || \
+    die "$pi_config predates the split boot configuration: push the micropanel commit that adds --emit-base, then rebuild"
+# The type the authored config.txt encodes, asked before the switch exists.
+display_type=$(MICROPANEL_DEFAULTS=/nonexistent "$pi_config" --configspath="$pi_configs" \
+    --input="$config" --query-config 2>/dev/null || true)
+if [ -z "$display_type" ] || [ "$display_type" = unknown ]; then
+    # micropanel's shipped configs/config.txt is a hand-kept copy of the edid
+    # rendering that has drifted from the template (the GPIO22 line), so it
+    # queries as unknown. edid is what it is; the DIP-switch service moves the
+    # device to its switch setting on first boot either way.
+    display_type=edid
+    say "config.txt: the authored config.txt matches no display type exactly; splitting as edid"
+fi
+printf '%s\n' '# micropanel A/B image: the display configuration lives in its own file on the' \
+    '# boot partition, included by the slot-selected config.txt (pi-config-txt.sh).' \
+    "MICROPANEL_BOOT_CONFIG=$display_file" > /etc/default/micropanel
+chmod 0644 /etc/default/micropanel
+MICROPANEL_NO_REBOOT=1 "$pi_config" --configspath="$pi_configs" --input=/boot/firmware/config.txt \
+    --type="$display_type" --no-reboot
+"$pi_config" --configspath="$pi_configs" --emit-base="$config"
+grep -q "^# micropanel-display-type: $display_type\$" "$display_file" || die "micropanel-display.txt lacks its type marker"
+if grep -q '^hdmi_timings=' "$config"; then die "config.txt still carries hdmi_timings after the split"; fi
+if grep -q '^dtoverlay=himax-touch' "$config"; then die "config.txt still carries the touch overlay after the split"; fi
+[ "$(grep -c '^include ' "$config")" -eq 1 ] && grep -qx 'include micropanel-display.txt' "$config" || \
+    die "config.txt must include micropanel-display.txt exactly once"
+if grep -Eq '^[[:space:]]*os_prefix=' "$config"; then die "config.txt selects an os_prefix"; fi
+rm -f "$display_file.bak"
+say "config.txt: split for display type $display_type; micropanel-display.txt is device-owned"
+
+# The module configuration the type implies is regenerated every boot by the
+# derive unit, which also loads the drivers; no static list loads them first.
+install -Dm0644 "$support/micropanel-display-derive.service" /etc/systemd/system/micropanel-display-derive.service
+systemctl enable micropanel-display-derive.service
+rm -f /etc/modules-load.d/custom-drivers.conf
+say "display: micropanel-display-derive enabled; static custom-drivers.conf removed"
+
+# Load the initramfs with the custom kernel. It belongs to this image layout,
+# not to micropanel's template, which single-slot images and buildroot share.
 grep -Eq '^[[:space:]]*kernel=Image[[:space:]]*$' "$config" || die "config.txt does not select kernel=Image"
 sed -i -E '/^[[:space:]]*initramfs[[:space:]]/d' "$config"
 sed -i -E '0,/^[[:space:]]*kernel=Image[[:space:]]*$/s//&\ninitramfs initramfs-custom followkernel/' "$config"
@@ -244,8 +291,6 @@ say "config.txt: 'initramfs initramfs-custom followkernel' added after kernel=Im
 
 grep -Eq "(^|[[:space:]])${overlayroot_token}([[:space:]]|$)" "$cmdline" || die "cmdline.txt lacks $overlayroot_token"
 if grep -Eq '(^|[[:space:]])init=' "$cmdline"; then die "cmdline.txt still carries an init= token"; fi
-
-# --- 5. /etc/default/micropanel: next step (the config.txt include split) ------
 
 # --- 6. Image manifest ------------------------------------------------------------
 # micropanel-hook.sh recorded the revision it built (it deletes its clone).

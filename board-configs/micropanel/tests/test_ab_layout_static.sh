@@ -208,6 +208,24 @@ for unit in micropanel-machine-id.service micropanel-ssh-host-keys.service; do
 done
 grep -Fq 'systemctl enable micropanel-machine-id.service micropanel-ssh-host-keys.service' "$appliance" || \
     fail 'appliance hook does not enable the restore units'
+# The config.txt include split: the hook points pi-config-txt.sh at the display
+# file, emits the release-owned base, and hands the derived module configuration
+# to a unit that runs every boot before anything that reads it or uses the drivers.
+derive_unit="$support/micropanel-display-derive.service"
+[ -f "$derive_unit" ] || fail "derive unit missing: $derive_unit"
+grep -Fq -- '--apply-derived' "$derive_unit" || fail 'derive unit does not run --apply-derived'
+grep -Fqx 'RequiresMountsFor=/boot/firmware' "$derive_unit" || fail 'derive unit does not wait for the boot partition'
+for consumer in dip-switch-resolution.service micropanel.service als-dimmer.service; do
+    grep -Eq "^Before=(.* )?$consumer( |$)" "$derive_unit" || fail "derive unit is not ordered before $consumer"
+done
+grep -Fq 'systemctl enable micropanel-display-derive.service' "$appliance" || fail 'appliance hook does not enable the derive unit'
+grep -Fq 'rm -f /etc/modules-load.d/custom-drivers.conf' "$appliance" || fail 'appliance hook keeps the static driver list'
+grep -Fq '"MICROPANEL_BOOT_CONFIG=$display_file" > /etc/default/micropanel' "$appliance" || \
+    fail 'appliance hook does not write /etc/default/micropanel'
+grep -Fq -- '--emit-base="$config"' "$appliance" || fail 'appliance hook does not emit the base config.txt'
+grep -Fq "grep -q -- '--emit-base' \"\$pi_config\"" "$appliance" || \
+    fail 'appliance hook does not refuse a pi-config-txt.sh that predates the split'
+
 # The imager copies <hook>.d/ in as HOOK_SUPPORT_DIR, and the builder stamps it.
 grep -Fq 'local support_dir="${hook_script%.sh}.d"' "$repo_root/custom-pi-imager/custom-pi-imager.sh" || \
     fail 'imager no longer copies hook support directories'

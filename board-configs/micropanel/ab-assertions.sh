@@ -31,13 +31,54 @@ require grep -Fqx "AB_APP_REVISION=$revision" "$image_manifest"
 # The display configuration is device-owned and shared by both slots: it lives
 # at the root of p1 and the release-owned selector template only includes it,
 # so neither an update nor a slot commit can overwrite a device's display type.
-require test -f "$boot_mount/micropanel-display.txt"
+# (The flat and per-slot config.txt copies are never authoritative and may
+# differ; the selector renders p1/config.txt and tryboot.txt from the template.)
+display_file="$boot_mount/micropanel-display.txt"
+require test -f "$display_file"
+require grep -Eq '^# micropanel-display-type: [A-Za-z0-9._-]+$' "$display_file"
 template="$root_mount$engine_lib_dir/boot-selector-config.base"
+require test "$(grep -c '^include ' "$template")" = 1
 require grep -Eq '^[[:space:]]*include[[:space:]]+micropanel-display\.txt[[:space:]]*$' "$template"
-if grep -Eq '^[[:space:]]*os_prefix=' "$template"; then
-    echo "ERROR: board assertion failed: the selector template selects an os_prefix" >&2
-    exit 1
-fi
+for device_line in '^[[:space:]]*os_prefix=' '^hdmi_timings=' '^dtoverlay=himax-touch'; do
+    if grep -Eq "$device_line" "$template"; then
+        echo "ERROR: board assertion failed: the selector template carries a device line ($device_line)" >&2
+        exit 1
+    fi
+done
+# pi-config-txt.sh is told to use the display file.
+require grep -Fqx 'MICROPANEL_BOOT_CONFIG=/boot/firmware/micropanel-display.txt' "$root_mount/etc/default/micropanel"
+# The overlay contract. The firmware resolves overlays under os_prefix, i.e.
+# from the slot being booted, while the display file naming them is the
+# device's own and outlives every update: an overlay a release drops or renames
+# stops exactly the devices whose display file names it from booting their
+# display. Every overlay the template, this device's display file, or any
+# display type can name (pi-config-txt.sh: vc4-kms/fkms-v3d, and the touch
+# overlay and its per-type replacements) must be in the slot's overlays/.
+#
+# gpio-pullup is named by micropanel's config-base.txt.in (commit 60df4cc) but
+# exists in no overlay set: the firmware logs a load failure and boots on. It is
+# a known product defect with an open owner question, excused here by name only.
+known_missing_overlays=" gpio-pullup "
+overlay_names=$( { grep -h '^[[:space:]]*dtoverlay=' "$template" "$display_file";
+                   printf 'dtoverlay=%s\n' vc4-kms-v3d vc4-fkms-v3d himax-touch himax-touch-oled hh983-serializer; } |
+                 sed 's/^[[:space:]]*dtoverlay=//; s/[,[:space:]].*//' | sed '/^$/d' | sort -u)
+for slot in A B; do
+    for overlay in $overlay_names; do
+        case "$known_missing_overlays" in *" $overlay "*) continue ;; esac
+        require test -f "$boot_mount/$slot/overlays/$overlay.dtbo"
+    done
+done
+# The module contract: every driver a display type can configure is in the
+# custom kernel's out-of-tree module set.
+release=$(grep -a -o -m1 'Linux version [^ ]*' "$boot_mount/A/Image" | awk '{print $3}')
+require test -n "$release"
+for module in hh983-serializer himax_mmi himax_oled; do
+    require sh -c "ls '$root_mount/lib/modules/$release/extra/$module'.ko* >/dev/null 2>&1"
+done
+# The derived module configuration is regenerated every boot; nothing loads the
+# drivers from a static list before it has run.
+require test -L "$root_mount/etc/systemd/system/multi-user.target.wants/micropanel-display-derive.service"
+require test ! -e "$root_mount/etc/modules-load.d/custom-drivers.conf"
 # The custom kernel boots through an initramfs (overlayroot needs one), under a
 # version-free name that every slot carries: os_prefix makes the firmware load
 # A/ or B/'s copy, which must be the kernel's own.
@@ -46,8 +87,8 @@ for slot in A B; do
     require cmp -s "$boot_mount/initramfs-custom" "$boot_mount/$slot/initramfs-custom"
     require cmp -s "$boot_mount/Image" "$boot_mount/$slot/Image"
 done
-# Step 2: the line is in the authored config.txt; the include split moves it
-# into micropanel's display file.
+# Release-owned (it belongs to this image layout), so it is in the template.
+require test "$(grep -Ec '^[[:space:]]*initramfs[[:space:]]' "$template")" = 1
 require grep -Fqx 'initramfs initramfs-custom followkernel' "$template"
 # No slot boots with any init= at all: the engine verifier refuses Pi OS's
 # first-boot resize, and this board has no other init to run.

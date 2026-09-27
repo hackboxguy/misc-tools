@@ -1,0 +1,22 @@
+[Unit]
+Description=Apply the micropanel display type's kernel-module configuration
+# The display type lives in micropanel-display.txt on the boot partition (it
+# survives updates); the module options it implies are written to the volatile
+# root, so they are regenerated here on every boot. udev has already loaded
+# hh983-serializer with the image defaults by the time /boot/firmware is
+# mounted; pi-config-txt.sh --apply-derived reloads it when the options differ
+# and loads the type's touch driver. Everything that reads those files or uses
+# the drivers starts after this.
+ConditionPathExists=/etc/default/micropanel
+RequiresMountsFor=/boot/firmware
+After=local-fs.target systemd-udev-trigger.service systemd-modules-load.service
+Before=dip-switch-resolution.service micropanel.service als-dimmer.service qt-demo-launcher.service
+
+[Service]
+Type=oneshot
+ExecStartPre=-/usr/bin/udevadm settle --timeout=15
+ExecStart=/home/pi/micropanel/usr/bin/pi-config-txt.sh --configspath=/home/pi/micropanel/usr/share/micropanel/configs/ --apply-derived -v
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -152,10 +152,8 @@ single_count=$(printf '%s\n' "$single_hooks" | wc -l)
 ab_prefix=$(hook_lines "$board/hooks-ab.txt" | head -n "$single_count")
 [ "$ab_prefix" = "$single_hooks" ] || fail 'hooks-ab.txt no longer starts with exactly the lines of hooks.txt'
 ab_extra=$(hook_lines "$board/hooks-ab.txt" | tail -n +"$((single_count + 1))")
-for extra in $ab_extra; do
-    [ "$extra" = 'packages/micropanel-appliance-hook.sh' ] || \
-        fail "hooks-ab.txt has an unexpected A/B-only hook: $extra"
-done
+[ "$ab_extra" = 'packages/micropanel-appliance-hook.sh' ] || \
+    fail "hooks-ab.txt must be hooks.txt plus exactly packages/micropanel-appliance-hook.sh, last; A/B-only lines: $ab_extra"
 
 # The imager parses hook lists in its own process: every ${VAR} they use must be
 # handed to it (in the invocation) or exported by the builder.
@@ -171,6 +169,76 @@ for hook_list in "$board/hooks.txt" "$board/hooks-ab.txt"; do
         fail "hook list uses \${$hook_variable} but the builder does not pass it to the imager: $hook_list"
     done
 done
+
+# --- The appliance hook and its support files --------------------------------------
+appliance="$board/packages/micropanel-appliance-hook.sh"
+support="$board/packages/micropanel-appliance-hook.d"
+[ -x "$appliance" ] || fail "appliance hook missing or not executable: $appliance"
+bash -n "$appliance"
+for tool in micropanel-restore-machine-id micropanel-restore-ssh-host-keys; do
+    [ -x "$support/$tool" ] || fail "restore tool missing or not executable: $tool"
+    sh -n "$support/$tool"
+done
+for unit in micropanel-machine-id.service micropanel-ssh-host-keys.service; do
+    [ -f "$support/$unit" ] || fail "unit missing: $unit"
+    grep -Fq "ExecStart=/usr/local/sbin/micropanel-restore-" "$support/$unit" || fail "$unit runs no restore tool"
+    grep -Fq "\"\$support/$unit\" /etc/systemd/system/$unit" "$appliance" || fail "appliance hook does not install $unit"
+done
+grep -Fq 'systemctl enable micropanel-machine-id.service micropanel-ssh-host-keys.service' "$appliance" || \
+    fail 'appliance hook does not enable the restore units'
+# The imager copies <hook>.d/ in as HOOK_SUPPORT_DIR, and the builder stamps it.
+grep -Fq 'local support_dir="${hook_script%.sh}.d"' "$repo_root/custom-pi-imager/custom-pi-imager.sh" || \
+    fail 'imager no longer copies hook support directories'
+grep -Fq 'export HOOK_SUPPORT_DIR=' "$repo_root/custom-pi-imager/custom-pi-imager.sh" || \
+    fail 'imager no longer exports HOOK_SUPPORT_DIR'
+grep -Fq 'done < <(find "${hook_script%.sh}.d" -type f | LC_ALL=C sort)' "$builder" || \
+    fail 'builder no longer stamps hook support files'
+# The manifest: micropanel-hook.sh records what it built, only when the builder
+# hands it AB_MANIFEST_PATH, which it does only for A/B builds.
+grep -Fq 'AB_MANIFEST_PATH="$([ "$AB_LAYOUT" = "1" ] && printf' "$builder" || \
+    fail 'builder passes AB_MANIFEST_PATH to single-slot hooks'
+grep -Fq 'if [ -n "${AB_MANIFEST_PATH:-}" ]; then' "$board/packages/micropanel-hook.sh" || \
+    fail 'micropanel-hook.sh records the manifest unconditionally'
+grep -Fq "printf 'MICROPANEL_REVISION=%s\\n' \"\$(git -C /tmp/micropanel rev-parse HEAD)\"" \
+    "$board/packages/micropanel-hook.sh" || fail 'micropanel-hook.sh no longer records its clone HEAD'
+
+# Every unit that must wait for a factory reset exists in the image: shipped by
+# the OS, enabled by an application hook, or created by the appliance hook.
+os_units='NetworkManager.service'
+for unit in $(sed -n 's/^AB_RESET_BEFORE=//p' "$ab_conf"); do
+    printf '%s\n' $os_units | grep -Fqx "$unit" && continue
+    [ -f "$support/$unit" ] && continue
+    grep -Eq "(systemctl (enable|link) [^|;]*${unit%.service}(\.service)?|/${unit}( |$|;))" \
+        "$board/hooks.txt" "$board/packages/"*.sh && continue
+    fail "AB_RESET_BEFORE names $unit, which nothing installs or enables"
+done
+# Every bind the hook writes: the finalizer keeps it, and its consumer waits
+# for the reset.
+binds=$(grep -Ev '^[[:space:]]*(#|$)' "$support/fstab.binds")
+[ -n "$binds" ] || fail 'fstab.binds is empty'
+reset_before=" $(sed -n 's/^AB_RESET_BEFORE=//p' "$ab_conf") "
+fstab_fixture=$(mktemp)
+printf '%s\n' 'PARTUUID=x-02 / ext4 defaults 0 1' 'PARTUUID=x-01 /boot/firmware vfat defaults 0 2' > "$fstab_fixture"
+printf '%s\n' "$binds" >> "$fstab_fixture"
+# Run the finalizer's own fstab rewrite, not a copy of its rule.
+eval "$(sed -n '/^replace_ab_fstab() {/,/^}/p' "$finalizer")"
+fixture_root=$(mktemp -d)
+install -d "$fixture_root/etc"
+cp "$fstab_fixture" "$fixture_root/etc/fstab"
+replace_ab_fstab "$fixture_root"
+printf '%s\n' "$binds" | while IFS= read -r bind_line; do
+    grep -Fqx -- "$bind_line" "$fixture_root/etc/fstab" || fail "the A/B finalizer drops the bind: $bind_line"
+    case "$bind_line" in
+        *x-systemd.after=ab-factory-reset.service*) ;;
+        *) fail "bind does not wait for the factory reset: $bind_line" ;;
+    esac
+    consumer=$(printf '%s\n' "$bind_line" | sed -n 's/.*x-systemd\.before=\([^, ]*\).*/\1/p')
+    [ -n "$consumer" ] || fail "bind names no consumer: $bind_line"
+    case "$reset_before" in *" $consumer "*) ;; *) fail "bind consumer $consumer is not in AB_RESET_BEFORE" ;; esac
+    source_dir=$(printf '%s\n' "$bind_line" | awk '{print $1}')
+    grep -Fq "\"\$data_root/${source_dir#/data/}\"" "$skeleton" || fail "skeleton does not create bind source $source_dir"
+done
+rm -rf "$fstab_fixture" "$fixture_root"
 
 # --- The skeleton, for real, where we may chown ------------------------------------
 # Preflight of a real build runs as root, so this part runs before every A/B

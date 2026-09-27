@@ -1,0 +1,40 @@
+#!/bin/sh
+# Restore persistent SSH host keys from the data partition.
+#
+# On an overlay root the stock first-boot key generator would run on every
+# boot (its writes vanish with the tmpfs upper layer) and the device would
+# present new host keys after every reboot and every update. Instead one set
+# lives on /data; this seeds it once and copies it into /etc/ssh before sshd
+# starts. If /data is not mounted the directory is absent and the lower
+# image's keys remain a recovery fallback.
+#
+# Adapted from the inline tool in micropanel-touch-hook.sh.
+set -eu
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+persistent_dir=${MICROPANEL_SSH_HOST_KEYS_DIR:-/data/micropanel-system/ssh-host-keys}
+system_dir=${MICROPANEL_SSH_SYSTEM_DIR:-/etc/ssh}
+
+[ -d "$persistent_dir" ] && [ -d "$system_dir" ] || exit 0
+[ -w "$persistent_dir" ] || exit 0
+
+umask 077
+for key_type in rsa ecdsa ed25519; do
+    persistent_key="$persistent_dir/ssh_host_${key_type}_key"
+    persistent_public_key="${persistent_key}.pub"
+    system_key="$system_dir/ssh_host_${key_type}_key"
+    system_public_key="${system_key}.pub"
+
+    if ! ssh-keygen -lf "$persistent_key" >/dev/null 2>&1; then
+        rm -f "$persistent_key" "$persistent_public_key"
+        ssh-keygen -q -N '' -t "$key_type" -f "$persistent_key"
+    fi
+    if [ ! -s "$persistent_public_key" ]; then
+        ssh-keygen -y -f "$persistent_key" > "$persistent_public_key"
+    fi
+    chmod 0600 "$persistent_key"
+    chmod 0644 "$persistent_public_key"
+    install -m0600 "$persistent_key" "$system_key"
+    install -m0644 "$persistent_public_key" "$system_public_key"
+done

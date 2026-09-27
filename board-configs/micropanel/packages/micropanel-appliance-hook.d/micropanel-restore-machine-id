@@ -1,0 +1,67 @@
+#!/bin/sh
+# Restore a device-unique machine ID from the persistent data partition.
+# Runs before systemd-machine-id-commit and D-Bus. The read-only lower root
+# keeps /etc/machine-id empty, so systemd supplies a transient random ID on a
+# first boot; that ID is committed here to the root-only data store, and every
+# later boot (and every A/B update) restores the same one.
+#
+# Adapted from micropanel-touch's packaging/micropanel-touch-restore-machine-id.
+set -eu
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+persistent_directory=${MICROPANEL_MACHINE_ID_PERSISTENT_DIR:-/data/micropanel-system}
+persistent_id=${persistent_directory}/machine-id
+system_id=${MICROPANEL_MACHINE_ID_SYSTEM_PATH:-/etc/machine-id}
+dbus_id=${MICROPANEL_MACHINE_ID_DBUS_PATH:-/var/lib/dbus/machine-id}
+
+valid_machine_id() {
+    [ "$#" -eq 1 ] || return 1
+    printf '%s\n' "$1" | grep -Eq '^[0-9a-f]{32}$' || return 1
+    [ "$1" != 00000000000000000000000000000000 ]
+}
+
+read_machine_id() {
+    [ -r "$1" ] || return 1
+    value=$(cat "$1") || return 1
+    valid_machine_id "$value" || return 1
+    printf '%s\n' "$value"
+}
+
+# Only ever commit to the real durable partition: an unmounted /data is an
+# empty directory on the volatile root, and an ID stored there is lost.
+if [ "${MICROPANEL_MACHINE_ID_ASSUME_PERSISTENT_DATA:-0}" != 1 ]; then
+    mounted_target=$(findmnt -rn -T "$persistent_directory" -o TARGET 2>/dev/null || true)
+    [ "$mounted_target" = /data ] || exit 0
+fi
+
+# The data skeleton creates this root-only directory; creating it here too
+# keeps a /data volume from an older image working.
+install -d -m0700 "$persistent_directory"
+
+desired_id=
+if stored_id=$(read_machine_id "$persistent_id"); then
+    desired_id=$stored_id
+elif transient_id=$(read_machine_id "$system_id"); then
+    desired_id=$transient_id
+else
+    desired_id=$(tr -d '-' </proc/sys/kernel/random/uuid)
+    valid_machine_id "$desired_id" || exit 1
+fi
+
+if [ "$desired_id" != "${stored_id:-}" ]; then
+    temporary_id=$(mktemp "$persistent_directory/.machine-id.XXXXXX") || exit 1
+    if ! printf '%s\n' "$desired_id" > "$temporary_id" ||
+       ! chmod 0444 "$temporary_id" || ! sync -f "$temporary_id"; then
+        rm -f "$temporary_id"
+        exit 1
+    fi
+    if ! mv -f "$temporary_id" "$persistent_id" || ! sync -f "$persistent_directory"; then
+        rm -f "$temporary_id"
+        exit 1
+    fi
+fi
+chmod 0444 "$persistent_id"
+
+install -m0444 "$persistent_id" "$system_id"
+install -m0444 "$persistent_id" "$dbus_id"

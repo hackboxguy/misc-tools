@@ -68,6 +68,17 @@ make install > /dev/null
 # Set correct ownership (pi user is uid:gid 1000:1000)
 chown -R 1000:1000 /home/pi/micropanel
 
+# A/B images only: record the exact revision built into the image manifest.
+# The builder sets AB_MANIFEST_PATH for --layout=ab builds and leaves it empty
+# otherwise, so the single-slot image is unchanged. The clone is deleted below,
+# which is why this cannot be looked up later; the appliance hook completes
+# the manifest.
+if [ -n "${AB_MANIFEST_PATH:-}" ]; then
+    install -d -m0755 "$(dirname "$AB_MANIFEST_PATH")"
+    printf 'MICROPANEL_REVISION=%s\n' "$(git -C /tmp/micropanel rev-parse HEAD)" > "$AB_MANIFEST_PATH"
+    echo "Recorded $(cat "$AB_MANIFEST_PATH") in $AB_MANIFEST_PATH"
+fi
+
 ######finalize the micropanel installation######
 echo ""
 echo "Finalizing micropanel installation..."

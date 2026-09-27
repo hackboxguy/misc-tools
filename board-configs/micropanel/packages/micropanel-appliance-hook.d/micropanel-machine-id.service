@@ -1,0 +1,17 @@
+[Unit]
+Description=Restore persistent micropanel machine identity
+DefaultDependencies=no
+Wants=data.mount
+After=data.mount
+Before=systemd-machine-id-commit.service dbus.service dbus.socket systemd-journal-flush.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/micropanel-restore-machine-id
+# Journald started under the transient ID; restart it so the journal of this
+# boot is filed under the restored one. Failure must not block the boot.
+ExecStartPost=-/usr/bin/systemctl try-restart systemd-journald.service
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

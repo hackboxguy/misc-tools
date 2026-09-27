@@ -1,0 +1,12 @@
+[Unit]
+Description=Restore persistent micropanel SSH host keys
+Wants=data.mount
+After=data.mount
+Before=ssh.service sshd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/micropanel-restore-ssh-host-keys
+
+[Install]
+WantedBy=ssh.service

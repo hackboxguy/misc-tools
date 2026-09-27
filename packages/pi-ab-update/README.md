@@ -116,6 +116,15 @@ skeleton cannot know about (files the image seeded into the durable partition
 whose pristine copies live in the read-only root). `lost+found` is the
 filesystem's, not the product's, and is left alone.
 
+**Seeding durable state from the image.** `AB_RESET_SEED` restores flat,
+root-owned files only (NetworkManager keyfiles). Anything richer - a directory
+tree owned by the app account, say - is the skeleton's job, because the
+skeleton runs on both paths: the skeleton may copy pristine seeds from
+`$AB_SEED_ROOT` (finalizer) or `/media/root-ro` (reset); it must copy only into
+an empty destination and must preserve ownership. The finalizer exports
+`AB_SEED_ROOT` as the mounted authored root; the reset exports nothing, so a
+skeleton defaults to `/media/root-ro`.
+
 `AB_RESET_BEFORE` becomes a generated `Before=` drop-in, so the shared unit
 names no product. List every unit that reads the durable state — including any
 that restores machine identity, which must not run before the wipe.

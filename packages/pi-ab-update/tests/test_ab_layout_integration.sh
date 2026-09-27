@@ -113,6 +113,8 @@ printf '%s\n' 'IMAGE_VERSION=fixture' \
 # The health hook is the application's contribution to the engine's candidate
 # predicate; its own hook installs it, so the fixture stands one in for it.
 install -Dm0755 /dev/null "$source_root_mount/usr/lib/micropanel-touch/update-health"
+# Identifies the authored root for the AB_SEED_ROOT check below.
+printf '%s\n' 'authored-root' > "$source_root_mount/etc/ab-seed-root-fixture"
 # The reference board's xmproxy package (jsonrpc-tcp-srv hook): its board
 # assertions check the installed footprint, so stand one in the same way.
 for xmproxy_tool in xmproxysrv sysmgr xmproxy-seed.sh; do
@@ -163,6 +165,21 @@ ab_update_conf="$board/ab-update.conf"
 ab_assertions="$board/ab-assertions.sh"
 ab_manifest_path=/opt/micropanel-touch/share/micropanel-touch/image-manifest.env
 
+# The finalizer hands the skeleton the mounted authored root as AB_SEED_ROOT,
+# so a board skeleton can seed pristine state from it. Wrap the board skeleton
+# in one that records what it was given and proves it is that root.
+seed_record="$work/seed-root-record"
+recording_skeleton="$work/recording-skeleton.sh"
+cat > "$recording_skeleton" <<RECORDER
+#!/bin/sh
+set -eu
+printf '%s\\n' "\${AB_SEED_ROOT:-unset}" > "$seed_record"
+mountpoint -q "\$AB_SEED_ROOT"
+grep -Fqx authored-root "\$AB_SEED_ROOT/etc/ab-seed-root-fixture"
+exec "$skeleton" "\$@"
+RECORDER
+chmod 0755 "$recording_skeleton"
+
 env -u DATA_PARTITION_MB \
     IMAGE_PATH="$image" AB_LAYOUT=1 AB_IMAGE_SIZE_MB=384 \
     AB_BOOT_PARTITION_MB=32 AB_ROOT_PARTITION_MB=96 AB_FACTORY_PARTITION_MB=32 \
@@ -176,8 +193,13 @@ env -u DATA_PARTITION_MB \
     AB_APP_REVISION_KEY=MICROPANEL_TOUCH_REVISION \
     AB_APP_REVISION="$fixture_app_revision" \
     AB_UPDATE_CONF="$ab_update_conf" \
-    DATA_SKELETON_SCRIPT="$skeleton" \
+    DATA_SKELETON_SCRIPT="$recording_skeleton" \
     "$finalizer"
+[ -s "$seed_record" ] && [ "$(cat "$seed_record")" != unset ] || {
+    echo 'ERROR: the finalizer did not export AB_SEED_ROOT to the skeleton' >&2
+    exit 1
+}
+echo '  ok  skeleton received the mounted authored root as AB_SEED_ROOT'
 
 # A base built with root expansion arms Pi OS's first-boot resize through
 # cmdline.txt; the fixture carries that token, and no A/B cmdline may keep it

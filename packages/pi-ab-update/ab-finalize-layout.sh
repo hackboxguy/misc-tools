@@ -240,7 +240,10 @@ seed_data_skeleton() { # $1=root mount; $2=data mount
         echo "ERROR: $ab_app_account sysuser was not created in the image" >&2
         exit 1
     }
-    "$data_skeleton_script" --root "$2" \
+    # AB_SEED_ROOT is the authored root, mounted: a skeleton that seeds
+    # pristine state into /data reads it from here on first flash, and from
+    # the lower root (/media/root-ro) when the factory reset re-runs it.
+    AB_SEED_ROOT="$1" "$data_skeleton_script" --root "$2" \
         --uid "${account%%:*}" --gid "${account##*:}"
 }
 

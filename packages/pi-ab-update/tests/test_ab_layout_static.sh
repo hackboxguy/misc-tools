@@ -30,6 +30,11 @@ printf '%s\n' "$plan" | grep -Fqx 'tryboot_selector=os_prefix=B/'
 # apps image is authored. Its A/B branch must create, rather than expect, p8.
 grep -Fqx "    [ \"\$partition_count\" -eq 2 ] || {" "$finalizer"
 grep -Fqx "    seed_network_connections \"\$root_mount\" \"\$data_mount\"" "$finalizer"
+# The skeleton seeds from the authored root at finalize time (AB_SEED_ROOT) and
+# from /media/root-ro at reset time; the reset itself exports nothing.
+grep -Fq 'AB_SEED_ROOT="$1" "$data_skeleton_script" --root "$2"' "$finalizer"
+! grep -Fq 'AB_SEED_ROOT' "$engine/ab-factory-reset-boot"
+grep -Fq '$AB_SEED_ROOT' "$engine/README.md"
 grep -Fqx "    install -d -m0700 -o root -g root \"\$2/NetworkManager/system-connections\"" "$finalizer"
 grep -Fqx "slot_compatible_boards=\${SLOT_COMPATIBLE_BOARDS:-pi4}" "$finalizer"
 grep -Fqx "    render_boot_selector \"\$root_mount\" \"\$boot_mount\" render-normal A config.txt" "$finalizer"

@@ -72,11 +72,13 @@
 #                       (default: <output>/payloads/<version>; assets are
 #                       version-less, so releases must not share a directory)
 #   --signing-key=FILE  ed25519 release signing key for --payload (default:
-#                       /etc/micropanel-touch/release-signing/ed25519-release.key,
-#                       created on first use)
+#                       <board AB_RELEASE_KEY_DIR>/ed25519-release.key, e.g.
+#                       /etc/micropanel-touch/release-signing/; created on
+#                       first use)
 #   --release-url-template=URL
 #                       Where the device fetches releases from, with @ASSET@
 #                       standing in for the asset name (default: the board's
+#                       AB_RELEASE_URL_TEMPLATE, or for micropanel-touch its
 #                       MICROPANEL_TOUCH_RELEASE_URL_TEMPLATE). Point this at a
 #                       local server to rehearse an over-the-air update:
 #                         --release-url-template=http://192.168.1.80:8000/@ASSET@
@@ -316,6 +318,25 @@ if [ -n "$ARG_LAYOUT" ]; then
         *) die "--layout must be 'single' or 'ab'" ;;
     esac
 fi
+# Per-layout override: VAR_ab replaces VAR for an A/B build. This is what lets a
+# board add the appliance-only pieces (post-image hook, appliance hook list,
+# runtime deps, slimming) while its single-slot product builds exactly as
+# before. A per-variant VAR_<variant> still wins; combining a layout override
+# with a per-profile one is refused rather than silently ordered.
+if [ "$AB_LAYOUT" = "1" ]; then
+    for _v in RUNTIME_DEPS HOOK_LIST POST_IMAGE_HOOK IMAGE_SLIM_HOOK SLIM_REMOVE SLIM_MAX_ROOT_MB; do
+        _lkey="${_v}_ab"
+        [ -n "${!_lkey+x}" ] || continue
+        _vkey="${_v}_${VARIANT//-/_}"
+        [ -n "$VARIANT" ] && [ -n "${!_vkey+x}" ] && continue
+        _pkey="${_v}_${BASE_PROFILE//-/_}"
+        [ -n "$BASE_PROFILE" ] && [ -n "${!_pkey+x}" ] && \
+            die "$BOARD_CONF sets both $_lkey and $_pkey; pick one"
+        declare "$_v=${!_lkey}"
+        info "Using board ${_v,,} override for the A/B layout: ${!_lkey}"
+    done
+    unset _v _lkey _vkey _pkey
+fi
 VERSION="${VERSION:-$DEFAULT_VERSION}"
 PASSWORD="${PASSWORD:-$DEFAULT_PASSWORD}"
 
@@ -351,8 +372,13 @@ unset _ab_size
 if [ "$AB_LAYOUT" = "1" ]; then IMAGE_LAYOUT=ab; else IMAGE_LAYOUT=single; fi
 [ "$AB_LAYOUT" = "0" ] || { [ "$POST_IMAGE_HOOK" != "none" ] && [ -n "$POST_IMAGE_HOOK" ]; } || \
     die "--layout=ab requires a board POST_IMAGE_HOOK"
-[ "$AB_LAYOUT" = "0" ] || [ "$EXPAND_ROOT" = "0" ] || \
-    die "--layout=ab requires EXPAND_ROOT=0; first-boot root expansion would corrupt the A/B partition layout"
+# First-boot root expansion would corrupt the A/B partition layout: it grows the
+# root partition to the end of the card, across the slots behind it. EXPAND_ROOT
+# itself is left alone, because with a base profile it is part of the *shared*
+# base stamp and flipping it per board would rebuild the base for every other
+# board of the profile. So an A/B build forces only its own apps stage off, and
+# the finalizer strips any first-boot init= the base left in cmdline.txt.
+if [ "$AB_LAYOUT" = "1" ]; then APPS_EXPAND_ROOT=0; else APPS_EXPAND_ROOT="$EXPAND_ROOT"; fi
 [ "$BUILD_PAYLOAD" = "0" ] || [ "$AB_LAYOUT" = "1" ] || \
     die "--payload requires --layout=ab; single-slot images have no inactive update slot"
 if [ "$BOARD" = "micropanel-touch" ]; then
@@ -485,7 +511,7 @@ RELEASE_SIGNING_PUBLIC_KEY="${RELEASE_SIGNING_KEY:+$RELEASE_SIGNING_KEY.pub}"
 # Where the built image will look for releases. The board default points at the
 # project's GitHub releases; --release-url-template redirects it, which is how
 # an over-the-air update is rehearsed against a server on the bench LAN.
-RELEASE_URL_TEMPLATE="${ARG_RELEASE_URL_TEMPLATE:-${MICROPANEL_TOUCH_RELEASE_URL_TEMPLATE:-}}"
+RELEASE_URL_TEMPLATE="${ARG_RELEASE_URL_TEMPLATE:-${AB_RELEASE_URL_TEMPLATE:-${MICROPANEL_TOUCH_RELEASE_URL_TEMPLATE:-}}}"
 if [ -n "$RELEASE_URL_TEMPLATE" ]; then
     case "$RELEASE_URL_TEMPLATE" in
         http://*|https://*) ;;
@@ -622,7 +648,7 @@ git_remote_rev() {
 
 apps_stamp_inputs() {
     parse_hook_list "$HOOK_LIST"
-    local in=("apps-v4" "version:$VERSION" "input:$APPS_INPUT_STAMP" "apps-extend:$APPS_EXTEND_SIZE_MB" "expand-root:$EXPAND_ROOT" "data-partition-mb:$DATA_PARTITION_MB" "ab-layout:$AB_LAYOUT" "ab-image-mb:$AB_IMAGE_SIZE_MB" "ab-boot-mb:$AB_BOOT_PARTITION_MB" "ab-root-mb:$AB_ROOT_PARTITION_MB" "ab-factory-mb:$AB_FACTORY_PARTITION_MB" "slot-boards:$SLOT_COMPATIBLE_BOARDS" "pw:$PASSWORD" "cluster-source:${CLUSTER_SOURCE:-}")
+    local in=("apps-v4" "version:$VERSION" "input:$APPS_INPUT_STAMP" "apps-extend:$APPS_EXTEND_SIZE_MB" "expand-root:$APPS_EXPAND_ROOT" "data-partition-mb:$DATA_PARTITION_MB" "ab-layout:$AB_LAYOUT" "ab-image-mb:$AB_IMAGE_SIZE_MB" "ab-boot-mb:$AB_BOOT_PARTITION_MB" "ab-root-mb:$AB_ROOT_PARTITION_MB" "ab-factory-mb:$AB_FACTORY_PARTITION_MB" "slot-boards:$SLOT_COMPATIBLE_BOARDS" "pw:$PASSWORD" "cluster-source:${CLUSTER_SOURCE:-}")
     [ "$HOOK_LIST" != "none" ] && [ -n "$HOOK_LIST" ] && in+=("file:$HOOK_LIST")
     local h d entry url ref
     for h in "${HOOK_SCRIPTS[@]}"; do in+=("file:$h"); done
@@ -635,7 +661,15 @@ apps_stamp_inputs() {
     done
     [ "$RUNTIME_DEPS" != "none" ] && in+=("file:$RUNTIME_DEPS")
     [ "$BUILD_DEPS" != "none" ] && in+=("file:$BUILD_DEPS")
-    [ "$POST_IMAGE_HOOK" != "none" ] && [ -n "$POST_IMAGE_HOOK" ] && in+=("file:$POST_IMAGE_HOOK")
+    if [ "$POST_IMAGE_HOOK" != "none" ] && [ -n "$POST_IMAGE_HOOK" ]; then
+        in+=("file:$POST_IMAGE_HOOK")
+        # The post-image hook seeds /data with the board's skeleton script and
+        # installs the board's ab-update.conf into the root, so both are image
+        # inputs. (The board's ab-assertions.sh is not: it only reads the image,
+        # and run_verify_ab_image runs on every build, cached or not.)
+        [ "$DATA_SKELETON_PATH" != "none" ] && in+=("file:$DATA_SKELETON_PATH")
+        [ "$AB_LAYOUT" = "1" ] && [ "$AB_UPDATE_CONF_PATH" != "none" ] && in+=("file:$AB_UPDATE_CONF_PATH")
+    fi
     if [ "$IMAGE_SLIM_HOOK" != "none" ] && [ -n "$IMAGE_SLIM_HOOK" ]; then
         in+=("file:$IMAGE_SLIM_HOOK" "slim-max-root-mb:$SLIM_MAX_ROOT_MB")
         [ -n "$SLIM_REMOVE" ] && [ "$SLIM_REMOVE" != "none" ] && in+=("file:$SLIM_REMOVE")
@@ -1085,7 +1119,7 @@ run_stage_apps() {
         --output="$work" \
         ${PASSWORD:+--password="$PASSWORD"} \
         --extend-size-mb="$APPS_EXTEND_SIZE_MB" \
-        $([ "$EXPAND_ROOT" = "0" ] && echo "--no-expand-root") \
+        $([ "$APPS_EXPAND_ROOT" = "0" ] && echo "--no-expand-root") \
         --builddep-package="$([ "$APPS_BUILD_DEPS" != "none" ] && [ -n "$APPS_BUILD_DEPS" ] && echo "$APPS_BUILD_DEPS" || echo none)" \
         ${RUNTIME_DEPS:+$([ "$RUNTIME_DEPS" != "none" ] && echo "--runtime-package=$RUNTIME_DEPS")} \
         $([ "$HOOK_LIST" != "none" ] && [ -n "$HOOK_LIST" ] && echo "--setup-hook-list=$HOOK_LIST") \
@@ -1144,7 +1178,7 @@ run_post_image_hook() {
         AB_LIB_DIR="${AB_LIB_DIR:-}" \
         AB_APP_ACCOUNT="${AB_APP_ACCOUNT:-}" \
         AB_APP_REVISION_KEY="${AB_APP_REVISION_KEY:-}" \
-        AB_APP_REVISION="$MICROPANEL_TOUCH_REVISION" \
+        AB_APP_REVISION="${MICROPANEL_TOUCH_REVISION:-${AB_APP_REVISION:-}}" \
         AB_UPDATE_CONF="$AB_UPDATE_CONF_PATH" \
         DATA_SKELETON_SCRIPT="$DATA_SKELETON_PATH" \
         bash "$POST_IMAGE_HOOK"

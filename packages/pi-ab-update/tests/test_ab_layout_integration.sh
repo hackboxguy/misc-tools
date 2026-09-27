@@ -87,7 +87,7 @@ mount "${source_loop}p2" "$source_root_mount"
 
 printf '%s\n' 'dtoverlay=vc4-kms-v3d' > "$source_boot_mount/config.txt"
 printf '%s\n' \
-    'console=serial0,115200 root=PARTUUID=fixture-root rootfstype=ext4 fsck.repair=yes rootwait overlayroot=tmpfs:recurse=0' \
+    'console=serial0,115200 root=PARTUUID=fixture-root rootfstype=ext4 fsck.repair=yes rootwait overlayroot=tmpfs:recurse=0 init=/usr/lib/raspberrypi-sys-mods/firstboot' \
     > "$source_boot_mount/cmdline.txt"
 printf '%s\n' 'fixture kernel payload' > "$source_boot_mount/kernel8.img"
 install -d "$source_boot_mount/overlays"
@@ -178,6 +178,29 @@ env -u DATA_PARTITION_MB \
     AB_UPDATE_CONF="$ab_update_conf" \
     DATA_SKELETON_SCRIPT="$skeleton" \
     "$finalizer"
+
+# A base built with root expansion arms Pi OS's first-boot resize through
+# cmdline.txt; the fixture carries that token, and no A/B cmdline may keep it
+# (the verifier below refuses it too).
+fixture_boot=$(losetup --find --show --partscan --read-only "$image")
+retries=0
+while [ "$retries" -lt 20 ]; do
+    [ -b "${fixture_boot}p1" ] && break
+    sleep 1
+    retries=$((retries + 1))
+done
+install -d "$work/finalized-boot"
+mount -o ro "${fixture_boot}p1" "$work/finalized-boot"
+for cmdline in cmdline.txt A/cmdline.txt B/cmdline.txt; do
+    if grep -Fq 'init=' "$work/finalized-boot/$cmdline"; then
+        echo "ERROR: first-boot init= survived in $cmdline" >&2
+        umount "$work/finalized-boot"; losetup -d "$fixture_boot"; exit 1
+    fi
+    grep -Eq 'overlayroot=tmpfs:recurse=0$' "$work/finalized-boot/$cmdline"
+done
+umount "$work/finalized-boot"
+losetup -d "$fixture_boot"
+echo '  ok  first-boot init= stripped from every slot cmdline'
 
 # The finalizer zeroes the slot's free space before sealing, so the deleted
 # fixture file's bytes must not survive anywhere in the finished image.

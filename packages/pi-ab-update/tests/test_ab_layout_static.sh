@@ -109,7 +109,18 @@ grep -Fqx 'curl' "$board/runtime-deps.txt"
 grep -Fqx 'openssl' "$board/runtime-deps.txt"
 grep -Fqx 'ca-certificates' "$board/runtime-deps.txt"
 grep -Fqx 'util-linux' "$board/runtime-deps.txt"
-grep -Fq 'requires EXPAND_ROOT=0; first-boot root expansion would corrupt the A/B partition layout' "$builder"
+# First-boot root expansion would grow the root across the slots behind it.
+# EXPAND_ROOT belongs to a shared base stamp, so the builder forces only the A/B
+# apps stage off, and the finalizer strips (and the verifier refuses) the
+# first-boot init= a base built with expansion leaves in cmdline.txt.
+grep -Fq 'if [ "$AB_LAYOUT" = "1" ]; then APPS_EXPAND_ROOT=0; else APPS_EXPAND_ROOT="$EXPAND_ROOT"; fi' "$builder"
+grep -Fq '$([ "$APPS_EXPAND_ROOT" = "0" ] && echo "--no-expand-root")' "$builder"
+grep -Fq '"expand-root:$APPS_EXPAND_ROOT"' "$builder"
+[ "$(grep -Fc '    strip_first_boot_init "$' "$finalizer")" -eq 2 ] || {
+    echo 'the finalizer must strip first-boot init= from the flat and per-slot cmdlines' >&2
+    exit 1
+}
+grep -Fq 'first-boot root expansion is still armed' "$verifier"
 grep -Fq 'for tool in sfdisk fdisk mkfs.ext4 mkfs.vfat e2fsck resize2fs e2label blkid blockdev mount; do' "$builder"
 grep -Fq "bash \"\$ab_static_test\"" "$builder"
 grep -Fq -- '--payload requires --layout=ab' "$builder"
@@ -251,7 +262,9 @@ grep -Fq "77) die image" "$engine/ab-update-check"
 # The release source is board-authored and overridable per build; the URLs stay
 # version-less because the version lives inside the signed manifest.
 grep -Fq -- '--release-url-template=*' "$builder"
-grep -Fq 'RELEASE_URL_TEMPLATE="${ARG_RELEASE_URL_TEMPLATE:-${MICROPANEL_TOUCH_RELEASE_URL_TEMPLATE:-}}"' "$builder"
+# AB_RELEASE_URL_TEMPLATE is the generic board key; touch keeps its historical
+# name as the fallback.
+grep -Fq 'RELEASE_URL_TEMPLATE="${ARG_RELEASE_URL_TEMPLATE:-${AB_RELEASE_URL_TEMPLATE:-${MICROPANEL_TOUCH_RELEASE_URL_TEMPLATE:-}}}"' "$builder"
 grep -Fq '@ASSET@' "$builder"
 grep -Fq '@ASSET@' "$board/board.conf"
 

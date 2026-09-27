@@ -287,6 +287,17 @@ set_cmdline_root_label() { # $1=cmdline path; $2=filesystem label
     printf '%s\n' "$after" > "$cmdline"
 }
 
+# Pi OS's first-boot init= grows the root partition to the end of the card. In
+# this layout the root is a fixed slot with B, the factory reserve and /data
+# behind it, so that resize must never run. A base built with root expansion
+# leaves the token in cmdline.txt, and the apps stage is not relied on to have
+# removed it; every cmdline this layout writes goes through here.
+strip_first_boot_init() { # $1=cmdline path
+    sed -i -E \
+        -e 's#(^|[[:space:]])init=/usr/lib/(raspberrypi-sys-mods/firstboot|raspi-config/init_resize\.sh)([[:space:]]|$)#\1#g' \
+        -e 's/[[:space:]]+$//' "$1"
+}
+
 write_watchdog_config() { # $1=root mount
     install -d "$1/etc/systemd/system.conf.d"
     cat > "$1/etc/systemd/system.conf.d/90-pi-ab-update-watchdog.conf" <<'EOF'
@@ -487,6 +498,7 @@ copy_slot_boot_tree() { # $1=source boot mount; $2=destination boot mount; $3=sl
     # config.txt is deliberately never authoritative.
     cp -a "$source_boot/." "$slot_dir/"
     set_cmdline_root_label "$slot_dir/cmdline.txt" "MP_ROOT_$slot"
+    strip_first_boot_init "$slot_dir/cmdline.txt"
 }
 
 render_boot_selector() { # $1=root mount; $2=boot mount; $3=selector command; $4=slot; $5=destination
@@ -596,6 +608,7 @@ EOF
         exit 1
     fi
     set_cmdline_root_label "$boot_mount/cmdline.txt" MP_ROOT_A
+    strip_first_boot_init "$boot_mount/cmdline.txt"
     copy_slot_boot_tree "$source_boot_mount" "$boot_mount" A
     copy_slot_boot_tree "$source_boot_mount" "$boot_mount" B
     grep -Eq '^[[:space:]]*os_prefix=' "$boot_mount/config.txt" && {

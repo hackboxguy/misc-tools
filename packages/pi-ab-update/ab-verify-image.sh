@@ -132,6 +132,12 @@ require grep -Eq '(^|[[:space:]])root=LABEL=MP_ROOT_A([[:space:]]|$)' "$boot_a_m
 require grep -Eq '(^|[[:space:]])root=LABEL=MP_ROOT_B([[:space:]]|$)' "$boot_a_mount/B/cmdline.txt"
 for cmdline in "$boot_a_mount/cmdline.txt" "$boot_a_mount/A/cmdline.txt" "$boot_a_mount/B/cmdline.txt"; do
     require grep -Eq '(^|[[:space:]])overlayroot=tmpfs:recurse=0([[:space:]]|$)' "$cmdline"
+    # A slot must never run Pi OS's first-boot resize: it would grow the root
+    # across the slots behind it.
+    ! grep -Eq '(^|[[:space:]])init=/usr/lib/(raspberrypi-sys-mods/firstboot|raspi-config/init_resize\.sh)' "$cmdline" || {
+        echo "ERROR: first-boot root expansion is still armed in $cmdline" >&2
+        exit 1
+    }
 done
 if ! tail -n +2 "$boot_a_mount/config.txt" | cmp - "$root_a_mount$engine_lib_dir/boot-selector-config.base"; then
     echo "ERROR: normal selector configuration differs from its template" >&2

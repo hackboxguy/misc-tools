@@ -5,6 +5,11 @@
 # factory reset on the device (installed as /usr/local/sbin/ab-data-skeleton),
 # so a reset device and a freshly flashed one cannot drift. Keep every
 # first-boot state directory here. PERSISTENCE.md says what binds to what.
+#
+# Pristine seeds come from the image itself: $AB_SEED_ROOT is the mounted
+# authored root when the finalizer runs this, and /media/root-ro (the read-only
+# lower root) when the factory reset does. A seed is copied only into an empty
+# destination, so re-running this never overwrites device state.
 set -euo pipefail
 
 data_root=""
@@ -51,16 +56,20 @@ fi
     exit 2
 }
 
+seed_root=${AB_SEED_ROOT:-/media/root-ro}
+
 # micropanel's own settings (settings.json is a symlink into here).
 install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/micropanel"
-# Restored into /etc/ssh at boot, so a device keeps its host keys across updates.
-install -d -m0700 -o root -g root "$data_root/micropanel/ssh-host-keys"
-# Bound to /var/lib/micropanel. It holds the DIP-switch service's reboot-loop
-# guard, which must survive the reboot it triggers.
-install -d -m0755 -o root -g root "$data_root/micropanel/var-lib-micropanel"
 
 # Device identity and update state (AB_STATE_DIR) are root-only system state.
+# The two below live here rather than under the pi-owned micropanel/ so that pi
+# cannot rename the host-key directory or the DIP-switch guard.
 install -d -m0700 -o root -g root "$data_root/micropanel-system"
+# Restored into /etc/ssh at boot, so a device keeps its host keys across updates.
+install -d -m0700 -o root -g root "$data_root/micropanel-system/ssh-host-keys"
+# Bound to /var/lib/micropanel. It holds the DIP-switch service's reboot-loop
+# guard, which must survive the reboot it triggers.
+install -d -m0755 -o root -g root "$data_root/micropanel-system/var-lib-micropanel"
 
 # Bound to /var/lib/disp-settings (the dual-display mode restored at boot).
 install -d -m0755 -o root -g root "$data_root/disp-settings"
@@ -71,3 +80,20 @@ install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/disptool-resul
 
 # NetworkManager's keyfile backend requires this restrictive mode.
 install -d -m0700 -o root -g root "$data_root/NetworkManager/system-connections"
+
+# --- Seeds ------------------------------------------------------------------
+# kodi: the image's add-ons hook builds a profile (database, keymaps, skin
+# patch, settings) in /home/pi/.kodi. /data/kodi is bound over that path, so
+# the authored tree survives only as the pristine copy in the lower root.
+kodi_seed="$seed_root/home/pi/.kodi"
+if [ -d "$kodi_seed" ] && [ -z "$(ls -A "$data_root/kodi")" ]; then
+    cp -a "$kodi_seed/." "$data_root/kodi/"
+    chown -R "$account_uid:$account_gid" "$data_root/kodi"
+fi
+# settings.json: the appliance hook moves an authored one (if the image ever
+# ships one) to settings.json.default and links the live path into /data.
+settings_seed="$seed_root/home/pi/micropanel/share/micropanel/settings.json.default"
+if [ -f "$settings_seed" ] && [ ! -e "$data_root/micropanel/settings.json" ]; then
+    install -m0644 -o "$account_uid" -g "$account_gid" "$settings_seed" \
+        "$data_root/micropanel/settings.json"
+fi

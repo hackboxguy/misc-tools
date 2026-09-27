@@ -178,9 +178,10 @@ done
 if [ "$(id -u)" -eq 0 ]; then
     data=$(mktemp -d)
     trap 'rm -rf "$data"' EXIT HUP INT TERM
-    "$skeleton" --root "$data" --uid 1000 --gid 1000
-    for expected in 'micropanel 1000:1000:755' 'micropanel/ssh-host-keys 0:0:700' \
-        'micropanel/var-lib-micropanel 0:0:755' 'micropanel-system 0:0:700' \
+    # An empty seed root: nothing to seed, only the layout.
+    AB_SEED_ROOT="$data/no-seed" "$skeleton" --root "$data" --uid 1000 --gid 1000
+    for expected in 'micropanel 1000:1000:755' 'micropanel-system/ssh-host-keys 0:0:700' \
+        'micropanel-system/var-lib-micropanel 0:0:755' 'micropanel-system 0:0:700' \
         'disp-settings 0:0:755' 'kodi 1000:1000:755' 'disptool-results 1000:1000:755' \
         'NetworkManager/system-connections 0:0:700'; do
         path=${expected% *}
@@ -190,7 +191,27 @@ if [ "$(id -u)" -eq 0 ]; then
             fail "ab-assertions.sh does not check skeleton path $path"
     done
     # Idempotent: the factory reset re-runs it over a wiped mount.
-    "$skeleton" --root "$data" --uid 1000 --gid 1000
+    AB_SEED_ROOT="$data/no-seed" "$skeleton" --root "$data" --uid 1000 --gid 1000
+
+    # Seeds: kodi's tree and an authored settings.json are copied from the seed
+    # root with pi ownership, and only into an empty destination.
+    seeded=$(mktemp -d)
+    seed="$seeded/seed-root"
+    install -d "$seed/home/pi/.kodi/userdata/Database" "$seed/home/pi/micropanel/share/micropanel"
+    printf '%s\n' pristine > "$seed/home/pi/.kodi/userdata/Database/fixture.db"
+    printf '%s\n' '{}' > "$seed/home/pi/micropanel/share/micropanel/settings.json.default"
+    AB_SEED_ROOT="$seed" "$skeleton" --root "$seeded/data" --uid 1000 --gid 1000
+    [ "$(cat "$seeded/data/kodi/userdata/Database/fixture.db")" = pristine ] || fail 'skeleton did not seed kodi'
+    [ -z "$(find "$seeded/data/kodi" ! -user 1000 -print -quit)" ] || fail 'seeded kodi tree is not owned by pi'
+    [ "$(stat -c '%u' "$seeded/data/micropanel/settings.json")" = 1000 ] || fail 'skeleton did not seed settings.json'
+    printf '%s\n' device-state > "$seeded/data/kodi/userdata/Database/fixture.db"
+    printf '%s\n' '{"device":1}' > "$seeded/data/micropanel/settings.json"
+    AB_SEED_ROOT="$seed" "$skeleton" --root "$seeded/data" --uid 1000 --gid 1000
+    [ "$(cat "$seeded/data/kodi/userdata/Database/fixture.db")" = device-state ] || \
+        fail 'skeleton overwrote a non-empty kodi profile'
+    [ "$(cat "$seeded/data/micropanel/settings.json")" = '{"device":1}' ] || \
+        fail 'skeleton overwrote an existing settings.json'
+    rm -rf "$seeded"
 fi
 
 echo "micropanel A/B static contract: ok"

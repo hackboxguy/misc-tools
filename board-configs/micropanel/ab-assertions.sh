@@ -53,13 +53,18 @@ case "$app_account" in
     *) echo "ERROR: missing pi account in root A" >&2; exit 1 ;;
 esac
 require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel")" = "${app_account}:755"
-require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel/ssh-host-keys")" = '0:0:700'
-require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel/var-lib-micropanel")" = '0:0:755'
 require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel-system")" = '0:0:700'
+require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel-system/ssh-host-keys")" = '0:0:700'
+require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel-system/var-lib-micropanel")" = '0:0:755'
 require test "$(stat -c '%u:%g:%a' "$data_mount/disp-settings")" = '0:0:755'
 require test "$(stat -c '%u:%g:%a' "$data_mount/kodi")" = "${app_account}:755"
 require test "$(stat -c '%u:%g:%a' "$data_mount/disptool-results")" = "${app_account}:755"
 require test "$(stat -c '%u:%g:%a' "$data_mount/NetworkManager/system-connections")" = '0:0:700'
+# The kodi profile the image authored is seeded into /data on first flash.
+if [ -n "$(ls -A "$root_mount/home/pi/.kodi" 2>/dev/null)" ]; then
+    require test -n "$(ls -A "$data_mount/kodi")"
+    require test -z "$(find "$data_mount/kodi" ! -user "${app_account%%:*}" -print -quit)"
+fi
 
 # --- What the engine needs from this image --------------------------------------
 # Every health unit must be enabled: a unit that never starts fails every

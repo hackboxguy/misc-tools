@@ -101,7 +101,7 @@ fi
 
 for tool in sfdisk fdisk losetup mkfs.ext4 mkfs.vfat e2fsck resize2fs \
             e2label blkid blockdev mount umount mountpoint cp install awk sed \
-            truncate stat sync dd; do
+            truncate stat sync dd dumpe2fs df; do
     command -v "$tool" >/dev/null 2>&1 || {
         echo "ERROR: required host tool is missing: $tool" >&2
         exit 1
@@ -131,6 +131,8 @@ root_mount=""
 data_mount=""
 boot_mount=""
 ab_image_path=""
+copy_source_mount=""
+copy_target_mount=""
 
 unmount_if_mounted() {
     local dir=$1
@@ -139,6 +141,8 @@ unmount_if_mounted() {
 
 cleanup() {
     local status=$?
+    unmount_if_mounted "$copy_target_mount" || true
+    unmount_if_mounted "$copy_source_mount" || true
     unmount_if_mounted "$data_mount" || true
     unmount_if_mounted "$root_mount" || true
     unmount_if_mounted "$boot_mount" || true
@@ -146,6 +150,8 @@ cleanup() {
     if [ -n "$target_loop" ]; then losetup -d "$target_loop" 2>/dev/null || true; fi
     if [ -n "$source_loop" ]; then losetup -d "$source_loop" 2>/dev/null || true; fi
     if [ -n "$data_mount" ]; then rmdir "$data_mount" 2>/dev/null || true; fi
+    if [ -n "$copy_target_mount" ]; then rmdir "$copy_target_mount" 2>/dev/null || true; fi
+    if [ -n "$copy_source_mount" ]; then rmdir "$copy_source_mount" 2>/dev/null || true; fi
     if [ -n "$root_mount" ]; then rmdir "$root_mount" 2>/dev/null || true; fi
     if [ -n "$boot_mount" ]; then rmdir "$boot_mount" 2>/dev/null || true; fi
     if [ -n "$source_boot_mount" ]; then rmdir "$source_boot_mount" 2>/dev/null || true; fi
@@ -406,16 +412,75 @@ safe_e2fsck() { # $1=device
     esac
 }
 
+# The ext4 feature list of a filesystem, one per line, sorted, without the
+# state flags that describe a mounted or dirty filesystem rather than its format.
+ext4_features() { # $1=device
+    dumpe2fs -h "$1" 2>/dev/null |
+        sed -n 's/^Filesystem features:[[:space:]]*//p' | tr ' ' '\n' |
+        grep -Ev '^(needs_recovery|orphan_present|)$' | LC_ALL=C sort
+}
+
+# Two ways into a slot, one decision. A source partition that fits the slot is
+# cloned block for block and grown - the path the reference board's hardware
+# acceptance was run on. A source *partition* larger than the slot (the base
+# and apps stages extend the image for build headroom, so the partition can be
+# far larger than what it holds) is copied file by file into a fresh
+# filesystem instead, provided what it actually holds fits with a margin.
 clone_and_expand_ext4() { # $1=source; $2=target; $3=label
     local source=$1 target=$2 label=$3
-    [ "$(blockdev --getsize64 "$source")" -le "$(blockdev --getsize64 "$target")" ] || {
-        echo "ERROR: source filesystem is larger than target slot: $source" >&2
+    local source_bytes target_bytes used_bytes margin_bytes mib=$((1024 * 1024))
+    local source_features target_features inode_size block_size
+    source_bytes=$(blockdev --getsize64 "$source")
+    target_bytes=$(blockdev --getsize64 "$target")
+    if [ "$source_bytes" -le "$target_bytes" ]; then
+        echo "root copy: block clone (source partition $((source_bytes / mib)) MiB fits the $((target_bytes / mib)) MiB slot)"
+        dd if="$source" of="$target" bs=4M status=none conv=fsync
+        safe_e2fsck "$target"
+        resize2fs "$target" >/dev/null
+        e2label "$target" "$label"
+        return 0
+    fi
+
+    copy_source_mount=$(mktemp -d)
+    mount -o ro "$source" "$copy_source_mount"
+    used_bytes=$(df -B1 --output=used "$copy_source_mount" | tail -n 1 | tr -d '[:space:]')
+    [[ "$used_bytes" =~ ^[0-9]+$ ]] || { echo "ERROR: unable to measure the authored root's used space" >&2; exit 1; }
+    margin_bytes=$((target_bytes / 20))
+    [ "$margin_bytes" -ge $((256 * mib)) ] || margin_bytes=$((256 * mib))
+    if [ $((used_bytes + margin_bytes)) -gt "$target_bytes" ]; then
+        echo "ERROR: authored root uses $((used_bytes / mib)) MiB; with a $((margin_bytes / mib)) MiB margin it does not fit the $((target_bytes / mib)) MiB A/B slot" >&2
+        exit 1
+    fi
+    echo "root copy: file copy (source partition $((source_bytes / mib)) MiB exceeds the $((target_bytes / mib)) MiB slot; $((used_bytes / mib)) MiB used)"
+
+    # The same on-disk format as the source, not the build host's defaults: the
+    # device's e2fsprogs is older, and a feature it does not know makes its
+    # e2fsck refuse the slot. "none" clears mke2fs.conf's list first.
+    source_features=$(ext4_features "$source")
+    inode_size=$(dumpe2fs -h "$source" 2>/dev/null | sed -n 's/^Inode size:[[:space:]]*//p')
+    block_size=$(dumpe2fs -h "$source" 2>/dev/null | sed -n 's/^Block size:[[:space:]]*//p')
+    mkfs.ext4 -F -q -L "$label" -b "$block_size" -I "$inode_size" \
+        -O "none,$(printf '%s\n' "$source_features" | paste -sd, -)" "$target"
+    target_features=$(ext4_features "$target")
+    [ "$target_features" = "$source_features" ] || {
+        echo "ERROR: the fresh slot filesystem's features differ from the authored root's" >&2
+        diff <(printf '%s\n' "$source_features") <(printf '%s\n' "$target_features") >&2 || true
         exit 1
     }
-    dd if="$source" of="$target" bs=4M status=none conv=fsync
+
+    # Everything the block clone preserved: owners, modes, timestamps, hard
+    # links, symlinks, sparse files, and every xattr (ACLs and file
+    # capabilities are xattrs). --preserve names xattr explicitly because
+    # cp -a would not report a failure to copy one.
+    copy_target_mount=$(mktemp -d)
+    mount "$target" "$copy_target_mount"
+    cp -dR --one-file-system --sparse=always \
+        --preserve=mode,ownership,timestamps,links,xattr \
+        "$copy_source_mount/." "$copy_target_mount/"
+    sync
+    umount "$copy_target_mount"; rmdir "$copy_target_mount"; copy_target_mount=""
+    umount "$copy_source_mount"; rmdir "$copy_source_mount"; copy_source_mount=""
     safe_e2fsck "$target"
-    resize2fs "$target" >/dev/null
-    e2label "$target" "$label"
 }
 
 finalize_single_layout() {
@@ -575,10 +640,8 @@ finalize_ab_layout() {
     wait_for_partitions "$source_loop" 1 2
     source_boot="${source_loop}p1"
     source_root="${source_loop}p2"
-    [ "$(blockdev --getsize64 "$source_root")" -le $((ab_root_partition_mb * 1024 * 1024)) ] || {
-        echo "ERROR: authored root does not fit the configured ${ab_root_partition_mb}MiB A/B slot" >&2
-        exit 1
-    }
+    # An oversized source partition is not refused here: clone_and_expand_ext4
+    # file-copies it when what it holds fits the slot.
 
     # sfdisk derives the partition-device spelling from the image filename.
     # Keep a nonnumeric suffix so its script uses image1/image5, not imagep1.

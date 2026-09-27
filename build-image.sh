@@ -756,6 +756,26 @@ preflight() {
             command -v "$tool" >/dev/null 2>&1 && pf_ok "A/B layout tool: $tool" \
                 || pf_fail "A/B layout tool not found: $tool"
         done
+        # The authored root partition is the input image's plus the apps-stage
+        # extension. Larger than the slot is fine - the finalizer then copies
+        # files instead of blocks - but say so before a 40-minute stage.
+        local root_input="" root_input_mb root_estimate_mb
+        if [ -n "$ARG_START_FROM" ]; then root_input="$ARG_START_FROM"
+        elif [ "$KERNEL" = "1" ] && [ -f "$KERNEL_IMG" ]; then root_input="$KERNEL_IMG"
+        elif [ -f "$BASE_IMG" ]; then root_input="$BASE_IMG"
+        fi
+        if [ -n "$root_input" ] && [ -f "$root_input" ]; then
+            root_input_mb=$(sfdisk --dump "$root_input" 2>/dev/null |
+                sed -n 's/^.*2 : .*size= *\([0-9]*\).*$/\1/p' | head -n 1)
+            if [[ "$root_input_mb" =~ ^[0-9]+$ ]]; then
+                root_estimate_mb=$(( root_input_mb / 2048 + APPS_EXTEND_SIZE_MB ))
+                if [ "$root_estimate_mb" -gt "$AB_ROOT_PARTITION_MB" ]; then
+                    pf_warn "authored root partition ~${root_estimate_mb} MiB exceeds the ${AB_ROOT_PARTITION_MB} MiB slot: the finalizer will file-copy the root (it refuses only if the used space does not fit)"
+                else
+                    pf_ok "authored root partition ~${root_estimate_mb} MiB fits the ${AB_ROOT_PARTITION_MB} MiB slot (block clone)"
+                fi
+            fi
+        fi
         local ab_static_test="$BOARD_DIR/tests/test_ab_layout_static.sh"
         if [ -f "$ab_static_test" ]; then
             if bash "$ab_static_test"; then

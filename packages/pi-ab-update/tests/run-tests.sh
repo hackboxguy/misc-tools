@@ -36,6 +36,8 @@ if [ "$(id -u)" -eq 0 ]; then
     # is free, and the fixture now reports where it died if it recurs.
     command -v udevadm >/dev/null 2>&1 && udevadm settle || true
     run 'layout loopback'    bash "$engine/tests/test_ab_layout_integration.sh"
+    command -v udevadm >/dev/null 2>&1 && udevadm settle || true
+    run 'root copy'          bash "$engine/tests/test_ab_root_copy.sh"
     run 'factory reset'      bash "$engine/tests/test_factory_reset.sh" \
         "$engine/ab-factory-reset" "$engine/ab-factory-reset-boot" \
         "$engine/../../board-configs/micropanel-touch/packages/micropanel-touch-data-skeleton.sh"

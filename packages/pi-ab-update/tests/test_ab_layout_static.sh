@@ -59,7 +59,22 @@ grep -Fqx '    zero_free_space "$root_mount"' "$finalizer"
     echo 'both layout paths must zero free space before sealing' >&2
     exit 1
 }
-grep -Fq '            truncate stat sync dd; do' "$finalizer"
+grep -Fq '            truncate stat sync dd dumpe2fs df; do' "$finalizer"
+# Two ways into a root slot: a block clone when the source partition fits, a
+# file copy into a fresh filesystem with the source's own ext4 features when
+# only its contents fit, and a refusal naming the numbers otherwise.
+grep -Fq 'echo "root copy: block clone (source partition' "$finalizer"
+grep -Fq 'echo "root copy: file copy (source partition' "$finalizer"
+grep -Fq 'with a $((margin_bytes / mib)) MiB margin it does not fit the $((target_bytes / mib)) MiB A/B slot' "$finalizer"
+grep -Fq -- '-O "none,$(printf' "$finalizer"
+grep -Fq -- '--preserve=mode,ownership,timestamps,links,xattr' "$finalizer"
+grep -Fq "the fresh slot filesystem's features differ from the authored root's" "$finalizer"
+if grep -Fq 'authored root does not fit the configured' "$finalizer"; then
+    echo 'the finalizer refuses an oversized source partition before trying the file copy' >&2
+    exit 1
+fi
+grep -Fq "run 'root copy'" "$engine/tests/run-tests.sh"
+grep -Fq 'the finalizer will file-copy the root' "$builder"
 
 # Image slimming: the board declares the policy, build-image.sh runs it on the
 # authored image after the imager's last apt command and before the layout

@@ -71,6 +71,20 @@ grep -Eq '^SLIM_MAX_ROOT_MB=[1-9][0-9]*([[:space:]]+#.*)?$' "$board/board.conf"
 grep -Fq '    run_image_slim_hook
     run_post_image_hook' "$builder"
 grep -Fq 'in+=("file:$IMAGE_SLIM_HOOK" "slim-max-root-mb:$SLIM_MAX_ROOT_MB")' "$builder"
+# Every engine file the finalizer installs is an image input: the finalizer
+# lists them, and the apps stamp hashes that list.
+grep -Fq 'done < <(bash "$POST_IMAGE_HOOK" --print-installed-files)' "$builder"
+installed_files=$("$finalizer" --print-installed-files)
+for engine_file in ab-slot-selector ab-system-update ab-update ab-update-check ab-factory-reset \
+                   ab-factory-reset-boot ab-factory-reset.service ab-update-commit ab-update-commit.service; do
+    printf '%s\n' "$installed_files" | grep -Fqx "$engine/$engine_file" || {
+        echo "finalizer does not list installed engine file: $engine_file" >&2
+        exit 1
+    }
+done
+for engine_file in $installed_files; do
+    [ -f "$engine_file" ] || { echo "listed engine file is missing: $engine_file" >&2; exit 1; }
+done
 # firmware-brcm80211 drives the Pi 4 radio the WiFi feature needs; removing it
 # would take the hotspot-join milestone with it.
 if grep -Eq '^firmware-brcm80211$' "$slim_list"; then

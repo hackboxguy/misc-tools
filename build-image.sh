@@ -669,6 +669,14 @@ apps_stamp_inputs() {
         # and run_verify_ab_image runs on every build, cached or not.)
         [ "$DATA_SKELETON_PATH" != "none" ] && in+=("file:$DATA_SKELETON_PATH")
         [ "$AB_LAYOUT" = "1" ] && [ "$AB_UPDATE_CONF_PATH" != "none" ] && in+=("file:$AB_UPDATE_CONF_PATH")
+        # The engine files the A/B finalizer installs into the image. It names
+        # them itself, so this list cannot drift from what it actually copies.
+        if [ "$AB_LAYOUT" = "1" ] && [ "$(realpath -m "$POST_IMAGE_HOOK")" = "$(realpath -m "$AB_ENGINE_DIR/ab-finalize-layout.sh")" ]; then
+            local engine_file
+            while IFS= read -r engine_file; do
+                in+=("file:$engine_file")
+            done < <(bash "$POST_IMAGE_HOOK" --print-installed-files)
+        fi
     fi
     if [ "$IMAGE_SLIM_HOOK" != "none" ] && [ -n "$IMAGE_SLIM_HOOK" ]; then
         in+=("file:$IMAGE_SLIM_HOOK" "slim-max-root-mb:$SLIM_MAX_ROOT_MB")

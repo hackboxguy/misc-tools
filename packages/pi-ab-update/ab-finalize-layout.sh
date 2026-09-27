@@ -53,6 +53,7 @@ usage() {
     cat >&2 <<'EOF'
 Usage: ab-finalize-layout.sh
        ab-finalize-layout.sh --print-ab-layout
+       ab-finalize-layout.sh --print-installed-files
 EOF
     exit 2
 }
@@ -78,9 +79,22 @@ print_ab_layout() {
         'tryboot_selector=os_prefix=B/'
 }
 
+# Every engine file this finalizer copies into an image. The builder hashes
+# them into the apps stamp: they are image inputs exactly like the finalizer
+# itself, and an engine fix that did not rebuild the image would never ship.
+print_installed_files() {
+    printf '%s\n' "$selector_script" "$update_script" "$cli_script" "$check_script" \
+        "$reset_script" "$reset_boot_script" "$reset_unit" "$commit_script" "$commit_unit"
+}
+
 if [ "${1:-}" = "--print-ab-layout" ]; then
     [ "$#" -eq 1 ] || usage
     print_ab_layout
+    exit 0
+fi
+if [ "${1:-}" = "--print-installed-files" ]; then
+    [ "$#" -eq 1 ] || usage
+    print_installed_files
     exit 0
 fi
 [ "$#" -eq 0 ] || usage

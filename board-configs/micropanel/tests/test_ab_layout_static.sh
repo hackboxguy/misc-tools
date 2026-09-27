@@ -147,10 +147,25 @@ done
 
 # --- Hook lists: the A/B list is hooks.txt plus the appliance conversion, last -----
 hook_lines() { grep -Ev '^[[:space:]]*(#|$)' "$1"; }
+# Only the micropanel line's ref may differ: the A/B image needs a micropanel
+# branch the single-slot image does not (see the comment in hooks-ab.txt).
+mask_micropanel_ref() { sed -E 's#^(packages/micropanel-hook\.sh\|[^|]*\|)[^|]*(\|)#\1<ref>\2#'; }
 single_hooks=$(hook_lines "$board/hooks.txt")
 single_count=$(printf '%s\n' "$single_hooks" | wc -l)
 ab_prefix=$(hook_lines "$board/hooks-ab.txt" | head -n "$single_count")
-[ "$ab_prefix" = "$single_hooks" ] || fail 'hooks-ab.txt no longer starts with exactly the lines of hooks.txt'
+[ "$(printf '%s\n' "$ab_prefix" | mask_micropanel_ref)" = "$(printf '%s\n' "$single_hooks" | mask_micropanel_ref)" ] || \
+    fail 'hooks-ab.txt no longer starts with the lines of hooks.txt (only the micropanel ref may differ)'
+# ...and that ref must exist, or git_remote_rev would stamp the literal name and
+# the in-chroot clone would fail 40 minutes in. Skipped only without network.
+ab_micropanel=$(hook_lines "$board/hooks-ab.txt" | grep '^packages/micropanel-hook\.sh|')
+ab_micropanel_repo=$(printf '%s\n' "$ab_micropanel" | cut -d'|' -f2)
+ab_micropanel_ref=$(printf '%s\n' "$ab_micropanel" | cut -d'|' -f3)
+if git ls-remote "$ab_micropanel_repo" HEAD >/dev/null 2>&1; then
+    git ls-remote --exit-code "$ab_micropanel_repo" "refs/heads/$ab_micropanel_ref" "refs/tags/$ab_micropanel_ref" >/dev/null 2>&1 || \
+        fail "hooks-ab.txt clones micropanel ref '$ab_micropanel_ref', which $ab_micropanel_repo does not have"
+else
+    echo "NOTE: $ab_micropanel_repo unreachable; not checking the A/B micropanel ref" >&2
+fi
 ab_extra=$(hook_lines "$board/hooks-ab.txt" | tail -n +"$((single_count + 1))")
 [ "$ab_extra" = 'packages/micropanel-appliance-hook.sh' ] || \
     fail "hooks-ab.txt must be hooks.txt plus exactly packages/micropanel-appliance-hook.sh, last; A/B-only lines: $ab_extra"

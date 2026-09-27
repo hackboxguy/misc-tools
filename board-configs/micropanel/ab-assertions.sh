@@ -54,11 +54,9 @@ require grep -Fqx 'MICROPANEL_BOOT_CONFIG=/boot/firmware/micropanel-display.txt'
 # display. Every overlay the template, this device's display file, or any
 # display type can name (pi-config-txt.sh: vc4-kms/fkms-v3d, and the touch
 # overlay and its per-type replacements) must be in the slot's overlays/.
-#
-# gpio-pullup is named by micropanel's config-base.txt.in (commit 60df4cc) but
-# exists in no overlay set: the firmware logs a load failure and boots on. It is
-# a known product defect with an open owner question, excused here by name only.
-known_missing_overlays=" gpio-pullup "
+# No exceptions: the last one (gpio-pullup, which existed in no overlay set)
+# became the firmware's own gpio=22=ip,pu in micropanel's template.
+known_missing_overlays=" "
 overlay_names=$( { grep -h '^[[:space:]]*dtoverlay=' "$template" "$display_file";
                    printf 'dtoverlay=%s\n' vc4-kms-v3d vc4-fkms-v3d himax-touch himax-touch-oled hh983-serializer; } |
                  sed 's/^[[:space:]]*dtoverlay=//; s/[,[:space:]].*//' | sed '/^$/d' | sort -u)

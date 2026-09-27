@@ -20,7 +20,11 @@
 # image silently keeps the old code.
 
 #micropanel hook - cannot be generic as it has some special cmake flags
-packages/micropanel-hook.sh|https://github.com/hackboxguy/micropanel.git|main|/home/pi/micropanel|
+# A/B images need micropanel's split boot configuration (pi-config-txt.sh
+# --emit-base), which lives on feature/A-B-Update until the split lands on
+# micropanel main, then flip back to main. Only this ref may differ from
+# hooks.txt (tests/test_ab_layout_static.sh).
+packages/micropanel-hook.sh|https://github.com/hackboxguy/micropanel.git|feature/A-B-Update|/home/pi/micropanel|
 
 # RH850 Bluebox and Pi-GPIO flashing tools, target profiles, and Bluebox udev rule.
 ../../custom-pi-imager/packages/generic-package-hook.sh|file://${REPOBINS}/rh850-flash-tools|local|/home/pi/micropanel||install -Dm644 /home/pi/micropanel/share/rh850-flash-tools/udev/99-rh850-bluebox.rules /etc/udev/rules.d/99-rh850-bluebox.rules

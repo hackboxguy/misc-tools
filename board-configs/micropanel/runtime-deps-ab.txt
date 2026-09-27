@@ -24,6 +24,9 @@ evtest
 iperf3
 libcurl4-openssl-dev
 libftdi1
+# openFPGALoader links libftdi1.so.2; installed only as a dependency otherwise,
+# and an autoremove took it on the A/B slim rehearsal (report v3 5.1).
+libftdi1-2
 libhidapi-libusb0
 libi2c-dev
 libudev-dev

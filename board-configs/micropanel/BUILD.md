@@ -14,15 +14,22 @@ design and the persistence contract are in `PERSISTENCE.md`; the engine is
 > boot configuration lands there. This file is started in Step 6 and completed
 > in Step 7.
 
-## Burned versions
+## Versions
 
-**A/B 02.00-02.04 are burned: never flash them, never publish them, never reuse
-the numbers.** Their updater cannot resolve its slot on bookworm (`lsblk -o
-PARTN`, util-linux 2.40+; fixed in pi-ab-update `50dd082`), so none of them can
-be the source of an update and a device updated to one is stuck there. The
-first usable A/B release is **02.05**. Version numbers are never reissued: the
-engine refuses an update whose version equals the running one, and a reissued
-number makes bench evidence ambiguous. (Single-slot keeps its own 01.xx line.)
+**The bench series 02.00-02.06 is burned: never flash, publish or reuse those
+numbers.** 02.00-02.04 carry an updater that cannot resolve its slot on
+bookworm (E1: `lsblk -o PARTN`, util-linux 2.40+; pi-ab-update `50dd082`), and
+all of 02.00-02.06 carry the commit-service ordering cycle that stops any
+candidate from committing or recording a fallback (E2: pi-ab-update `4df206a`).
+
+The **release baseline** starts at `2.00` (image + payload) and `2.01`
+(payload), built with the production release URL (no
+`--release-url-template`), so the bench-tested image is byte for byte the
+shippable one. Pending the bench, `2.00` is the first shippable image and
+`2.01` the first bundle; a later fix becomes `2.02`, `2.03`, ... Version numbers
+are never reissued: the engine refuses an update whose version equals the
+running one, and a reissued number makes bench evidence ambiguous.
+(Single-slot keeps its own 01.xx line.)
 
 ## Device tool baseline
 
@@ -147,20 +154,33 @@ same labels.
 
 ## 5. Over-the-air rehearsal (without publishing)
 
-```sh
-# Terminal 1, on the build host (192.168.1.80 on the bench LAN), from misc-tools/
-packages/pi-ab-update/ab-serve-release.sh ~/pi-image-workspace/out/micropanel-ab/payloads/02.04 8000
+The image keeps its production release URL; the device's front end takes a
+bench override for one command (`--source-config`, a root-owned regular file,
+never a symlink):
 
-# Terminal 2, on the build host: the three assets resolve
+```sh
+# On the build host (192.168.1.80 on the bench LAN), from misc-tools/
+packages/pi-ab-update/ab-serve-release.sh ~/pi-image-workspace/out/micropanel-ab/payloads/<ver> 8000
 for a in micropanel-base.manifest micropanel-base.manifest.sig micropanel-base.mpupdate; do
-    curl -fsI "http://192.168.1.80:8000/$a" | head -1
+    curl -fsI "http://192.168.1.80:8000/$a" | head -1        # 200 each
 done
 
-# The device image must have been built to ask this host:
-#   --release-url-template=http://192.168.1.80:8000/@ASSET@
-# (the verifier prints a plain-http NOTICE for such an image: expected).
-# The Pi must reach 192.168.1.80:8000 (open the port on the host firewall).
+# On the device (it must reach 192.168.1.80:8000; open the port on the host firewall)
+sudo install -d -m0700 /data/ab-bundles
+printf '%s\n' \
+    'MANIFEST_URL=http://192.168.1.80:8000/micropanel-base.manifest' \
+    'MANIFEST_SIG_URL=http://192.168.1.80:8000/micropanel-base.manifest.sig' \
+    'BUNDLE_URL=http://192.168.1.80:8000/micropanel-base.mpupdate' \
+    | sudo tee /data/ab-bundles/bench-source.conf >/dev/null
+sudo ab-update check --source-config=/data/ab-bundles/bench-source.conf
+sudo ab-update install ota --source-config=/data/ab-bundles/bench-source.conf
 ```
+
+`ab-update` exports the file as `AB_SOURCE_CONFIG`; `ab-update-check` and
+`ab-system-update` both read it through `ab_setting`, where the environment
+wins. The alternative is an image built to ask the bench host
+(`--release-url-template=http://192.168.1.80:8000/@ASSET@`; the verifier prints
+a plain-http NOTICE for it) - but then the tested image is not the shipped one.
 
 Authenticity comes from the pinned key, not the transport, so plain http is a
 faithful rehearsal. A shipping image points at https (the board default).
@@ -171,7 +191,7 @@ faithful rehearsal. A shipping image points at https (the board default).
 sudo ab-update                    # status: version, slot, inactive slot, state, health units
 sudo ab-update check              # ask the release source (manifest + signature only)
 sudo ab-update install ota        # from the configured release source
-sudo ab-update install usb        # exactly one .mpupdate on a FAT32/exFAT stick
+sudo ab-update install usb        # exactly one .mpupdate on a FAT32, exFAT or NTFS stick
 sudo ab-update watch              # progress until it settles
 sudo ab-update log 60             # engine + commit journal
 ab-update --state; ab-update --active-slot; ab-update --active-version
@@ -197,6 +217,7 @@ Placeholders; Step 7 fills them from the bench reports.
 | S2 `include` under `os_prefix` | pass (reviewer, live) | 2026-09-28 | 02.00 |
 | S3 derive unit; B1 single probe, panel up unaided | pass | 2026-09-28 | 02.01 |
 | E1 first install attempt | refused: `lsblk: unknown column: PARTN` (fixed in 02.05) | 2026-09-28 | 02.01 |
+| USB install 02.05 -> 02.06 | written, armed, booted B; commit never ran (E2, fixed in 2.00) | 2026-09-28 | 02.05 |
 | Fallback (health window not met) | | | |
 | USB update + commit | | | |
 | OTA update + commit | | | |

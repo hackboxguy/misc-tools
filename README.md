@@ -175,6 +175,25 @@ stamp ping-pong.
 - `--variant=NAME` - board variants (e.g. `media-mux --variant=selfhosted-dlna`).
 - `--debug` - on a hook failure, keep the chroot mounted for inspection.
 
+## micropanel A/B (in-system update)
+
+The micropanel board also builds an opt-in A/B image for a 16 GB card:
+`--layout=ab`. It carries the `packages/pi-ab-update` engine (the same one
+micropanel-touch uses): two root slots, a read-only overlay root, durable
+state on `/data`, and signed `.mpupdate` bundles installed from USB (FAT32,
+exFAT or NTFS) or over the network, booted once through the firmware's
+`tryboot` and committed only after the health window.
+
+```bash
+./build-image.sh --board=micropanel --base-profile=qt-bookworm --layout=ab --version=2.xx --skip-kernel --dry-run
+sudo ./build-image.sh --board=micropanel --base-profile=qt-bookworm --layout=ab --version=2.xx --skip-kernel --payload
+```
+
+The single-slot `01.xx` product is unchanged by it. The full command
+reference (payloads, publishing, flashing, the bench OTA rehearsal, on-device
+commands, version rules) is `board-configs/micropanel/BUILD.md`; what lives
+where on the device is `board-configs/micropanel/PERSISTENCE.md`.
+
 ## Repository layout
 
 - `build-image.sh` - top-level orchestrator (see above).

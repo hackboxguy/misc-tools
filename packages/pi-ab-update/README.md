@@ -13,7 +13,7 @@ profile and, so far, its only adopter.
 
 | File | Role |
 |---|---|
-| `ab-system-update` | the root-only installer: USB discovery, single-pass bundle reader, streaming write, hash-before-arm, selector arm, reboot |
+| `ab-system-update` | the root-only installer: USB discovery (FAT32, exFAT or NTFS; NTFS through the kernel's ntfs3 first, then ntfs-3g), single-pass bundle reader, streaming write, hash-before-arm, selector arm, reboot |
 | `ab-update` | the front door: `status`, `check`, `install ota\|usb\|--file=`, `watch`, `log`, plus single-value queries for scripts. Composes and delegates; contains no policy of its own |
 | `ab-update-check` | asks the release server what it offers: fetches the manifest and its signature only, verifies, and publishes `available` / `up-to-date` |
 | `ab-slot-selector` | the three-operation slot protocol (`current-slot`, `arm-candidate`, `commit`) — the seam a secure-boot backend replaces |

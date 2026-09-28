@@ -185,6 +185,47 @@ credential store; env vars by design, never CLI flags).
   touch is not evidence: `lsblk -o PARTN` (util-linux 2.40+) made every
   micropanel A/B image up to 02.04 unable to install an update. The engine
   README's "Device tool baseline" is the list to check against.
+- micropanel A/B (`--layout=ab`; `board-configs/micropanel/BUILD.md`,
+  `PERSISTENCE.md`). What cost time, in one place:
+  - The custom kernel boots without an initramfs, and overlayroot needs one:
+    the appliance hook builds it with `MODULES=list` plus `overlay`, and
+    mkinitramfs needs `/boot/config-<release>` to accept a compressor - it
+    is extracted from the kernel's own `configs.ko` (CONFIG_IKCONFIG=m).
+    The release comes from the `Image` string; the kernel builder's
+    `<release>+` symlink also matches `-v8+$`.
+  - `config.txt` is the slot selector's (it carries `os_prefix`). The display
+    configuration lives in `micropanel-display.txt` on the boot partition,
+    included by it; `pi-config-txt.sh` redirects `--input=/boot/firmware/config.txt`
+    there when `/etc/default/micropanel` says so. `config-base.txt.in` stays
+    unchanged (single-slot output is byte-identical); the A/B base is derived
+    with `--emit-base`.
+  - `EXPAND_ROOT` is in the shared qt-bookworm base stamp: A/B forces only its
+    apps stage off (`APPS_EXPAND_ROOT`). The authored root partition (~6.5 GiB)
+    exceeds the 5120 MiB slot; the finalizer file-copies it with the source's
+    own ext4 features.
+  - udev autoloads hh983-serializer before `/boot/firmware` is mounted, and a
+    reload leaves the DP source untrained (black panel): the drivers' alias
+    autoload is blacklisted, `micropanel-display-derive.service` loads them
+    once with the right options, and a reload (fallback) is followed by an
+    HPD toggle.
+  - `<hook>.d/` beside a hook is copied into the chroot as `HOOK_SUPPORT_DIR`
+    and stamped like the hook.
+  - Never slim `rpi-eeprom`: purging it cascades into raspi-config,
+    raspi-utils (vcgencmd, dtoverlay) and ~40 packages. No `--autoremove`
+    either: it took libftdi1-2 (openFPGALoader).
+  - `producer | grep -q` fails under `pipefail` on large output (SIGPIPE);
+    use here-strings. In sh tests, `! cmd` never trips `set -e`: write
+    `if cmd; then exit 1; fi`.
+  - The commit service must never be `After=` its health units: an
+    application unit is `After=multi-user.target`, the service is
+    `WantedBy=` it, and systemd deletes the commit job to break the cycle.
+  - USB sticks may be FAT32, exFAT or NTFS (Windows sticks are NTFS; the
+    custom kernel has ntfs3).
+  - The apps stage clones br-wrapper `main` when it starts, so two builds of
+    the same misc-tools commit can carry different System Manager versions
+    (02.05 vs 02.06); the A/B manifest now records every source revision.
+  - An A/B build takes about 63 minutes (the apps stage); two back to back
+    for an image + payload pair.
 - Trixie 'pi' login: vanilla Pi OS *trixie* ships the `pi` user as a first-boot
   placeholder with shell `/usr/sbin/nologin`; sdm's `adduser=pi|password=` sets
   the password on that existing account but leaves the nologin shell, so the

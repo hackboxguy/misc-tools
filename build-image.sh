@@ -677,6 +677,8 @@ apps_stamp_inputs() {
         # and run_verify_ab_image runs on every build, cached or not.)
         [ "$DATA_SKELETON_PATH" != "none" ] && in+=("file:$DATA_SKELETON_PATH")
         [ "$AB_LAYOUT" = "1" ] && [ "$AB_UPDATE_CONF_PATH" != "none" ] && in+=("file:$AB_UPDATE_CONF_PATH")
+        # The finalizer writes the release URL into the image's update-source.conf.
+        [ "$AB_LAYOUT" = "1" ] && in+=("release-url:$RELEASE_URL_TEMPLATE")
         # The engine files the A/B finalizer installs into the image. It names
         # them itself, so this list cannot drift from what it actually copies.
         if [ "$AB_LAYOUT" = "1" ] && [ "$(realpath -m "$POST_IMAGE_HOOK")" = "$(realpath -m "$AB_ENGINE_DIR/ab-finalize-layout.sh")" ]; then

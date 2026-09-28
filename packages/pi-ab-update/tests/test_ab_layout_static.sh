@@ -244,6 +244,16 @@ bash -n "$engine/ab-factory-reset" "$engine/ab-factory-reset-boot"
 grep -Fq '/usr/local/sbin/ab-factory-reset' "$finalizer"
 grep -Fq 'sysinit.target.wants/ab-factory-reset.service' "$finalizer"
 grep -Fq 'AB_RESET_BEFORE' "$finalizer"
+# E2: the health drop-in is Wants= only (After= made a cycle with a unit ordered
+# after multi-user.target, and systemd deleted the commit job).
+grep -Fq "printf '[Unit]\\nWants=%s\\n' \"\$health_units\"" "$finalizer"
+if grep -Fq 'After=%s' "$finalizer"; then echo 'the health drop-in orders the commit service After= its units' >&2; exit 1; fi
+grep -Fq "the commit service's health drop-in orders it against its health units (cycle)" "$verifier"
+grep -Fq '    normal-slot)' "$selector"
+# 3.5: application revisions the builder resolved, appended without duplicates.
+grep -Fq 'ab_manifest_extra=${AB_MANIFEST_EXTRA:-}' "$finalizer"
+grep -Fq 'AB_MANIFEST_EXTRA="$AB_MANIFEST_EXTRA_VALUE"' "$builder"
+grep -Fq '"release-url:$RELEASE_URL_TEMPLATE"' "$builder"
 grep -Fq 'ab-factory-reset' "$verifier"
 grep -Fq 'AB_RESET_BEFORE=' "$board/ab-update.conf"
 grep -Fq 'AB_RESET_SEED=' "$board/ab-update.conf"

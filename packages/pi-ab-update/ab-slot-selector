@@ -35,6 +35,7 @@ template=$(ab_setting "${AB_BOOT_CONFIG_TEMPLATE:-}" AB_BOOT_CONFIG_TEMPLATE \
 usage() {
     cat >&2 <<'EOF'
 Usage: ab-slot-selector current-slot
+       ab-slot-selector normal-slot
        ab-slot-selector render-normal A|B
        ab-slot-selector render-candidate A|B
        ab-slot-selector arm-candidate A|B
@@ -113,6 +114,15 @@ case "$1" in
     current-slot)
         [ "$#" -eq 1 ] || usage
         current_slot
+        ;;
+    normal-slot)
+        # The slot a normal (non-tryboot) boot selects: config.txt line 1.
+        [ "$#" -eq 1 ] || usage
+        case "$(head -n 1 "$boot_dir/config.txt" 2>/dev/null)" in
+            os_prefix=A/) printf 'A\n' ;;
+            os_prefix=B/) printf 'B\n' ;;
+            *) echo "ERROR: config.txt selects no A/B slot" >&2; exit 1 ;;
+        esac
         ;;
     render-normal)
         [ "$#" -eq 2 ] || usage

@@ -127,11 +127,17 @@ write_update_state() { # $1=state
 # The durable state remains root-only authority.  This separate, bounded file
 # is UI telemetry only, so the unprivileged HMI can show committed/pending or
 # fallback truthfully without gaining access to update control state.
+# state= stays first; version= and candidate_slot= name the candidate the state
+# is about, so a UI can say which release fell back without its own record.
 publish_status() { # $1=committed|candidate-armed|fallback
     local public_state=$1 temporary
     install -d -m0755 "$status_dir"
     temporary=$(mktemp "$status_dir/.status.XXXXXX")
-    printf 'state=%s\n' "$public_state" > "$temporary"
+    {
+        printf 'state=%s\n' "$public_state"
+        printf 'version=%s\n' "${update_state[version]}"
+        printf 'candidate_slot=%s\n' "${update_state[candidate_slot]}"
+    } > "$temporary"
     chmod 0644 "$temporary"
     mv -f "$temporary" "$status_file"
 }
@@ -152,6 +158,13 @@ if ! is_tryboot_candidate; then
     if [ "$current_slot" != "${update_state[candidate_slot]}" ]; then
         write_update_state fallback
         publish_status fallback
+    elif [ "$("$selector" normal-slot 2>/dev/null || true)" = "$current_slot" ]; then
+        # Running the candidate on a normal boot, and the normal selector boots
+        # it: it was committed out of band (by hand, or by a commit whose
+        # record was lost). Record what the boot selector already says.
+        write_update_state committed
+        publish_status committed
+        printf '[INFO] candidate slot %s is the normal boot slot; recorded as committed\n' "$current_slot"
     else
         publish_status candidate-armed
     fi

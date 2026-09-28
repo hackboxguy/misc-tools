@@ -165,6 +165,11 @@ for unit in $health_units; do
     require test -L "$root_mount/etc/systemd/system/multi-user.target.wants/$unit"
     require grep -Fq "$unit" "$root_mount/etc/systemd/system/ab-update-commit.service.d/10-health-units.conf"
 done
+# Pulled in, never ordered after (After= made a cycle; systemd deleted the job).
+if grep -Eq '^After=' "$root_mount/etc/systemd/system/ab-update-commit.service.d/10-health-units.conf"; then
+    echo "ERROR: board assertion failed: the commit service is ordered after its health units" >&2
+    exit 1
+fi
 require grep -Fq 'micropanel-machine-id.service' \
     "$root_mount/etc/systemd/system/ab-factory-reset.service.d/10-before-consumers.conf"
 require grep -Eq '^BUNDLE_URL=https?://[^[:space:]]+/micropanel-base\.mpupdate$' \

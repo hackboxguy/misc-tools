@@ -36,5 +36,35 @@ test "$(stat -c %a "$status_directory/status")" = 644
 write_state fallback
 run_helper
 grep -Fqx 'state=fallback' "$status_directory/status"
+# state= first, then the candidate the state is about.
+[ "$(head -n 1 "$status_directory/status")" = 'state=fallback' ]
+grep -Fqx 'version=00.17' "$status_directory/status"
+grep -Fqx 'candidate_slot=B' "$status_directory/status"
+
+# A normal boot running the candidate that the normal selector already selects:
+# committed out of band (by hand), and recorded as such.
+fake_selector=$temporary_directory/selector
+tryboot_marker=$temporary_directory/tryboot
+printf '\000\000\000\000' > "$tryboot_marker"
+run_normal_boot() { # $1=current slot $2=normal slot
+    printf '#!/bin/sh\ncase "$1" in current-slot) echo %s ;; normal-slot) echo %s ;; *) exit 1 ;; esac\n' "$1" "$2" > "$fake_selector"
+    chmod 0755 "$fake_selector"
+    AB_STATE_DIR="$state_directory" AB_RUNTIME_DIR="$status_directory" AB_HEALTH_UNITS="fixture.service" \
+    AB_SLOT_SELECTOR="$fake_selector" AB_TRYBOOT_MARKER="$tryboot_marker" \
+    /bin/bash "$commit_helper" >/dev/null
+}
+write_state candidate-armed
+run_normal_boot B B
+grep -Fqx 'state=committed' "$state_directory/update-state"
+grep -Fqx 'state=committed' "$status_directory/status"
+# ...but not while the normal selector still boots the other slot.
+write_state candidate-armed
+run_normal_boot B A
+grep -Fqx 'state=candidate-armed' "$state_directory/update-state"
+grep -Fqx 'state=candidate-armed' "$status_directory/status"
+# and a normal boot of the other slot is still a fallback.
+write_state candidate-armed
+run_normal_boot A A
+grep -Fqx 'state=fallback' "$state_directory/update-state"
 
 printf '%s\n' 'update-commit-public-status: PASS'

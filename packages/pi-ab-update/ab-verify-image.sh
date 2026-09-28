@@ -175,6 +175,15 @@ require test -f "$root_a_mount/lib/systemd/system/ab-update-commit.service"
 require test -L "$root_a_mount/etc/systemd/system/multi-user.target.wants/ab-update-commit.service"
 require test -f "$root_a_mount$engine_lib_dir/ab-update.conf"
 require grep -Eq '^AB_HEALTH_UNITS=[^[:space:]].*$' "$root_a_mount$engine_lib_dir/ab-update.conf"
+# The commit service pulls its health units in but is never ordered after them:
+# After= with a unit ordered after multi-user.target is a cycle systemd breaks
+# by deleting the commit job.
+health_dropin="$root_a_mount/etc/systemd/system/ab-update-commit.service.d/10-health-units.conf"
+require grep -Eq '^Wants=[^[:space:]]' "$health_dropin"
+if grep -Eq '^(After|Before)=' "$health_dropin"; then
+    echo "ERROR: the commit service's health drop-in orders it against its health units (cycle)" >&2
+    exit 1
+fi
 require grep -Fq 'RuntimeWatchdogSec=20s' \
     "$root_a_mount/etc/systemd/system.conf.d/90-pi-ab-update-watchdog.conf"
 # The layout/update contract inside the board's image manifest.

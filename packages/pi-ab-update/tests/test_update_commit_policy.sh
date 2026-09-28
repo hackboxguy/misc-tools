@@ -23,6 +23,9 @@ grep -Fq 'publish_status fallback' "$commit_helper"
 grep -Fq 'publish_status committed' "$commit_helper"
 grep -Fq '"$selector" commit "$current_slot"' "$commit_helper"
 grep -Fq 'write_update_state committed' "$commit_helper"
+# A candidate running on a normal boot that the normal selector selects was
+# committed out of band; the record follows the boot selector.
+grep -Fq 'elif [ "$("$selector" normal-slot 2>/dev/null || true)" = "$current_slot" ]; then' "$commit_helper"
 grep -Fq 'TimeoutStartSec=3min' "$unit"
 # Ordering after the health units is a per-board drop-in the finalizer writes
 # from AB_HEALTH_UNITS, so the shared unit itself names none of them.

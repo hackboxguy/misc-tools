@@ -218,13 +218,18 @@ install_update_engine() { # $1=root mount
     }
     install -D -m0644 -o root -g root "$ab_update_conf" \
         "$root$engine_lib_dir/ab-update.conf"
-    # Order the commit service after the units it will be judging, so it does
-    # not spend its readiness budget waiting for them to be started at all.
+    # Pull the units the commit service judges into the transaction - Wants=
+    # only, never After=. A health unit ordered After=multi-user.target (a
+    # plain application service is) plus this service's WantedBy=multi-user
+    # target makes After= a cycle, and systemd breaks it by deleting the
+    # commit job: nothing ever commits or records a fallback (found on a
+    # bookworm adopter, 2026-09-28). The service waits up to
+    # AB_COMMIT_WAIT_SECONDS for the units itself, so ordering buys nothing.
     health_units=$(awk -F= '$1 == "AB_HEALTH_UNITS" { print $2; exit }' \
         "$ab_update_conf" 2>/dev/null || true)
     if [ -n "$health_units" ]; then
         install -d -m0755 "$root/etc/systemd/system/ab-update-commit.service.d"
-        printf '[Unit]\nWants=%s\nAfter=%s\n' "$health_units" "$health_units" \
+        printf '[Unit]\nWants=%s\n' "$health_units" \
             > "$root/etc/systemd/system/ab-update-commit.service.d/10-health-units.conf"
     fi
     # The reset must finish before anything reads the durable state it is about

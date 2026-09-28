@@ -14,6 +14,25 @@ design and the persistence contract are in `PERSISTENCE.md`; the engine is
 > boot configuration lands there. This file is started in Step 6 and completed
 > in Step 7.
 
+## Burned versions
+
+**A/B 02.00-02.04 are burned: never flash them, never publish them, never reuse
+the numbers.** Their updater cannot resolve its slot on bookworm (`lsblk -o
+PARTN`, util-linux 2.40+; fixed in pi-ab-update `50dd082`), so none of them can
+be the source of an update and a device updated to one is stuck there. The
+first usable A/B release is **02.05**. Version numbers are never reissued: the
+engine refuses an update whose version equals the running one, and a reissued
+number makes bench evidence ambiguous. (Single-slot keeps its own 01.xx line.)
+
+## Device tool baseline
+
+The update engine runs on the device - here Debian 12 (bookworm): util-linux
+2.38, coreutils 9.1, xz 5.4, curl 7.88, OpenSSL 3.0, tar 1.34, systemd 252.
+micropanel-touch is trixie and the build host is newer still, so a tool flag
+that works there proves nothing for this board. Any new device-side flag in
+`packages/pi-ab-update/` or in this board's hooks is checked against that
+list (the engine README, "Device tool baseline").
+
 ## 0. Test gates (before any build)
 
 ```sh
@@ -177,6 +196,7 @@ Placeholders; Step 7 fills them from the bench reports.
 | S1 overlay + initramfs + drivers | pass (reviewer, live) | 2026-09-28 | 02.00 |
 | S2 `include` under `os_prefix` | pass (reviewer, live) | 2026-09-28 | 02.00 |
 | S3 derive unit; B1 single probe, panel up unaided | pass | 2026-09-28 | 02.01 |
+| E1 first install attempt | refused: `lsblk: unknown column: PARTN` (fixed in 02.05) | 2026-09-28 | 02.01 |
 | Fallback (health window not met) | | | |
 | USB update + commit | | | |
 | OTA update + commit | | | |

@@ -27,8 +27,8 @@ fi
 grep -Fq 'ab_config=${AB_UPDATE_CONFIG:-/usr/lib/pi-ab-update/ab-update.conf}' "$handler"
 grep -Fq 'ab_config_value()' "$handler"
 grep -Fq 'ab_setting()' "$handler"
-! grep -Eq '(^|[[:space:]])(\.|source)[[:space:]]+"?\$ab_config' "$handler"
-! grep -Eq 'micropanel|MicroPanel' "$handler"
+if grep -Eq '(^|[[:space:]])(\.|source)[[:space:]]+"?\$ab_config' "$handler"; then echo "test_system_update_handler_policy.sh: forbidden pattern found (line $LINENO)" >&2; exit 1; fi
+if grep -Eq 'micropanel|MicroPanel' "$handler"; then echo "test_system_update_handler_policy.sh: forbidden pattern found (line $LINENO)" >&2; exit 1; fi
 grep -Fq 'bundle_extension=.mpupdate' "$handler"
 grep -Fq "die payload 'USB media must contain exactly one update bundle'" "$handler"
 grep -Fq "die payload 'no update bundle was found on the USB media'" "$handler"
@@ -44,7 +44,8 @@ grep -Fq 'boot cmdline template must contain exactly one line' "$handler"
 grep -Fq 'write_update_progress "failed-${class}" 0' "$handler"
 grep -Fq 'write_update_progress failed-internal 0' "$handler"
 grep -Fq 'source|signature|network|clock|integrity|compatibility|payload|version|stall|boot|target|selector|image|internal' "$handler"
-! grep -Fq 'failure_class()' "$handler"
+# The retired helper by its whole name (valid_failure_class() is the current one).
+if grep -Eq '(^|[^_[:alnum:]])failure_class\(\)' "$handler"; then echo "test_system_update_handler_policy.sh: forbidden pattern found (line $LINENO)" >&2; exit 1; fi
 
 # --- Stage 4: signatures and the network source ---------------------------
 # The manifest signature is a mandatory member, and it is verified before a
@@ -54,7 +55,7 @@ grep -Fq "die signature 'update bundle carries no manifest signature'" "$handler
 # The bench showed "this devices release key": `''` inside a single-quoted
 # shell string closes and reopens the quote rather than escaping an apostrophe.
 grep -Fq "not signed by this device's release key" "$handler"
-! grep -Fq "device''s" "$handler"
+if grep -Fq "device''s" "$handler"; then echo "test_system_update_handler_policy.sh: forbidden pattern found (line $LINENO)" >&2; exit 1; fi
 grep -Fq 'openssl pkeyutl -verify -pubin -inkey "$signing_key" -rawin' "$handler"
 awk '
     /openssl pkeyutl -verify/ { verified = NR }
@@ -64,18 +65,18 @@ awk '
 # Raw ed25519 over the manifest, with no certificate anywhere: signature
 # checking must not depend on the clock, which is what keeps a permanently
 # offline device updatable from USB forever.
-! grep -Eq 'x509|openssl (verify|smime|cms)|-CAfile' "$handler"
+if grep -Eq 'x509|openssl (verify|smime|cms)|-CAfile' "$handler"; then echo "test_system_update_handler_policy.sh: forbidden pattern found (line $LINENO)" >&2; exit 1; fi
 grep -Fq 'signing_key=$(ab_setting "${AB_SIGNING_KEY:-}" AB_SIGNING_KEY /usr/lib/pi-ab-update/update-signing-key.pub)' "$handler"
 # The download streams straight into the reader - the inactive slot stays the
 # only staging area, exactly as it is for USB.
 grep -Fq 'exec 0< <(exec "$curl_command" --fail --location --silent --show-error' "$handler"
-! grep -Eq -- '--output|-o "\$' "$handler"
+if grep -Eq -- '--output|-o "\$' "$handler"; then echo "test_system_update_handler_policy.sh: forbidden pattern found (line $LINENO)" >&2; exit 1; fi
 # A transfer-rate floor, not a whole-transfer deadline: a 5 GiB bundle over a
 # slow link is not a fault, but a server that connects and then goes quiet is,
 # and nothing else is watching until the rootfs member starts.
 grep -Fq -- '--speed-limit "$network_min_bytes_per_second"' "$handler"
 grep -Fq -- '--speed-time "$network_stall_seconds"' "$handler"
-! grep -Fq -- '--max-time' "$handler"
+if grep -Fq -- '--max-time' "$handler"; then echo "test_system_update_handler_policy.sh: forbidden pattern found (line $LINENO)" >&2; exit 1; fi
 # --location must never leave http(s).
 grep -Fq -- "--proto '=http,https' --proto-redir '=http,https'" "$handler"
 # Curl's own words reach the root-only journal; they are the difference between
@@ -94,7 +95,7 @@ grep -Fq "77) printf 'image" "$handler"
 # that matter most.
 grep -Fq 'fetch_pid=$!' "$handler"
 grep -Fq 'fetch_exit_status()' "$handler"
-! grep -Fq 'curl_status_file' "$handler"
+if grep -Fq 'curl_status_file' "$handler"; then echo "test_system_update_handler_policy.sh: forbidden pattern found (line $LINENO)" >&2; exit 1; fi
 
 grep -Fq "die target 'refusing to overwrite a mounted root partition'" "$handler"
 grep -Fq "die image 'running image manifest is unavailable'" "$handler"
@@ -132,9 +133,9 @@ grep -Fq 'header_checksum_matches()' "$handler"
 grep -Fq "die payload 'update bundle is not a ustar archive'" "$handler"
 grep -Fq "die payload 'update bundle member uses a prefixed path'" "$handler"
 grep -Fq "die payload 'update bundle contains a non-regular member'" "$handler"
-! grep -Fq 'tar -xOf' "$handler"
-! grep -Fq 'update_usb_source=/dev/disk/by-label/MP_UPDATE' "$handler"
-! grep -Fq 'MICROPANEL_LOCAL_UPDATE_ROOT' "$handler"
+if grep -Fq 'tar -xOf' "$handler"; then echo "test_system_update_handler_policy.sh: forbidden pattern found (line $LINENO)" >&2; exit 1; fi
+if grep -Fq 'update_usb_source=/dev/disk/by-label/MP_UPDATE' "$handler"; then echo "test_system_update_handler_policy.sh: forbidden pattern found (line $LINENO)" >&2; exit 1; fi
+if grep -Fq 'MICROPANEL_LOCAL_UPDATE_ROOT' "$handler"; then echo "test_system_update_handler_policy.sh: forbidden pattern found (line $LINENO)" >&2; exit 1; fi
 
 manifest_line=$(grep -nF '[ "$member_name" = "$bundle_manifest_member" ] || die' "$handler" | cut -d: -f1)
 # Mandatory since Stage 4: the signature is no longer an `if` to be skipped.
@@ -166,7 +167,7 @@ umount_line=$(grep -nF '[ "$source_was_mounted" != 1 ] || umount "$source_mount"
 # class for what is plainly a source problem.
 grep -Fq "die source 'unable to mount the USB filesystem holding the update bundle'" "$handler"
 grep -Fq "die source 'unable to release a scanned USB filesystem'" "$handler"
-! grep -Eq '^ *mount_source_device "\$\{found_devices\[0\]\}"$' "$handler"
+if grep -Eq '^ *mount_source_device "\$\{found_devices\[0\]\}"$' "$handler"; then echo "test_system_update_handler_policy.sh: forbidden pattern found (line $LINENO)" >&2; exit 1; fi
 
 # A failed-internal must at least be diagnosable from the root-only journal.
 grep -Fq 'set -Eeuo pipefail' "$handler"
@@ -177,7 +178,7 @@ grep -Fq 'log_diagnostic()' "$handler"
 # like per-product attribution while delivering none. The bare tag is also what
 # `journalctl -t` matches, which `ab-update log` depends on.
 grep -Fq 'logger -t ab-system-update -p daemon.err' "$handler"
-! grep -Fq 'logger -t "ab-system-update[' "$handler"
+if grep -Fq 'logger -t "ab-system-update[' "$handler"; then echo "test_system_update_handler_policy.sh: forbidden pattern found (line $LINENO)" >&2; exit 1; fi
 grep -Fq 'unexpected failure${internal_failure_context:+ at $internal_failure_context}' "$handler"
 
 # O-01: the bundle descriptors are released before cleanup unmounts, otherwise
@@ -205,7 +206,9 @@ image_die_line=$(grep -nF "die image 'running image manifest is unavailable'" "$
 grep -Fq '[ "$lock_held" -eq 1 ] || return 0' "$handler"
 
 # The rootfs transfer cannot regress to a RAM-backed staging path.
-! grep -Eq '(^|[[:space:]])(/tmp|\$TMPDIR|\${TMPDIR)' "$handler"
+# (Code only: the handler's own comment says the transfer is never "staged in
+# RAM or /tmp".)
+if grep -Eq '^[^#]*((^|[^[:alnum:]_.-])/tmp([^[:alnum:]_.-]|$)|\$TMPDIR|\$\{TMPDIR)' "$handler"; then echo "test_system_update_handler_policy.sh: forbidden pattern found (line $LINENO)" >&2; exit 1; fi
 
 # Failure phases are explicit protocol values, not a by-product of matching an
 # error sentence. Exercise the running-image edge that previously blamed USB.

@@ -29,7 +29,7 @@ grep -Fq 'elif [ "$("$selector" normal-slot 2>/dev/null || true)" = "$current_sl
 grep -Fq 'TimeoutStartSec=3min' "$unit"
 # Ordering after the health units is a per-board drop-in the finalizer writes
 # from AB_HEALTH_UNITS, so the shared unit itself names none of them.
-! grep -Eq 'micropanel|MicroPanel' "$unit"
-! grep -Eq 'micropanel|MicroPanel' "$commit_helper"
+if grep -Eq 'micropanel|MicroPanel' "$unit"; then echo "test_update_commit_policy.sh: forbidden pattern found (line $LINENO)" >&2; exit 1; fi
+if grep -Eq 'micropanel|MicroPanel' "$commit_helper"; then echo "test_update_commit_policy.sh: forbidden pattern found (line $LINENO)" >&2; exit 1; fi
 
 printf '%s\n' 'update-commit-policy: PASS'

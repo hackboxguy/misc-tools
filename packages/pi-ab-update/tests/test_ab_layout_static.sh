@@ -33,7 +33,7 @@ grep -Fqx "    seed_network_connections \"\$root_mount\" \"\$data_mount\"" "$fin
 # The skeleton seeds from the authored root at finalize time (AB_SEED_ROOT) and
 # from /media/root-ro at reset time; the reset itself exports nothing.
 grep -Fq 'AB_SEED_ROOT="$1" "$data_skeleton_script" --root "$2"' "$finalizer"
-! grep -Fq 'AB_SEED_ROOT' "$engine/ab-factory-reset-boot"
+if grep -Fq 'AB_SEED_ROOT' "$engine/ab-factory-reset-boot"; then echo "test_ab_layout_static.sh: forbidden pattern found (line $LINENO)" >&2; exit 1; fi
 grep -Fq '$AB_SEED_ROOT' "$engine/README.md"
 grep -Fqx "    install -d -m0700 -o root -g root \"\$2/NetworkManager/system-connections\"" "$finalizer"
 grep -Fqx "slot_compatible_boards=\${SLOT_COMPATIBLE_BOARDS:-pi4}" "$finalizer"
@@ -53,7 +53,7 @@ printf '%s\n' '# keeps / and /data as words in a comment' 'PARTUUID=x-02 / ext4 
 replace_ab_fstab "$fstab_check"
 grep -Fqx '# keeps / and /data as words in a comment' "$fstab_check/etc/fstab"
 grep -Fqx '/srv/a /srv/b none bind 0 0' "$fstab_check/etc/fstab"
-! grep -Eq '^PARTUUID=x-0[23] ' "$fstab_check/etc/fstab"
+if grep -Eq '^PARTUUID=x-0[23] ' "$fstab_check/etc/fstab"; then echo "test_ab_layout_static.sh: forbidden pattern found (line $LINENO)" >&2; exit 1; fi
 rm -rf "$fstab_check"
 if grep -Fq "'LABEL=MP_ROOT_A / ext4" "$finalizer"; then
     echo 'slot-specific root fstab entry returned' >&2
@@ -268,7 +268,7 @@ marker_clear_line=$(grep -nF 'rm -f -- "$marker"' "$engine/ab-factory-reset-boot
 skeleton_line=$(grep -nF 'unable to recreate the durable skeleton' "$engine/ab-factory-reset-boot" | head -1 | cut -d: -f1)
 [ "$skeleton_line" -lt "$marker_clear_line" ]
 # The request writes a marker and reboots; it never wipes anything itself.
-! grep -Fq 'rm -rf' "$engine/ab-factory-reset"
+if grep -Fq 'rm -rf' "$engine/ab-factory-reset"; then echo "test_ab_layout_static.sh: forbidden pattern found (line $LINENO)" >&2; exit 1; fi
 grep -Fq '"$reboot_command"' "$engine/ab-factory-reset"
 # The marker is durable the moment it is written, so a request cancelled before
 # the reboot is committed to must withdraw it rather than leave a reset armed.
@@ -293,7 +293,7 @@ grep -Fq '/usr/local/bin/ab-update"' "$finalizer"
 grep -Fq 'sbin/ab-update"' "$verifier"
 # The front end composes and delegates; policy stays in the engine. A second
 # copy of it here would drift, and the copy people run would be the untested one.
-! grep -qE 'sort -V|version_greater' "$engine/ab-update"
+if grep -qE 'sort -V|version_greater' "$engine/ab-update"; then echo "test_ab_layout_static.sh: forbidden pattern found (line $LINENO)" >&2; exit 1; fi
 grep -Fq 'exec "$updater"' "$engine/ab-update"
 [ -x "$engine/ab-update-check" ] || {
     echo "missing or non-executable update check: $engine/ab-update-check" >&2; exit 1; }
@@ -308,7 +308,7 @@ awk '
 ' "$engine/ab-update-check"
 # It fetches the manifest pair only: discovering that a release is already
 # installed must not cost a payload download.
-! grep -Fq 'BUNDLE_URL' "$engine/ab-update-check"
+if grep -Fq 'BUNDLE_URL' "$engine/ab-update-check"; then echo "test_ab_layout_static.sh: forbidden pattern found (line $LINENO)" >&2; exit 1; fi
 # The GitHub per-asset ceiling must be caught on the build host, not at upload
 # time and certainly not as a `network` failure on a device.
 grep -Fq 'asset_limit_bytes=${AB_ASSET_LIMIT_BYTES:-2147483648}' "$payload_generator"

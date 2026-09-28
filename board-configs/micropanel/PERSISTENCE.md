@@ -86,6 +86,16 @@ display file (it is not on `/data`).
 - Swap: none. `dphys-swapfile` is disabled (a swap file on an overlay root is
   RAM), `/var/swap` removed.
 
+## Update health (ab-update.conf)
+
+A candidate slot commits only when every `AB_HEALTH_UNITS` unit stays active
+with no restarts for the settle window. Today that is `qt-demo-launcher.service`
+alone: `micropanel.service` restarts in the Pi 4 + 983 display-diagnostics
+mode, which has no SSD1306 menu display. When the standalone mode (SSD1306 +
+navigation board) is on the bench, either the daemon idles instead of exiting
+without a display and returns to the health units, or that mode gets its own
+`ab-update.conf` through a build variant.
+
 ## Services changed by the appliance conversion
 
 | Unit | Change | Why |

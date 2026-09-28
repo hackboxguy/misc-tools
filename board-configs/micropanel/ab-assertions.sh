@@ -157,8 +157,11 @@ require test "$(readlink "$root_mount/home/pi/micropanel/settings.json")" = /dat
 
 # --- What the engine needs from this image --------------------------------------
 # Every health unit must be enabled: a unit that never starts fails every
-# candidate's health window, and every update falls back.
-for unit in micropanel.service qt-demo-launcher.service; do
+# candidate's health window, and every update falls back. The list is read
+# from the installed ab-update.conf, so this cannot disagree with it.
+health_units=$(awk -F= '$1 == "AB_HEALTH_UNITS" { print $2; exit }' "$root_mount$engine_lib_dir/ab-update.conf")
+require test -n "$health_units"
+for unit in $health_units; do
     require test -L "$root_mount/etc/systemd/system/multi-user.target.wants/$unit"
     require grep -Fq "$unit" "$root_mount/etc/systemd/system/ab-update-commit.service.d/10-health-units.conf"
 done

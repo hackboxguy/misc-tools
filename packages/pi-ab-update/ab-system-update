@@ -360,7 +360,7 @@ list_usb_filesystems() {
     local record disk
     for record in "${records[@]}"; do
         IFS='|' read -r path type tran fstype pkname <<< "$record"
-        case "$fstype" in vfat|exfat) ;; *) continue ;; esac
+        case "$fstype" in vfat|exfat|ntfs) ;; *) continue ;; esac
         if [ "$type" = disk ] && [ "$tran" = usb ]; then
             printf '%s\n' "$path"
             continue
@@ -384,8 +384,21 @@ reclaim_stale_source_mount() {
     umount "$source_mount" 2>/dev/null || die source 'a stale update source mount is still busy'
 }
 
+# FAT32, exFAT or NTFS (sticks from Windows PCs). NTFS tries the in-kernel
+# ntfs3 driver first; a plain mount then lets ntfs-3g serve where the kernel
+# has none. A volume neither will mount read-only - an NTFS left dirty by an
+# unclean removal, typically - is named in the journal.
 mount_source_device() { # $1=device
-    mount -o ro,nosuid,nodev,noexec -- "$1" "$source_mount"
+    local fstype
+    fstype=$(blkid -s TYPE -o value "$1" 2>/dev/null || true)
+    if [ "$fstype" = ntfs ] && mount -t ntfs3 -o ro,nosuid,nodev,noexec -- "$1" "$source_mount" 2>/dev/null; then
+        source_was_mounted=1
+        return 0
+    fi
+    mount -o ro,nosuid,nodev,noexec -- "$1" "$source_mount" || {
+        printf '[WARN] cannot mount USB filesystem %s (%s) read-only\n' "$1" "${fstype:-unknown}" >&2
+        return 1
+    }
     source_was_mounted=1
 }
 
@@ -398,7 +411,7 @@ unmount_source() {
 # Exactly one bundle across every USB filesystem; fail closed on zero or many.
 discover_usb_bundle() {
     local -a devices=() found_devices=() found_names=()
-    local device candidate examined=0
+    local device candidate examined=0 unmountable=""
     mapfile -t devices < <(list_usb_filesystems)
     [ "${#devices[@]}" -gt 0 ] || die source 'no USB filesystem is available for a system update'
     # Reclaim before install -d: a stranded read-only mount makes the
@@ -409,7 +422,7 @@ discover_usb_bundle() {
         examined=$((examined + 1))
         [ "$examined" -le "$usb_max_candidates" ] || die source 'too many USB filesystems to scan for an update bundle'
         [ -b "$device" ] || continue
-        mount_source_device "$device" || { source_was_mounted=0; continue; }
+        mount_source_device "$device" || { source_was_mounted=0; unmountable="$unmountable $device"; continue; }
         shopt -s nullglob
         for candidate in "$source_mount"/*"$bundle_extension"; do
             [ -f "$candidate" ] && [ ! -L "$candidate" ] || continue
@@ -422,6 +435,9 @@ discover_usb_bundle() {
         # generic internal class for what is plainly a source problem.
         unmount_source || die source 'unable to release a scanned USB filesystem'
     done
+    if [ "${#found_names[@]}" -eq 0 ] && [ -n "$unmountable" ]; then
+        die source "a USB filesystem could not be mounted read-only:$unmountable"
+    fi
     [ "${#found_names[@]}" -ne 0 ] || die payload 'no update bundle was found on the USB media'
     [ "${#found_names[@]}" -eq 1 ] || die payload 'USB media must contain exactly one update bundle'
     mount_source_device "${found_devices[0]}" || \

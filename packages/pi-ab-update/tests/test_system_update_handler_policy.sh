@@ -7,7 +7,9 @@ handler=$1
 # Pin the non-negotiable streaming, bundle-order and selector ordering here for
 # every build.
 grep -Fq 'mount -o ro,nosuid,nodev,noexec -- "$1" "$source_mount"' "$handler"
-grep -Fq 'case "$fstype" in vfat|exfat) ;; *) continue ;; esac' "$handler"
+grep -Fq 'case "$fstype" in vfat|exfat|ntfs) ;; *) continue ;; esac' "$handler"
+grep -Fq 'mount -t ntfs3 -o ro,nosuid,nodev,noexec -- "$1" "$source_mount"' "$handler"
+grep -Fq 'die source "a USB filesystem could not be mounted read-only:$unmountable"' "$handler"
 grep -Fq '"$lsblk_command" -P -o PATH,TYPE,TRAN,FSTYPE,PKNAME' "$handler"
 grep -Fq 'lsblk_command=${AB_LSBLK:-lsblk}' "$handler"
 # Device tool baseline: Debian 12's util-linux 2.38 has no PARTN column, so the

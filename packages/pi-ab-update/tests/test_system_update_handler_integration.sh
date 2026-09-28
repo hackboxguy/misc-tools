@@ -342,6 +342,17 @@ publish_bundle_to_usb "$usb_two" "$bundle"
 record_usb "$usb_one" "$usb_two"
 expect_failure 'two bundles across USB media' failed-payload usb
 
+# A stick whose filesystem no driver will mount read-only (a dirty NTFS from an
+# unclean Windows removal, typically) is a source problem, named in the journal,
+# not "no bundle": here a device the inventory calls vfat that holds none.
+truncate -s 16M "$work/usb-unmountable.img"
+usb_unmountable=$(losetup --find --show "$work/usb-unmountable.img")
+usb_loops+=("$usb_unmountable")
+reset_target
+: > "$lsblk_records"
+printf 'PATH="%s" TYPE="disk" TRAN="usb" FSTYPE="vfat" PKNAME=""\n' "$usb_unmountable" >> "$lsblk_records"
+expect_failure 'USB filesystem that cannot be mounted' failed-source usb
+
 # --- 3b. O-01: a USB-source failure must not strand its mount -------------
 # The bundle stays open on fd 0/3 for the whole run, and an open file keeps its
 # filesystem busy. Before the fix, cleanup's unmount failed EBUSY, was swallowed
@@ -538,6 +549,25 @@ if command -v mkfs.exfat >/dev/null 2>&1; then
     fi
 else
     echo '  skip  exFAT case: mkfs.exfat is unavailable'
+fi
+
+# --- 7. NTFS (sticks formatted on Windows) where the host can make one ----
+if command -v mkfs.ntfs >/dev/null 2>&1; then
+    mkfs_ntfs_quick() { mkfs.ntfs -Q -F "$1"; }
+    make_usb_filesystem "$work/usb-ntfs.img" mkfs_ntfs_quick
+    usb_ntfs=$usb_loop_device
+    if mount -o ro "$usb_ntfs" "$usb_stage" 2>/dev/null; then
+        umount "$usb_stage"
+        reset_target
+        publish_bundle_to_usb "$usb_ntfs" "$bundle"
+        record_usb "$usb_ntfs"
+        run_handler usb
+        assert_candidate_armed 'unlabelled NTFS stick armed candidate B'
+    else
+        echo '  skip  NTFS case: this host kernel cannot mount ntfs'
+    fi
+else
+    echo '  skip  NTFS case: mkfs.ntfs (ntfs-3g) is unavailable'
 fi
 
 echo 'system-update-handler-integration: PASS'

@@ -36,7 +36,7 @@ Mechanisms, in one place:
 | `micropanel-system/machine-id` | root; file `0444` | copied to `/etc/machine-id` and `/var/lib/dbus/machine-id` by `micropanel-machine-id.service` (sysinit, before D-Bus and journal flush; restarts journald) | One identity per flashed device, captured from systemd's random first-boot ID | New identity after a reset |
 | `micropanel-system/ssh-host-keys/` | root, `0700` | copied into `/etc/ssh` by `micropanel-ssh-host-keys.service` before `ssh.service` | Host keys, created once; `regenerate_ssh_host_keys` and `sshd-keygen` are masked | New keys after a reset |
 | `micropanel-system/var-lib-micropanel/` | root, `0755` | bind → `/var/lib/micropanel` (before `dip-switch-resolution.service`) | `dip-reboot-pending`: the DIP-switch service's reboot-loop guard. It must survive the reboot it triggers, or a persistent mismatch reboots forever | Empty |
-| `disp-settings/` | root, `0755` | bind → `/var/lib/disp-settings` (before `disp-settings-dual-display-restore.service`) | `dual-display-mode.json`, restored at boot | Empty |
+| `disp-settings/` | pi, `0755` (the restore unit chowns it every boot) | bind → `/var/lib/disp-settings` (before `disp-settings-dual-display-restore.service`) | `dual-display-mode.json`, restored at boot | Empty |
 | `kodi/` | pi, `0755` | bind → `/home/pi/.kodi` (before `micropanel.service`) | kodi user data: database, add-ons, settings, thumbnails and caches | Seeded from the image's authored `/home/pi/.kodi` (the add-ons hook builds it), owned by pi; re-seeded by a reset |
 | `disptool-results/` | pi, `0755` | bind → `/home/pi/micropanel/share/disptool/display-test-framework/results` (before `micropanel.service`) | disptool test framework measurement runs | Empty |
 | `NetworkManager/system-connections/` | root, `0700` | bind → `/etc/NetworkManager/system-connections` (the engine's own line) | NetworkManager keyfiles: the Network menu's DHCP/static profiles, WiFi | The image's shipped profiles; re-seeded by a reset (`AB_RESET_SEED`) |
@@ -92,7 +92,8 @@ display file (it is not on `/data`).
 | --- | --- | --- |
 | `micropanel-machine-id.service` | created, enabled (sysinit) | restore durable identity |
 | `micropanel-ssh-host-keys.service` | created, enabled (wanted by `ssh.service`) | restore durable host keys |
-| `micropanel-display-derive.service` | created, enabled | module configuration of the display type, every boot; the static `custom-drivers.conf` is removed |
+| `micropanel-display-derive.service` | created, enabled | module configuration of the display type, every boot; the static `custom-drivers.conf` is removed and `/etc/modprobe.d/micropanel-no-autoload.conf` blacklists the drivers' alias autoload, so they load once, with the right options |
+| `resize2fs_once` (SysV) | removed | Pi OS's one-shot root resize; on an overlay root it failed on every boot |
 | `regenerate_ssh_host_keys.service`, `sshd-keygen.service` | disabled, masked | would regenerate keys every boot |
 | `dphys-swapfile.service` | disabled | no swap on an overlay root |
 | `rpi-eeprom-update.service` | disabled | EEPROM updates are outside the A/B chain |

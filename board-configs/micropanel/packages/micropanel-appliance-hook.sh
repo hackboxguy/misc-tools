@@ -85,6 +85,17 @@ ConditionKernelCommandLine=!overlayroot=tmpfs:recurse=0
 EOF
 done
 say "services: remount-fs and growfs-root skipped on an overlay root"
+# Pi OS's one-shot resize2fs_once (a SysV script the base's first-boot root
+# expansion leaves behind) would run - and fail - on every boot of an overlay
+# root, where it can never remove itself.
+if [ -e /etc/init.d/resize2fs_once ]; then
+    update-rc.d -f resize2fs_once remove >/dev/null 2>&1 || true
+    rm -f /etc/init.d/resize2fs_once
+fi
+find /etc/rc?.d /etc/systemd/system -name '*resize2fs_once*' -exec rm -f {} + 2>/dev/null || true
+[ ! -e /etc/init.d/resize2fs_once ] && [ -z "$(find /etc/rc?.d -name '*resize2fs_once*' 2>/dev/null)" ] || \
+    die "resize2fs_once is still installed"
+say "services: resize2fs_once removed"
 # First-boot helpers that write to the console. Measured on 01.33: no
 # cloud-init; userconfig.service present but not enabled.
 if [ -d /etc/cloud ] || command -v cloud-init >/dev/null 2>&1; then
@@ -222,9 +233,9 @@ update-initramfs -c -k "$release"
 initrd="/boot/initrd.img-$release"
 [ -s "$initrd" ] || die "update-initramfs produced no $initrd"
 initrd_contents=$(lsinitramfs "$initrd")
-printf '%s\n' "$initrd_contents" | grep -Eq '/overlay\.ko(\.xz|\.zst)?$' || \
+grep -Eq '/overlay\.ko(\.xz|\.zst)?$' <<< "$initrd_contents" || \
     die "the initramfs has no overlay module; overlayroot would be silently ignored"
-printf '%s\n' "$initrd_contents" | grep -Eq 'scripts/init-bottom/overlayroot$' || \
+grep -Eq 'scripts/init-bottom/overlayroot$' <<< "$initrd_contents" || \
     die "the initramfs has no overlayroot init-bottom script"
 # A version-free name, so neither the selector template nor a slot's boot tree
 # carries a kernel version; os_prefix makes the firmware load A/ or B/'s copy.
@@ -277,7 +288,17 @@ say "config.txt: split for display type $display_type; micropanel-display.txt is
 install -Dm0644 "$support/micropanel-display-derive.service" /etc/systemd/system/micropanel-display-derive.service
 systemctl enable micropanel-display-derive.service
 rm -f /etc/modules-load.d/custom-drivers.conf
-say "display: micropanel-display-derive enabled; static custom-drivers.conf removed"
+# ...and nothing autoloads them by alias before it has run: a serializer loaded
+# early with the default options would have to be reloaded, and after a reload
+# the DP source does not retrain (the 02.00 bench: a black panel). An explicit
+# modprobe - the derive unit's, the DIP-switch service's - ignores the blacklist.
+install -Dm0644 "$support/micropanel-no-autoload.conf" /etc/modprobe.d/micropanel-no-autoload.conf
+say "display: micropanel-display-derive enabled; static custom-drivers.conf removed; driver autoload blacklisted"
+modprobe_config=$(modprobe -c -S "$release" 2>/dev/null || true)
+for module in hh983_serializer himax_mmi himax_oled; do
+    grep -Fqx "blacklist $module" <<< "$modprobe_config" || \
+        die "modprobe does not see the autoload blacklist for $module"
+done
 
 # Load the initramfs with the custom kernel. It belongs to this image layout,
 # not to micropanel's template, which single-slot images and buildroot share.

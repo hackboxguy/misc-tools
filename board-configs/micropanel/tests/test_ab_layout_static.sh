@@ -235,6 +235,13 @@ for consumer in dip-switch-resolution.service micropanel.service als-dimmer.serv
 done
 grep -Fq 'systemctl enable micropanel-display-derive.service' "$appliance" || fail 'appliance hook does not enable the derive unit'
 grep -Fq 'rm -f /etc/modules-load.d/custom-drivers.conf' "$appliance" || fail 'appliance hook keeps the static driver list'
+# No alias autoload of the display drivers (the 02.00 black-panel finding).
+for module in hh983_serializer himax_mmi himax_oled; do
+    grep -Fqx "blacklist $module" "$support/micropanel-no-autoload.conf" || fail "no autoload blacklist for $module"
+done
+grep -Fq '"$support/micropanel-no-autoload.conf" /etc/modprobe.d/micropanel-no-autoload.conf' "$appliance" || \
+    fail 'appliance hook does not install the autoload blacklist'
+grep -Fq 'rm -f /etc/init.d/resize2fs_once' "$appliance" || fail 'appliance hook leaves resize2fs_once installed'
 grep -Fq '"MICROPANEL_BOOT_CONFIG=$display_file" > /etc/default/micropanel' "$appliance" || \
     fail 'appliance hook does not write /etc/default/micropanel'
 grep -Fq -- '--emit-base="$config"' "$appliance" || fail 'appliance hook does not emit the base config.txt'
@@ -316,7 +323,7 @@ if [ "$(id -u)" -eq 0 ]; then
     AB_SEED_ROOT="$data/no-seed" "$skeleton" --root "$data" --uid 1000 --gid 1000
     for expected in 'micropanel 1000:1000:755' 'micropanel-system/ssh-host-keys 0:0:700' \
         'micropanel-system/var-lib-micropanel 0:0:755' 'micropanel-system 0:0:700' \
-        'disp-settings 0:0:755' 'kodi 1000:1000:755' 'disptool-results 1000:1000:755' \
+        'disp-settings 1000:1000:755' 'kodi 1000:1000:755' 'disptool-results 1000:1000:755' \
         'NetworkManager/system-connections 0:0:700'; do
         path=${expected% *}
         [ "$(stat -c '%u:%g:%a' "$data/$path")" = "${expected#* }" ] || \

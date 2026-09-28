@@ -72,7 +72,9 @@ install -d -m0700 -o root -g root "$data_root/micropanel-system/ssh-host-keys"
 install -d -m0755 -o root -g root "$data_root/micropanel-system/var-lib-micropanel"
 
 # Bound to /var/lib/disp-settings (the dual-display mode restored at boot).
-install -d -m0755 -o root -g root "$data_root/disp-settings"
+# pi-owned: disp-settings-dual-display-restore.service chowns it to pi:pi on
+# every boot anyway, so a reset device must start where a running one is.
+install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/disp-settings"
 # Bound to /home/pi/.kodi (database, add-ons, settings).
 install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/kodi"
 # Bound to the disptool test framework's results directory (measurements).

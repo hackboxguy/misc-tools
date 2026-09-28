@@ -77,6 +77,13 @@ done
 # drivers from a static list before it has run.
 require test -L "$root_mount/etc/systemd/system/multi-user.target.wants/micropanel-display-derive.service"
 require test ! -e "$root_mount/etc/modules-load.d/custom-drivers.conf"
+# ...nor by alias: a driver loaded before the derive unit would need a reload.
+for module in hh983_serializer himax_mmi himax_oled; do
+    require grep -Fqx "blacklist $module" "$root_mount/etc/modprobe.d/micropanel-no-autoload.conf"
+done
+# Pi OS's one-shot root resize would fail on every boot of an overlay root.
+require test ! -e "$root_mount/etc/init.d/resize2fs_once"
+require test -z "$(find "$root_mount"/etc/rc?.d -name '*resize2fs_once*' 2>/dev/null)"
 # The custom kernel boots through an initramfs (overlayroot needs one), under a
 # version-free name that every slot carries: os_prefix makes the firmware load
 # A/ or B/'s copy, which must be the kernel's own.
@@ -107,7 +114,7 @@ require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel")" = "${app_account}:
 require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel-system")" = '0:0:700'
 require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel-system/ssh-host-keys")" = '0:0:700'
 require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel-system/var-lib-micropanel")" = '0:0:755'
-require test "$(stat -c '%u:%g:%a' "$data_mount/disp-settings")" = '0:0:755'
+require test "$(stat -c '%u:%g:%a' "$data_mount/disp-settings")" = "${app_account}:755"
 require test "$(stat -c '%u:%g:%a' "$data_mount/kodi")" = "${app_account}:755"
 require test "$(stat -c '%u:%g:%a' "$data_mount/disptool-results")" = "${app_account}:755"
 require test "$(stat -c '%u:%g:%a' "$data_mount/NetworkManager/system-connections")" = '0:0:700'

@@ -1,0 +1,15 @@
+[Unit]
+Description=micropanel bench forensics: mirror the kernel log and journal to /data
+# Inert unless asked for: the kernel command line token, or the marker file.
+ConditionKernelCommandLine=|micropanel.debug-journal=1
+ConditionPathExists=|/data/micropanel-system/debug/enabled
+RequiresMountsFor=/data
+After=data.mount ab-factory-reset.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/micropanel-debug-journal
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

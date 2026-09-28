@@ -52,6 +52,12 @@ rm -f /var/lib/dbus/machine-id
 chmod 0444 /var/lib/dbus/machine-id
 systemctl disable regenerate_ssh_host_keys.service 2>/dev/null || true
 systemctl mask regenerate_ssh_host_keys.service sshd-keygen.service
+# Bench forensics for spontaneous reboots: enabled, but inert unless the
+# cmdline carries micropanel.debug-journal=1 or /data/micropanel-system/debug/enabled
+# exists (see the script's header).
+install -Dm0755 "$support/micropanel-debug-journal" /usr/local/sbin/micropanel-debug-journal
+install -Dm0644 "$support/micropanel-debug-journal.service" /etc/systemd/system/micropanel-debug-journal.service
+systemctl enable micropanel-debug-journal.service
 say "identity: machine-id emptied; micropanel-machine-id and micropanel-ssh-host-keys enabled; regenerate_ssh_host_keys and sshd-keygen masked"
 
 # --- 2. Services that must not run on an overlay root ----------------------------

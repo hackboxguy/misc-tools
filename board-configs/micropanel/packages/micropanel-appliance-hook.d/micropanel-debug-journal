@@ -1,0 +1,64 @@
+#!/bin/bash
+# Bench forensics for spontaneous reboots (E4): keep the evidence a volatile
+# journal loses. Run by micropanel-debug-journal.service, which does nothing
+# unless the kernel command line carries micropanel.debug-journal=1 or
+# /data/micropanel-system/debug/enabled exists.
+#
+# Per boot, in /data/micropanel-system/debug/:
+#   <stamp>-<boot-id>.start    what can be known at start: the previous boot's
+#                              journal (empty on a volatile journal - which is
+#                              why the mirrors exist), systemd-analyze timing,
+#                              the watchdog settings and the firmware's reset
+#                              and throttle flags
+#   <stamp>-<boot-id>.dmesg    `dmesg -w`, line by line
+#   <stamp>-<boot-id>.journal  `journalctl -f -o short-monotonic`, line by line
+# Each mirror stops at DEBUG_JOURNAL_MAX_BYTES; the newest DEBUG_JOURNAL_KEEP
+# boots are kept. The files are written a line at a time and the filesystem is
+# synced once a minute, so a reset mid-boot leaves them readable up to the
+# last sync.
+set -u
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+dir=${DEBUG_JOURNAL_DIR:-/data/micropanel-system/debug}
+max_bytes=${DEBUG_JOURNAL_MAX_BYTES:-20971520}
+keep=${DEBUG_JOURNAL_KEEP:-5}
+
+install -d -m0700 "$dir" || exit 1
+boot_id=$(tr -d '-' < /proc/sys/kernel/random/boot_id)
+# The clock may be far off (no RTC); the uptime-free stamp only orders files.
+prefix="$dir/$(date +%Y%m%dT%H%M%S)-$boot_id"
+
+# Keep the newest (keep - 1) earlier boots, plus this one.
+ls -1t "$dir"/*.start 2>/dev/null | tail -n +"$keep" | while IFS= read -r old; do
+    rm -f -- "${old%.start}".start "${old%.start}".dmesg "${old%.start}".journal
+done
+
+capped() { # stdin -> $1, a line at a time, until max_bytes
+    awk -v cap="$max_bytes" -v out="$1" '
+        { n += length($0) + 1; if (n > cap) { print "[debug-journal] size cap reached" > out; exit }
+          print > out; fflush(out) }'
+}
+
+{
+    echo "== boot $boot_id, uptime $(cut -d' ' -f1 /proc/uptime) s"
+    echo "== cmdline"; cat /proc/cmdline
+    echo "== watchdog"; systemctl show -p RuntimeWatchdogUSec -p RebootWatchdogUSec 2>&1
+    for w in /sys/class/watchdog/watchdog*; do
+        [ -d "$w" ] || continue
+        for f in identity timeout bootstatus state; do
+            [ -r "$w/$f" ] && printf '%s/%s=%s\n' "$w" "$f" "$(cat "$w/$f" 2>/dev/null)"
+        done
+    done
+    echo "== firmware"; vcgencmd get_throttled 2>&1; vcgencmd get_rsts 2>&1
+    echo "== previous boot (empty on a volatile journal)"; journalctl -b -1 -n 300 --no-pager -o short-monotonic 2>&1
+    echo "== systemd-analyze"; systemd-analyze 2>&1; systemd-analyze blame 2>&1 | head -n 40
+} > "$prefix.start" 2>&1
+
+dmesg -w 2>&1 | capped "$prefix.dmesg" &
+journalctl -b -f -o short-monotonic --no-pager 2>&1 | capped "$prefix.journal" &
+
+while :; do
+    sleep 60
+    sync -f "$dir" 2>/dev/null || sync
+done

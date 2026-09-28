@@ -221,6 +221,12 @@ for unit in micropanel-machine-id.service micropanel-ssh-host-keys.service; do
     grep -Fq "ExecStart=/usr/local/sbin/micropanel-restore-" "$support/$unit" || fail "$unit runs no restore tool"
     grep -Fq "\"\$support/$unit\" /etc/systemd/system/$unit" "$appliance" || fail "appliance hook does not install $unit"
 done
+# The bench forensics unit: present, enabled by the hook, and inert unless asked for.
+[ -x "$support/micropanel-debug-journal" ] || fail 'debug-journal script missing'
+bash -n "$support/micropanel-debug-journal"
+grep -Fqx 'ConditionKernelCommandLine=|micropanel.debug-journal=1' "$support/micropanel-debug-journal.service" || fail 'debug-journal unit is not gated on the cmdline token'
+grep -Fqx 'ConditionPathExists=|/data/micropanel-system/debug/enabled' "$support/micropanel-debug-journal.service" || fail 'debug-journal unit is not gated on the marker'
+grep -Fq 'systemctl enable micropanel-debug-journal.service' "$appliance" || fail 'appliance hook does not enable the debug-journal unit'
 grep -Fq 'systemctl enable micropanel-machine-id.service micropanel-ssh-host-keys.service' "$appliance" || \
     fail 'appliance hook does not enable the restore units'
 # The config.txt include split: the hook points pi-config-txt.sh at the display

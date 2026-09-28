@@ -22,11 +22,15 @@ bookworm (E1: `lsblk -o PARTN`, util-linux 2.40+; pi-ab-update `50dd082`), and
 all of 02.00-02.06 carry the commit-service ordering cycle that stops any
 candidate from committing or recording a fallback (E2: pi-ab-update `4df206a`).
 
-The **release baseline** starts at `2.00` (image + payload) and `2.01`
-(payload), built with the production release URL (no
+**2.00 and 2.01 are burned too** (E3: the commit service was a oneshot that held
+`multi-user.target` back from its own health unit for the whole readiness
+wait, so no candidate ever committed by itself; pi-ab-update fix in Step 9).
+
+The **release baseline** is built with the production release URL (no
 `--release-url-template`), so the bench-tested image is byte for byte the
-shippable one. Pending the bench, `2.00` is the first shippable image and
-`2.01` the first bundle; a later fix becomes `2.02`, `2.03`, ... Version numbers
+shippable one: pending the bench, `2.02` (image + payload) is the first
+shippable image and `2.03` (payload) the first bundle; a later fix becomes
+`2.04`, `2.05`, ... Version numbers
 are never reissued: the engine refuses an update whose version equals the
 running one, and a reissued number makes bench evidence ambiguous.
 (Single-slot keeps its own 01.xx line.)
@@ -218,6 +222,7 @@ Placeholders; Step 7 fills them from the bench reports.
 | S3 derive unit; B1 single probe, panel up unaided | pass | 2026-09-28 | 02.01 |
 | E1 first install attempt | refused: `lsblk: unknown column: PARTN` (fixed in 02.05) | 2026-09-28 | 02.01 |
 | USB install 02.05 -> 02.06 | written, armed, booted B; commit never ran (E2, fixed in 2.00) | 2026-09-28 | 02.05 |
+| USB install 02.06 -> 2.00, OTA 2.00 -> 2.01 (`--source-config`) | written, armed, booted; commit service ran (E2 fixed) but gave up after 120 s (E3); manual commit worked | 2026-09-28 | 2.00, 2.01 |
 | Fallback (health window not met) | | | |
 | USB update + commit | | | |
 | OTA update + commit | | | |

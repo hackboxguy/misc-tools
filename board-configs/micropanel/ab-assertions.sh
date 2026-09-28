@@ -139,6 +139,11 @@ require test -L "$root_mount/etc/systemd/system/sysinit.target.wants/micropanel-
 require test -L "$root_mount/etc/systemd/system/ssh.service.wants/micropanel-ssh-host-keys.service"
 require test -x "$root_mount/usr/local/sbin/micropanel-restore-machine-id"
 require test -x "$root_mount/usr/local/sbin/micropanel-restore-ssh-host-keys"
+# Bench forensics: installed and enabled, but gated on the cmdline token or the marker.
+require test -x "$root_mount/usr/local/sbin/micropanel-debug-journal"
+require test -L "$root_mount/etc/systemd/system/multi-user.target.wants/micropanel-debug-journal.service"
+require grep -Fqx 'ConditionKernelCommandLine=|micropanel.debug-journal=1' "$root_mount/etc/systemd/system/micropanel-debug-journal.service"
+require grep -Fqx 'ConditionPathExists=|/data/micropanel-system/debug/enabled' "$root_mount/etc/systemd/system/micropanel-debug-journal.service"
 require test -f "$root_mount/etc/machine-id"
 require test ! -s "$root_mount/etc/machine-id"
 require test "$(readlink "$root_mount/etc/systemd/system/regenerate_ssh_host_keys.service")" = /dev/null

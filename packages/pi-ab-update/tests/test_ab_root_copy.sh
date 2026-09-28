@@ -32,12 +32,17 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 install -d "$mnt"
 
-attach() { # $1=image; sets $loop once partition 1 appears
+attach() { # $1=image; sets $loop once its partitions are settled
     loop=$(losetup --find --show --partscan "$1")
     local retries=0
     while [ "$retries" -lt 20 ] && [ ! -b "${loop}p1" ]; do sleep 1; retries=$((retries + 1)); done
+    # udev may still be re-reading the partition table of this (or the last)
+    # loop device: a format racing it failed once in a full run-tests.sh pass.
+    command -v udevadm >/dev/null 2>&1 && udevadm settle --timeout=10 >/dev/null 2>&1 || true
     [ -b "${loop}p1" ]
 }
+# One retry after a settle, for the same race.
+settled() { "$@" || { udevadm settle --timeout=10 >/dev/null 2>&1 || true; sleep 1; "$@"; }; }
 detach() { losetup -d "$loop"; loop=""; }
 
 # A two-partition authored image: 32 MiB boot, $2 MiB root. The root is made
@@ -54,8 +59,8 @@ ${image}1 : start=2048, size=65536, type=c, bootable
 ${image}2 : start=67584, size=$((root_mib * 2048)), type=83
 EOF
     attach "$image"
-    mkfs.vfat -F32 -n SOURCE_BOOT "${loop}p1" >/dev/null
-    mkfs.ext4 -F -q -L SOURCE_ROOT -O ^orphan_file,^metadata_csum_seed "${loop}p2"
+    settled mkfs.vfat -F32 -n SOURCE_BOOT "${loop}p1" >/dev/null
+    settled mkfs.ext4 -F -q -L SOURCE_ROOT -O ^orphan_file,^metadata_csum_seed "${loop}p2"
     mount "${loop}p1" "$mnt"
     printf '%s\n' 'dtoverlay=vc4-kms-v3d' > "$mnt/config.txt"
     printf '%s\n' 'console=tty1 root=PARTUUID=fixture-02 rootwait overlayroot=tmpfs:recurse=0' > "$mnt/cmdline.txt"

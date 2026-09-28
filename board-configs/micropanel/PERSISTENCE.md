@@ -39,6 +39,7 @@ Mechanisms, in one place:
 | `disp-settings/` | pi, `0755` (the restore unit chowns it every boot) | bind → `/var/lib/disp-settings` (before `disp-settings-dual-display-restore.service`) | `dual-display-mode.json`, restored at boot | Empty |
 | `kodi/` | pi, `0755` | bind → `/home/pi/.kodi` (before `micropanel.service`) | kodi user data: database, add-ons, settings, thumbnails and caches | Seeded from the image's authored `/home/pi/.kodi` (the add-ons hook builds it), owned by pi; re-seeded by a reset |
 | `disptool-results/` | pi, `0755` | bind → `/home/pi/micropanel/share/disptool/display-test-framework/results` (before `micropanel.service`) | disptool test framework measurement runs | Empty |
+| `system-manager/` and `system-manager/logs/` | pi, `0755` | - | System Manager (br-wrapper): the logs of its sections, the `last-install` record, `acknowledged-fallback` | Empty; a reset empties them (logs are not device state) |
 | `NetworkManager/system-connections/` | root, `0700` | bind → `/etc/NetworkManager/system-connections` (the engine's own line) | NetworkManager keyfiles: the Network menu's DHCP/static profiles, WiFi | The image's shipped profiles; re-seeded by a reset (`AB_RESET_SEED`) |
 
 `host-key` and DIP-guard directories live under the root-only

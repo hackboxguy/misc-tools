@@ -116,6 +116,8 @@ require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel-system/ssh-host-keys"
 require test "$(stat -c '%u:%g:%a' "$data_mount/micropanel-system/var-lib-micropanel")" = '0:0:755'
 require test "$(stat -c '%u:%g:%a' "$data_mount/disp-settings")" = "${app_account}:755"
 require test "$(stat -c '%u:%g:%a' "$data_mount/kodi")" = "${app_account}:755"
+require test "$(stat -c '%u:%g:%a' "$data_mount/system-manager")" = "${app_account}:755"
+require test "$(stat -c '%u:%g:%a' "$data_mount/system-manager/logs")" = "${app_account}:755"
 require test "$(stat -c '%u:%g:%a' "$data_mount/disptool-results")" = "${app_account}:755"
 require test "$(stat -c '%u:%g:%a' "$data_mount/NetworkManager/system-connections")" = '0:0:700'
 # The kodi profile the image authored is seeded into /data on first flash.

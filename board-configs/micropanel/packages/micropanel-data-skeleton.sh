@@ -75,6 +75,10 @@ install -d -m0755 -o root -g root "$data_root/micropanel-system/var-lib-micropan
 # pi-owned: disp-settings-dual-display-restore.service chowns it to pi:pi on
 # every boot anyway, so a reset device must start where a running one is.
 install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/disp-settings"
+# System Manager (br-wrapper): the logs of its sections, the last-install
+# record and the acknowledged fallback. Not device state; a reset empties it.
+install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/system-manager"
+install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/system-manager/logs"
 # Bound to /home/pi/.kodi (database, add-ons, settings).
 install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/kodi"
 # Bound to the disptool test framework's results directory (measurements).

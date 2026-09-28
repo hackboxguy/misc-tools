@@ -274,8 +274,10 @@ seed_network_connections() { # $1=root mount; $2=data mount
 replace_data_fstab_single() { # $1=root mount; $2=data PARTUUID
     local data_partuuid=$2 fstab="$1/etc/fstab" temporary
     temporary="$fstab.ab-update"
-    grep -vE '[[:space:]](/data|/etc/NetworkManager/system-connections)[[:space:]]' \
-        "$fstab" > "$temporary" || true
+    # Comments are kept whatever words they contain; only mount lines go.
+    awk '/^[[:space:]]*#/ { print; next }
+         $2 == "/data" || $2 == "/etc/NetworkManager/system-connections" { next }
+         { print }' "$fstab" > "$temporary"
     {
         printf '\n# Persistent state (must not block boot if damaged).\n'
         printf 'PARTUUID=%s /data ext4 defaults,nofail,x-systemd.device-timeout=5s 0 2\n' \
@@ -288,8 +290,10 @@ replace_data_fstab_single() { # $1=root mount; $2=data PARTUUID
 replace_ab_fstab() { # $1=root mount
     local fstab="$1/etc/fstab" temporary
     temporary="$fstab.ab-update"
-    awk '$2 == "/" || $2 == "/boot/firmware" || $2 == "/data" || $2 == "/etc/NetworkManager/system-connections" {next} {print}' \
-        "$fstab" > "$temporary"
+    # Comments are kept whatever words they contain; only mount lines go.
+    awk '/^[[:space:]]*#/ { print; next }
+         $2 == "/" || $2 == "/boot/firmware" || $2 == "/data" || $2 == "/etc/NetworkManager/system-connections" { next }
+         { print }' "$fstab" > "$temporary"
     printf '\n# A/B layout. Labels keep each slot independent of partition numbering.\n' >> "$temporary"
     printf '%s\n' \
         'LABEL=MP_BOOT_A /boot/firmware vfat defaults,ro,nofail,x-systemd.device-timeout=5s 0 2' \

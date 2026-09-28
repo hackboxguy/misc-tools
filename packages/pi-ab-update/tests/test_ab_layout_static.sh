@@ -39,6 +39,22 @@ grep -Fqx "    install -d -m0700 -o root -g root \"\$2/NetworkManager/system-con
 grep -Fqx "slot_compatible_boards=\${SLOT_COMPATIBLE_BOARDS:-pi4}" "$finalizer"
 grep -Fqx "    render_boot_selector \"\$root_mount\" \"\$boot_mount\" render-normal A config.txt" "$finalizer"
 grep -Fqx "    render_boot_selector \"\$root_mount\" \"\$boot_mount\" render-candidate B tryboot.txt" "$finalizer"
+# Both fstab rewrites match mount lines on their second field and keep every
+# comment, whatever words it contains.
+[ "$(grep -Fc "awk '/^[[:space:]]*#/ { print; next }" "$finalizer")" -eq 2 ] || {
+    echo 'both fstab rewrites must keep comment lines' >&2
+    exit 1
+}
+fstab_check=$(mktemp -d)
+eval "$(sed -n '/^replace_ab_fstab() {/,/^}/p' "$finalizer")"
+install -d "$fstab_check/etc"
+printf '%s\n' '# keeps / and /data as words in a comment' 'PARTUUID=x-02 / ext4 defaults 0 1' \
+    'PARTUUID=x-03 /data ext4 defaults 0 2' '/srv/a /srv/b none bind 0 0' > "$fstab_check/etc/fstab"
+replace_ab_fstab "$fstab_check"
+grep -Fqx '# keeps / and /data as words in a comment' "$fstab_check/etc/fstab"
+grep -Fqx '/srv/a /srv/b none bind 0 0' "$fstab_check/etc/fstab"
+! grep -Eq '^PARTUUID=x-0[23] ' "$fstab_check/etc/fstab"
+rm -rf "$fstab_check"
 if grep -Fq "'LABEL=MP_ROOT_A / ext4" "$finalizer"; then
     echo 'slot-specific root fstab entry returned' >&2
     exit 1

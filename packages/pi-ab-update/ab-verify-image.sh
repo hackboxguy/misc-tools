@@ -172,6 +172,9 @@ require test -x "$root_a_mount/usr/local/sbin/ab-factory-reset-boot"
 require test -f "$root_a_mount/lib/systemd/system/ab-factory-reset.service"
 require test -L "$root_a_mount/etc/systemd/system/sysinit.target.wants/ab-factory-reset.service"
 require test -f "$root_a_mount/lib/systemd/system/ab-update-commit.service"
+# Never a oneshot: it would hold multi-user.target back from the health units
+# ordered after it, for the whole readiness wait.
+require grep -Fqx 'Type=exec' "$root_a_mount/lib/systemd/system/ab-update-commit.service"
 require test -L "$root_a_mount/etc/systemd/system/multi-user.target.wants/ab-update-commit.service"
 require test -f "$root_a_mount$engine_lib_dir/ab-update.conf"
 require grep -Eq '^AB_HEALTH_UNITS=[^[:space:]].*$' "$root_a_mount$engine_lib_dir/ab-update.conf"

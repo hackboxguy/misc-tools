@@ -5,10 +5,18 @@ After=data.mount
 ConditionPathExists=/usr/local/sbin/ab-slot-selector
 
 [Service]
-Type=oneshot
+# exec, not oneshot: a target is reached only when the oneshots it wants have
+# finished, and a health unit ordered After=multi-user.target (a plain
+# application service is) would then wait for this service to give up - it
+# did, on every candidate boot (found on a bookworm adopter, 2026-09-28). As
+# exec the unit is active at once, the target proceeds, and the script's own
+# readiness wait (AB_COMMIT_WAIT_SECONDS) finds the units started.
+Type=exec
 User=root
 ExecStart=/usr/local/sbin/ab-update-commit
-TimeoutStartSec=3min
+# The script bounds itself (readiness wait + settle window); this is the
+# backstop for a script that hangs.
+RuntimeMaxSec=5min
 NoNewPrivileges=true
 PrivateTmp=true
 

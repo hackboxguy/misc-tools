@@ -96,6 +96,32 @@ restart_counts() {
     printf '%s\n' "$output"
 }
 
+# Why the candidate is not healthy right now, in words, for the journal: the
+# first predicate that fails. Mirrors candidate_is_healthy.
+health_failure() { # $1=restart counts at the start of the window
+    local expected_restarts=${1:-} unit now
+    for unit in $health_units; do
+        systemctl is-active --quiet "$unit" || { printf 'health unit %s is not active\n' "$unit"; return; }
+    done
+    data_is_writable || { printf '%s is not mounted read-write\n' "$data_mount"; return; }
+    if [ -n "$health_hook" ]; then
+        [ -x "$health_hook" ] || { printf 'health hook %s is not executable\n' "$health_hook"; return; }
+        "$health_hook" >/dev/null 2>&1 || { printf 'health hook %s failed\n' "$health_hook"; return; }
+    fi
+    now=$(restart_counts 2>/dev/null || printf 'unreadable')
+    if [ -n "$expected_restarts" ] && [ "$now" != "$expected_restarts" ]; then
+        printf 'a health unit restarted (%s-> %s)\n' "$expected_restarts" "$now"
+        return
+    fi
+    printf 'no predicate failed on re-check (transient)\n'
+}
+
+# Every way out of a candidate boot without a commit says why, once.
+give_up() {
+    printf '[INFO] not committing candidate slot %s: %s\n' "${update_state[candidate_slot]}" "$*"
+    exit 0
+}
+
 candidate_is_healthy() {
     local expected_restarts=${1:-} unit
     for unit in $health_units; do
@@ -170,26 +196,28 @@ if ! is_tryboot_candidate; then
     fi
     exit 0
 fi
-current_slot=$("$selector" current-slot) || exit 0
-[ "$current_slot" = "${update_state[candidate_slot]}" ] || exit 0
+current_slot=$("$selector" current-slot) || give_up 'the slot selector cannot name the running slot'
+[ "$current_slot" = "${update_state[candidate_slot]}" ] || \
+    give_up "this tryboot is running slot $current_slot, not the candidate"
 publish_status candidate-armed
 
 # Refuse any restart of a health unit from this candidate boot, including one
 # that happens before the hook makes the normal readiness predicate true.
-restarts=$(restart_counts) || exit 0
+restarts=$(restart_counts) || give_up 'the restart counts of the health units are unreadable'
 for pair in $restarts; do
-    [ "${pair#*=}" = 0 ] || exit 0
+    [ "${pair#*=}" = 0 ] || give_up "health unit ${pair%%=*} has already restarted (${pair#*=})"
 done
 deadline=$(( $(monotonic_seconds) + wait_seconds ))
 while ! candidate_is_healthy "$restarts"; do
-    [ "$(monotonic_seconds)" -lt "$deadline" ] || exit 0
+    [ "$(monotonic_seconds)" -lt "$deadline" ] || \
+        give_up "not healthy within ${wait_seconds} s: $(health_failure "$restarts")"
     sleep 1
 done
 for _ in $(seq 1 "$settle_seconds"); do
-    candidate_is_healthy "$restarts" || exit 0
+    candidate_is_healthy "$restarts" || give_up "health lost in the settle window: $(health_failure "$restarts")"
     sleep 1
 done
-candidate_is_healthy "$restarts" || exit 0
+candidate_is_healthy "$restarts" || give_up "health lost at the end of the settle window: $(health_failure "$restarts")"
 
 "$selector" commit "$current_slot"
 write_update_state committed

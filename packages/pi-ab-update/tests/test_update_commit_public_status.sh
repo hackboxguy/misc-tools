@@ -67,4 +67,17 @@ write_state candidate-armed
 run_normal_boot A A
 grep -Fqx 'state=fallback' "$state_directory/update-state"
 
+# A tryboot candidate boot that never gets healthy says why when it gives up
+# (here: its health unit never becomes active within a 1 s readiness wait).
+printf '\001\000\000\000' > "$tryboot_marker"
+printf '#!/bin/sh\ncase "$1" in current-slot) echo B ;; normal-slot) echo A ;; *) exit 1 ;; esac\n' > "$fake_selector"
+write_state candidate-armed
+reason=$(AB_STATE_DIR="$state_directory" AB_RUNTIME_DIR="$status_directory" \
+    AB_HEALTH_UNITS="pi-ab-update-fixture-absent.service" AB_COMMIT_WAIT_SECONDS=1 \
+    AB_SLOT_SELECTOR="$fake_selector" AB_TRYBOOT_MARKER="$tryboot_marker" \
+    /bin/bash "$commit_helper")
+printf '%s\n' "$reason" | grep -Fqx '[INFO] not committing candidate slot B: not healthy within 1 s: health unit pi-ab-update-fixture-absent.service is not active' || {
+    echo "unexpected give-up reason: $reason" >&2; exit 1; }
+grep -Fqx 'state=candidate-armed' "$state_directory/update-state"
+
 printf '%s\n' 'update-commit-public-status: PASS'

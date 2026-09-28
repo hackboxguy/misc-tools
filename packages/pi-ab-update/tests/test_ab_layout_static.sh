@@ -428,6 +428,10 @@ if grep -Fq 'ext4_volume_label_offset' "$payload_generator"; then
     exit 1
 fi
 grep -Fq 'mkfifo "$hash_fifo" "$count_fifo"' "$payload_generator"
+# The generator settles udev after attaching the image and retries its one
+# read-only mount: a late partition rescan otherwise fails it ("wrong fs type").
+grep -Fq 'udevadm settle --timeout=10' "$payload_generator"
+grep -Fq 'until mount -o ro "${loop}p1" "$boot_mount"; do' "$payload_generator"
 grep -Fq 'wait "$hash_pid"' "$payload_generator"
 
 # V5-01: every cleanup handler disarms its own traps before doing any work, so

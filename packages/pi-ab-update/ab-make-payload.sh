@@ -138,10 +138,17 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
+# The nodes appearing is not the end of it: udev may still be processing this
+# attach (or the previous run's detach) and re-reads the partition table, which
+# briefly removes and re-creates the partitions under a concurrent mount - seen
+# as "wrong fs type" on p1 in back-to-back loop fixtures. Settle first.
 wait_for_partitions() {
     local attempts=0
     while [ "$attempts" -lt 20 ]; do
-        [ -b "${loop}p1" ] && [ -b "${loop}p5" ] && return 0
+        if [ -b "${loop}p1" ] && [ -b "${loop}p5" ]; then
+            command -v udevadm >/dev/null 2>&1 && udevadm settle --timeout=10 >/dev/null 2>&1 || true
+            [ -b "${loop}p1" ] && [ -b "${loop}p5" ] && return 0
+        fi
         sleep 1
         attempts=$((attempts + 1))
     done
@@ -173,7 +180,14 @@ esac
 work=$(mktemp -d)
 boot_mount="$work/boot-mounted"
 install -d "$boot_mount" "$work/boot-tree" "$work/bundle"
-mount -o ro "${loop}p1" "$boot_mount"
+# Read-only, so a retry is harmless; it rides out a late partition rescan.
+boot_mount_attempts=0
+until mount -o ro "${loop}p1" "$boot_mount"; do
+    boot_mount_attempts=$((boot_mount_attempts + 1))
+    [ "$boot_mount_attempts" -lt 5 ] || { echo "ERROR: cannot mount ${loop}p1 read-only" >&2; exit 1; }
+    sleep 1
+    wait_for_partitions
+done
 [ -d "$boot_mount/A" ] || { echo 'ERROR: A/B image has no A boot tree' >&2; exit 1; }
 [ -f "$boot_mount/A/cmdline.txt" ] || { echo 'ERROR: A boot tree has no cmdline.txt' >&2; exit 1; }
 [ "$(wc -l < "$boot_mount/A/cmdline.txt")" -eq 1 ] || {

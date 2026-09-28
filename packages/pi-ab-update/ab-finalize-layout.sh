@@ -32,6 +32,7 @@ ab_update_conf=${AB_UPDATE_CONF:-}
 image_version=${IMAGE_VERSION:-}
 update_signing_public_key=${UPDATE_SIGNING_PUBLIC_KEY:-}
 update_release_url_template=${UPDATE_RELEASE_URL_TEMPLATE:-}
+ab_manifest_extra=${AB_MANIFEST_EXTRA:-}
 
 script_dir=$(cd "$(dirname "$0")" && pwd)
 data_skeleton_script=${DATA_SKELETON_SCRIPT:-}
@@ -358,6 +359,19 @@ append_ab_manifest() { # $1=root mount
     grep -vE '^(IMAGE_LAYOUT|SLOT_COMPATIBLE_BOARDS|IMAGE_VERSION)=' "$manifest" > "$temporary" || true
     printf 'IMAGE_LAYOUT=ab\nSLOT_COMPATIBLE_BOARDS=%s\nIMAGE_VERSION=%s\n' \
         "$slot_compatible_boards" "$image_version" >> "$temporary"
+    # The revisions of the application sources the build cloned (the builder
+    # resolves them; one NAME_REVISION=<sha> per line). A key the image already
+    # records is kept: a hook that records its own clone's HEAD is exact, while
+    # this is the branch head when the apps stage started. Never duplicated.
+    local extra_line
+    while IFS= read -r extra_line; do
+        [ -n "$extra_line" ] || continue
+        [[ $extra_line =~ ^[A-Z][A-Z0-9_]*_REVISION=[0-9a-f]{40}$ ]] || {
+            echo "ERROR: malformed AB_MANIFEST_EXTRA line: $extra_line" >&2
+            exit 1
+        }
+        grep -q "^${extra_line%%=*}=" "$temporary" || printf '%s\n' "$extra_line" >> "$temporary"
+    done <<< "$ab_manifest_extra"
     mv "$temporary" "$manifest"
 }
 

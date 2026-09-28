@@ -1131,6 +1131,28 @@ resolve_micropanel_touch_revision() {
     info "resolved micropanel-touch ref=$MICROPANEL_TOUCH_REF revision=$MICROPANEL_TOUCH_REVISION"
 }
 
+# NAME_REVISION=<sha> for every application source the apps stage clones or
+# copies (git-source hook lines at their remote head, local sources at their
+# checkout's HEAD), for the A/B image manifest. NAME is the repository's
+# basename, upper-cased, dashes to underscores.
+AB_MANIFEST_EXTRA_VALUE=""
+hook_source_revisions() {
+    parse_hook_list "$HOOK_LIST"
+    local entry url ref rev dir name
+    for entry in "${HOOK_GIT_REPOS[@]}"; do
+        url="${entry%%|*}"; ref="${entry#*|}"; [ "$ref" = "$entry" ] && ref="HEAD"
+        rev=$(git_remote_rev "$url" "$ref")
+        name=$(basename "$url" .git | tr '[:lower:]-' '[:upper:]_')
+        [[ "$rev" =~ ^[0-9a-f]{40}$ ]] && printf '%s_REVISION=%s\n' "$name" "$rev"
+    done
+    for dir in "${HOOK_LOCAL_DIRS[@]}"; do
+        rev=$(git -C "$dir" rev-parse HEAD 2>/dev/null) || continue
+        name=$(basename "$dir" | tr '[:lower:]-' '[:upper:]_')
+        [[ "$rev" =~ ^[0-9a-f]{40}$ ]] && printf '%s_REVISION=%s\n' "$name" "$rev"
+    done
+    return 0
+}
+
 run_stage_apps() {
     resolve_apps_input
     if [ $SKIP_APPS -eq 1 ]; then
@@ -1142,6 +1164,8 @@ run_stage_apps() {
         log "Stage apps: up-to-date (stamp match) -> $FINAL_IMG"; return 0
     fi
     stage_banner "Stage 3: Apps & services"
+    # Resolved as the stage starts, right before the hooks clone.
+    [ "$AB_LAYOUT" = "1" ] && AB_MANIFEST_EXTRA_VALUE=$(hook_source_revisions | awk -F= '!seen[$1]++')
     [ -f "$APPS_INPUT" ] || die "Input image for apps stage missing: $APPS_INPUT"
     local work="$TMP_DIR/apps"; rm -rf "$work"; mkdir -p "$work"
     local extra=()
@@ -1224,6 +1248,7 @@ run_post_image_hook() {
         AB_APP_REVISION="${MICROPANEL_TOUCH_REVISION:-${AB_APP_REVISION:-}}" \
         AB_UPDATE_CONF="$AB_UPDATE_CONF_PATH" \
         DATA_SKELETON_SCRIPT="$DATA_SKELETON_PATH" \
+        AB_MANIFEST_EXTRA="$AB_MANIFEST_EXTRA_VALUE" \
         bash "$POST_IMAGE_HOOK"
 }
 

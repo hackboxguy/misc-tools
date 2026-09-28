@@ -194,12 +194,31 @@ env -u DATA_PARTITION_MB \
     AB_APP_REVISION="$fixture_app_revision" \
     AB_UPDATE_CONF="$ab_update_conf" \
     DATA_SKELETON_SCRIPT="$recording_skeleton" \
+    AB_MANIFEST_EXTRA="$(printf '%s\n' 'FIXTURE_APP_REVISION=1111111111111111111111111111111111111111' \
+        'MICROPANEL_TOUCH_REVISION=2222222222222222222222222222222222222222')" \
     "$finalizer"
 [ -s "$seed_record" ] && [ "$(cat "$seed_record")" != unset ] || {
     echo 'ERROR: the finalizer did not export AB_SEED_ROOT to the skeleton' >&2
     exit 1
 }
 echo '  ok  skeleton received the mounted authored root as AB_SEED_ROOT'
+
+# Application revisions from the builder: a new key is appended once; a key the
+# image already records (from the hook's own clone) is kept as it was.
+manifest_check=$(losetup --find --show --partscan --read-only "$image")
+retries=0
+while [ "$retries" -lt 20 ] && [ ! -b "${manifest_check}p5" ]; do sleep 1; retries=$((retries + 1)); done
+install -d "$work/manifest-root"
+mount -o ro "${manifest_check}p5" "$work/manifest-root"
+finalized_manifest="$work/manifest-root$ab_manifest_path"
+extra_ok=1
+[ "$(grep -c '^FIXTURE_APP_REVISION=1111111111111111111111111111111111111111$' "$finalized_manifest")" = 1 ] || extra_ok=0
+[ "$(grep -c '^MICROPANEL_TOUCH_REVISION=' "$finalized_manifest")" = 1 ] || extra_ok=0
+grep -Fqx "MICROPANEL_TOUCH_REVISION=$fixture_app_revision" "$finalized_manifest" || extra_ok=0
+umount "$work/manifest-root"
+losetup -d "$manifest_check"
+[ "$extra_ok" = 1 ] || { echo 'ERROR: AB_MANIFEST_EXTRA was not appended once, or replaced a recorded key' >&2; exit 1; }
+echo '  ok  builder-resolved revisions appended once; a recorded key kept'
 
 # A base built with root expansion arms Pi OS's first-boot resize through
 # cmdline.txt; the fixture carries that token, and no A/B cmdline may keep it

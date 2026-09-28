@@ -160,6 +160,19 @@ board adopts, not a flag it flips:
    layout, variant and board keys.
 4. **Its own hardware acceptance.** Another board's records do not transfer.
 
+## Device tool baseline
+
+The engine runs on the device, so every tool invocation in it has to work with
+the oldest distribution an adopting board ships - today Debian 12 (bookworm,
+micropanel): util-linux 2.38, coreutils 9.1, xz 5.4, curl 7.88, OpenSSL 3.0,
+tar 1.34, systemd 252. micropanel-touch is trixie, and the build host is newer
+still, so a flag that works there is not evidence. The slot resolution learned
+this the hard way: `lsblk -o PARTN` exists only from util-linux 2.40, and on
+bookworm the updater refused every install ("unknown column: PARTN"); the
+partition number now comes from `/sys/class/block/<dev>/partition`. Check any
+new device-side flag against that baseline; the handler loopback fixture's
+`lsblk` refuses `PARTN` the way bookworm does.
+
 ## Format and layout constants
 
 `MP_BOOT_A`/`MP_BOOT_B`/`MP_ROOT_A`/`MP_ROOT_B`/`MP_FACTORY`/`MICROPANEL_DATA`

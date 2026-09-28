@@ -527,8 +527,22 @@ safe_e2fsck() {
 # volume label.  A failed write may have blanked or copied a label before its
 # post-write e2label step, but it must always be retryable from the surviving
 # running root on the same MMC device.
+# The partition number of a partition block device, from the kernel itself.
+# Not lsblk's partition-number column: that is util-linux 2.40+, and Debian 12
+# (bookworm) ships 2.38, where it is an "unknown column" - the engine could not
+# resolve its own slot there. sysfs has carried this file on every kernel.
+partition_number() { # $1=block device path; prints the number or fails
+    local device name value
+    device=$(realpath -e -- "$1") || return 1
+    name=$(basename -- "$device")
+    [ -r "/sys/class/block/$name/partition" ] || return 1
+    value=$(cat "/sys/class/block/$name/partition") || return 1
+    [[ $value =~ ^[0-9]+$ ]] || return 1
+    printf '%s\n' "$value"
+}
+
 resolve_target_root() {
-    local running_slot=$1 expected_running_part target_part root_source root_parent root_part target_root
+    local running_slot=$1 expected_running_part target_part root_source root_parent root_part target_root target_number
     case "$running_slot" in
         A) expected_running_part=5; target_part=6 ;;
         B) expected_running_part=6; target_part=5 ;;
@@ -537,13 +551,14 @@ resolve_target_root() {
     root_source=$(findmnt -rn -T "$lower_root_mount" -o SOURCE) || die target 'running lower root source is unavailable'
     root_source=$(realpath -e -- "$root_source") || die target 'running lower root source is unsafe'
     [ -b "$root_source" ] || die target 'running lower root source is not a block device'
-    root_parent=$(lsblk -no PKNAME "$root_source" | tr -d '[:space:]')
-    root_part=$(lsblk -no PARTN "$root_source" | tr -d '[:space:]')
+    root_parent=$("$lsblk_command" -no PKNAME "$root_source" | tr -d '[:space:]')
+    root_part=$(partition_number "$root_source") || die target 'unable to read the running root partition number'
     [[ $root_parent =~ $root_parent_pattern ]] || die target 'running lower root is not on the configured slot device'
     [ "$root_part" = "$expected_running_part" ] || die target 'running lower root does not match the selected slot'
     target_root="/dev/${root_parent}p${target_part}"
     [ -b "$target_root" ] || die target 'inactive root partition is unavailable'
-    [ "$(lsblk -no PARTN "$target_root" | tr -d '[:space:]')" = "$target_part" ] || \
+    target_number=$(partition_number "$target_root") || die target 'unable to read the inactive root partition number'
+    [ "$target_number" = "$target_part" ] || \
         die target 'inactive root partition does not match the A/B layout'
     printf '%s\n' "$target_root"
 }

@@ -332,6 +332,17 @@ for timed_script in "$engine/ab-system-update" "$engine/ab-update-commit"; do
     fi
 done
 
+# Device tool baseline (README): the slot is resolved through sysfs, never
+# lsblk's PARTN column, which Debian 12's util-linux 2.38 does not have.
+grep -Fq 'root_part=$(partition_number "$root_source")' "$engine/ab-system-update"
+grep -Fq 'target_number=$(partition_number "$target_root")' "$engine/ab-system-update"
+for engine_script in "$engine"/ab-*; do
+    if grep -Fq 'PARTN' "$engine_script"; then
+        echo "engine script uses lsblk PARTN (absent from util-linux 2.38): $engine_script" >&2
+        exit 1
+    fi
+done
+
 # The health predicate is data plus one hook, not hardcoded unit names.
 grep -Fq 'AB_HEALTH_UNITS' "$engine/ab-update-commit"
 grep -Fq 'health_hook' "$engine/ab-update-commit"

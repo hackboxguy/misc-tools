@@ -179,6 +179,12 @@ credential store; env vars by design, never CLI flags).
 - Repo branches: everything is merged to `main` in all repos (misc-tools,
   sp6bins) as of 2026-07-22; the historical development branch was
   `unified-build-structure`.
+- Device-side tools: the A/B engine (packages/pi-ab-update) runs on the
+  device, and its adopters differ - micropanel-touch is trixie, micropanel is
+  bookworm (util-linux 2.38). A tool flag that works on the build host or on
+  touch is not evidence: `lsblk -o PARTN` (util-linux 2.40+) made every
+  micropanel A/B image up to 02.04 unable to install an update. The engine
+  README's "Device tool baseline" is the list to check against.
 - Trixie 'pi' login: vanilla Pi OS *trixie* ships the `pi` user as a first-boot
   placeholder with shell `/usr/sbin/nologin`; sdm's `adduser=pi|password=` sets
   the password on that existing account but leaves the nologin shell, so the

@@ -10,6 +10,16 @@ grep -Fq 'mount -o ro,nosuid,nodev,noexec -- "$1" "$source_mount"' "$handler"
 grep -Fq 'case "$fstype" in vfat|exfat) ;; *) continue ;; esac' "$handler"
 grep -Fq '"$lsblk_command" -P -o PATH,TYPE,TRAN,FSTYPE,PKNAME' "$handler"
 grep -Fq 'lsblk_command=${AB_LSBLK:-lsblk}' "$handler"
+# Device tool baseline: Debian 12's util-linux 2.38 has no PARTN column, so the
+# slot is resolved through sysfs; and every lsblk call goes through the seam,
+# so the loopback fixture's bookworm-like lsblk sees all of them.
+# (Explicit if/exit: a "!"-negated command never trips set -e.)
+if grep -Fq 'PARTN' "$handler"; then echo 'handler uses lsblk PARTN (absent from util-linux 2.38)' >&2; exit 1; fi
+grep -Fq 'partition_number() { # $1=block device path; prints the number or fails' "$handler"
+grep -Fq '[ -r "/sys/class/block/$name/partition" ] || return 1' "$handler"
+if grep -Eq '^[^#]*(^|[^_$a-z])lsblk[[:space:]]+-' "$handler"; then
+    echo 'handler calls lsblk directly instead of through $lsblk_command' >&2; exit 1
+fi
 # The engine reads its product-specific values from a board-authored config and
 # never sources it as shell.
 grep -Fq 'ab_config=${AB_UPDATE_CONFIG:-/usr/lib/pi-ab-update/ab-update.conf}' "$handler"

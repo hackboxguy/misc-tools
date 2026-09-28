@@ -63,7 +63,8 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 # p5/p6 are logical partitions inside p4, matching the production A/B
-# contract closely enough for lsblk PKNAME/PARTN resolution to be real.
+# contract closely enough for the PKNAME + sysfs partition-number resolution
+# to be real (the loop partitions have /sys/class/block/loopNpM/partition).
 truncate -s 320M "$image"
 sfdisk "$image" >/dev/null <<EOF
 label: dos
@@ -185,11 +186,18 @@ printf '%s\n' \
 chmod 0755 "$reboot_command"
 
 # The handler resolves its own block-device inventory. Present a synthetic one
-# for the USB scan and delegate every other query to the real tool.
+# for the USB scan and delegate every other query to the real tool - as the
+# oldest supported device has it: Debian 12's util-linux 2.38 has no PARTN
+# column, so this refuses it exactly the way bookworm's lsblk does.
 fake_lsblk="$work/fake-lsblk"
 lsblk_records="$work/lsblk-records"
 cat > "$fake_lsblk" <<FAKE
 #!/bin/sh
+for argument in "\$@"; do
+    case "\$argument" in
+        *PARTN*) echo 'lsblk: unknown column: PARTN' >&2; exit 1 ;;
+    esac
+done
 if [ "\$1" = -P ] && [ "\$2" = -o ] && [ "\$3" = PATH,TYPE,TRAN,FSTYPE,PKNAME ]; then
     cat "$lsblk_records"
     exit 0

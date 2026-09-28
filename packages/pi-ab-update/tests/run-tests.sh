@@ -28,6 +28,9 @@ run 'update check'           bash "$engine/tests/test_ota_check.sh" "$engine/ab-
 run 'update cli'             bash "$engine/tests/test_update_cli.sh" "$engine/ab-update"
 
 if [ "$(id -u)" -eq 0 ]; then
+    # Loop devices are reused back to back between the fixtures; let udev
+    # finish with the previous ones first (see the layout fixture below).
+    command -v udevadm >/dev/null 2>&1 && udevadm settle || true
     run 'handler loopback'   bash "$engine/tests/test_system_update_handler_integration.sh" "$engine/ab-system-update"
     # These fixtures allocate loop devices back to back. Letting udev finish
     # with the ones just released costs a moment and removes the most likely

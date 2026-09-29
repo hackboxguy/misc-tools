@@ -11,9 +11,11 @@
 #   .late     90 s later: systemd-analyze timing, once boot has finished
 #   .dmesg    the kernel log, a record per line as it is written
 #   .journal  `journalctl -b -f -o short-monotonic`, a line per entry
-#   .sample   every 5 s: uptime, throttle flags, load, memory and I/O pressure
-#             (PSI "full avg10"), requests in flight on the SD card, and the
-#             update engine's progress when an update is running
+#   .sample   every 5 s: uptime, throttle flags, load, dirty and writeback
+#             memory, memory and I/O pressure (PSI "full avg10"; "n/a" unless
+#             the kernel runs with psi=1 - the Pi kernel is built with
+#             CONFIG_PSI_DEFAULT_DISABLED), requests in flight on the SD card,
+#             and the update engine's progress when an update is running
 #
 # NNNN is a boot counter kept in the directory. The Pi has no RTC: the clock at
 # this point is fake-hwclock's, the same on every boot of a session, so it
@@ -21,10 +23,12 @@
 # file stops at DEBUG_JOURNAL_MAX_BYTES.
 #
 # What survives a reset: every line is handed to the kernel as soon as it is
-# produced (no stdio buffering anywhere in the pipelines), so what bounds the
-# loss is ext4's own journal commit, 5 s by default - measured on the bench,
-# both mirrors ended 0-30 s before a reset. The once-a-minute `sync -f` below
-# is a second, coarser bound, not the main one.
+# produced (no buffering anywhere in the pipelines), so what bounds the loss is
+# ext4's own journal commit, 5 s by default. The once-a-minute `sync -f` below
+# is a second, coarser bound, not the main one. (The first mirrors ended 0-30 s
+# before a reset, and .dmesg at 6 s of uptime: dmesg's stdout was
+# block-buffered, and the writer was awk - on bookworm mawk, which reads its
+# input a block at a time whatever the producer does.)
 set -u
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -50,10 +54,19 @@ ls -1 "$dir"/boot-*.start 2>/dev/null | sort | head -n "-$((keep - 1))" | while 
              "${old%.start}".journal "${old%.start}".sample
 done
 
-capped() { # stdin -> $1, a line at a time, until max_bytes
-    awk -v cap="$max_bytes" -v out="$1" '
-        { n += length($0) + 1; if (n > cap) { print "[debug-journal] size cap reached" > out; exit }
-          print > out; fflush(out) }'
+# stdin -> $1, a line at a time, until max_bytes. A shell loop, not awk: the
+# builtin read takes one line from a pipe without reading ahead, and printf
+# writes it at once. (mawk, bookworm's awk, buffers its input; see above.)
+capped() {
+    local n=0 line
+    while IFS= read -r line; do
+        n=$((n + ${#line} + 1))
+        if [ "$n" -gt "$max_bytes" ]; then
+            printf '%s\n' '[debug-journal] size cap reached' >&3
+            break
+        fi
+        printf '%s\n' "$line" >&3
+    done 3>>"$1"
 }
 
 {
@@ -87,17 +100,20 @@ journalctl -b -f -o short-monotonic --no-pager 2>&1 | capped "$prefix.journal" &
   } > "$prefix.late" 2>&1 ) &
 
 psi_full() { # $1=/proc/pressure/<resource>; prints the "full avg10" value
+    [ -r "$1" ] || { echo n/a; return; }
     awk '$1 == "full" { for (i = 2; i <= NF; ++i) if ($i ~ /^avg10=/) { sub(/^avg10=/, "", $i); print $i } }' "$1" 2>/dev/null
 }
+meminfo_kb() { awk -v key="$1:" '$1 == key { print $2 }' /proc/meminfo; }
 sample_line() {
     local progress=""
     [ -r "$progress_file" ] && progress=$(tr '\n' ' ' < "$progress_file")
-    printf 'up=%s throttled=%s load=%s io_full=%s mem_full=%s mmc_inflight=%s progress=%s\n' \
+    printf 'up=%s throttled=%s load=%s dirty_kb=%s writeback_kb=%s io_full=%s mem_full=%s mmc_inflight=%s progress=%s\n' \
         "$(cut -d' ' -f1 /proc/uptime)" \
         "$(vcgencmd get_throttled 2>/dev/null | cut -d= -f2)" \
         "$(cut -d' ' -f1-3 /proc/loadavg)" \
+        "$(meminfo_kb Dirty)" "$(meminfo_kb Writeback)" \
         "$(psi_full /proc/pressure/io)" "$(psi_full /proc/pressure/memory)" \
-        "$(tr -s ' ' < /sys/block/mmcblk0/inflight 2>/dev/null | sed 's/^ //')" \
+        "$(tr -s ' ' 2>/dev/null < /sys/block/mmcblk0/inflight | sed 's/^ //')" \
         "${progress% }"
 }
 ( elapsed_since_sync=0

@@ -232,6 +232,12 @@ grep -Fq 'systemctl enable micropanel-debug-journal.service' "$appliance" || fai
 grep -Fq 'stdbuf -oL dmesg -w 2>&1 | capped "$prefix.dmesg" &' "$support/micropanel-debug-journal" || fail 'debug-journal dmesg mirror is not line-buffered'
 grep -Fq '"$dir/boot-counter"' "$support/micropanel-debug-journal" || fail 'debug-journal files are not ordered by a boot counter'
 grep -Fq 'sample_line >> "$prefix.sample"' "$support/micropanel-debug-journal" || fail 'debug-journal has no sampler'
+# The mirror writer must not be awk: bookworm's mawk reads its input a block
+# at a time, and the .dmesg mirror stopped at the backlog on the rig.
+awk '/^capped\(\) \{/ { c = 1 } c && /awk/ { bad = 1 } c && /^}/ { c = 0 } END { exit bad }' \
+    "$support/micropanel-debug-journal" || fail 'debug-journal mirror writer uses awk (mawk buffers its input)'
+grep -Fq 'while IFS= read -r line; do' "$support/micropanel-debug-journal" || fail 'debug-journal mirror writer is not a line-at-a-time read loop'
+grep -Fq 'dirty_kb=%s writeback_kb=%s' "$support/micropanel-debug-journal" || fail 'debug-journal sampler lost dirty/writeback memory'
 grep -Fq 'systemctl enable micropanel-machine-id.service micropanel-ssh-host-keys.service' "$appliance" || \
     fail 'appliance hook does not enable the restore units'
 # The config.txt include split: the hook points pi-config-txt.sh at the display

@@ -8,44 +8,47 @@ design and the persistence contract are in `PERSISTENCE.md`; the engine is
 > br-wrapper, which the sources stage pulls on every run; without the flag any
 > br-wrapper commit triggers a ~45-minute kernel rebuild.
 
-> **Status (2026-09-29):** A/B is opt-in (`--layout=ab`) and lives on the
-> `feature/A-B-Update` branch of misc-tools. Every other repo it builds from is
-> on its default branch: micropanel's A/B work (split boot configuration, HPD
-> toggle, the no-SSD1306 ExecCondition) was merged to micropanel `main` on
-> 2026-09-29, and `hooks-ab.txt` clones `main`, as `hooks.txt` does.
+> **Status (2026-09-29):** A/B is opt-in (`--layout=ab`) and is on misc-tools
+> `main` since 2026-09-29 (`feature/A-B-Update` fast-forwarded into it at
+> `00a7bea`; the feature branch is kept for history only). Every repo it builds
+> from is on its default branch: micropanel's A/B work (split boot
+> configuration, HPD toggle, the no-SSD1306 ExecCondition) is on micropanel
+> `main`, `hooks-ab.txt` clones `main` as `hooks.txt` does, and the System
+> Manager app is on br-wrapper `main`. The system ships USB-only.
 
 ## Versions
 
-**The bench series 02.00-02.06 is burned: never flash, publish or reuse those
-numbers.** 02.00-02.04 carry an updater that cannot resolve its slot on
-bookworm (E1: `lsblk -o PARTN`, util-linux 2.40+; pi-ab-update `50dd082`), and
-all of 02.00-02.06 carry the commit-service ordering cycle that stops any
-candidate from committing or recording a fallback (E2: pi-ab-update `4df206a`).
+**The shippable line starts at `2.00`, built from misc-tools `main` at or
+after `00a7bea`** (the commit `main` was fast-forwarded to when the A/B work
+was merged, 2026-09-29): **`2.00` (image + payload) is the first release and
+`2.01` (payload) its first update.** Record the misc-tools SHA each release
+was built from next to its version (§7); the image manifest records every
+other source revision (`BR_WRAPPER_REVISION`, `MICROPANEL_REVISION`, ...).
 
-**2.00 and 2.01 are burned too** (E3: the commit service was a oneshot that held
-`multi-user.target` back from its own health unit for the whole readiness
-wait, so no candidate ever committed by itself; pi-ab-update fix in Step 9).
+**Everything built before the merge is retired**: the bench series
+`02.00`-`02.06` and `2.00`-`2.07` as built from `feature/A-B-Update`. They
+were bench builds only: none was published, every card that carried one has
+been overwritten, and the artifacts are deleted. What they proved is in §7,
+labelled with those (pre-merge) numbers; the defects they carried are in the
+history of this section and in `tmp-docs/` (E1 `lsblk -o PARTN`, E2 the
+commit-service ordering cycle, E3 the oneshot commit service, the
+`fetch_terminated` diagnostic, the 20 s watchdog, E4 the reset during
+writes, the refused candidate that stayed up).
 
-**2.02 and 2.03 are not burned** - every update path works on them (§7) - but
-they carry the `fetch_terminated` malformed test on their failure path (every
-failed install prints `line 187: [: missing ']'`; pi-ab-update `97dd66a`) and
-the 20 s runtime watchdog, so they are the bench references, not the first
-release.
+**Why restarting at `2.00` is safe, once.** The engine's only version rule is
+equality: it refuses a bundle whose version equals the running one and
+offers any other, lower included. A reused number is therefore a problem
+only on a device that runs the *old* build of that number, and there is none
+known. The one real consequence: a device still running a pre-merge `2.00`
+(or `2.01`) would refuse the new `2.00` (or `2.01`) as "already running this
+version" and must be reflashed or given the next number. A device running a
+pre-merge `2.02`-`2.07` would be offered `2.00`/`2.01` like any other
+version.
 
-**2.04 and 2.05 passed the bench** (§7, E4 closed) and are good, but a
-candidate the commit service refuses stays up until some later reboot rolls
-it back. **2.06 (image + payload) and 2.07 (payload)** add the reboot on
-refusal (pi-ab-update `27e3e3e`) and the status screen that says nothing
-about a release source on a device that never checked (`a8edb1a`).
-
-The **release baseline** is built with the production release URL (no
-`--release-url-template`), so the bench-tested image is byte for byte the
-shippable one: pending the bench, `2.06` (image + payload) is the first
-shippable image and `2.07` (payload) the first bundle; a later fix becomes
-`2.08`, `2.09`, ... Version numbers
-are never reissued: the engine refuses an update whose version equals the
-running one, and a reissued number makes bench evidence ambiguous.
-(Single-slot keeps its own 01.xx line.)
+**After this restart, never reissue a number** (`2.00`, `2.01`, `2.02`, ...):
+a reissued number makes a same-version refusal of a different build
+possible, and bench evidence ambiguous. (Single-slot keeps its own 01.xx
+line.)
 
 ## Device tool baseline
 
@@ -234,7 +237,9 @@ not a fault, and not a health unit. See PERSISTENCE.md, "Update health".
 ## 7. Acceptance records
 
 From the bench reports (reviewer on the OTS-OLED head-unit rig, over SSH;
-power cuts by a Tasmota plug). Commits are by `ab-update-commit` alone, times
+power cuts by a Tasmota plug). Every version in the rows up to the 2.06/2.07
+bench is a **pre-merge** bench build (§Versions); rows for the release line
+say "post-merge" and the misc-tools SHA. Commits are by `ab-update-commit` alone, times
 after boot; each logged
 `[SUCCESS] committed candidate slot <X> after 30 seconds of health`.
 
@@ -260,3 +265,9 @@ after boot; each logged
 | System Manager `--auto-install` 2.04, three passes | from the NTFS stick, with OTA 2.05 return trips between them: **all three committed** at 47.8 / 47.9 / 48.0 s, **no reset** (the same operation reset the board twice on 2.03); return trips committed at 47.8 / 48.0 s | 2026-09-29 | 2.05 -> 2.04 |
 | Factory reset + reseed | fresh 2.04 card, `ab-factory-reset --yes`: reset requested, reboot, the early service wiped and reseeded `/data` (marker gone, skeleton back, NetworkManager profile reseeded), display type kept, machine-id regenerated, no failed unit, back up unaided | 2026-09-29 | 2.04 (fresh card) |
 | Fresh card: OTA, then System Manager USB | OTA 2.05 -> B committed at 48.0 s; System Manager USB 2.04 -> A committed at 49.8 s; the app's run log carries the 10 % milestones (br-wrapper `0f73290`) | 2026-09-29 | 2.04 -> 2.05 -> 2.04 |
+| Refusal reboot on hardware | old card on A/2.04, OTA 2.06 -> candidate B, `systemctl stop qt-demo-launcher` at 25 s: the 2.06 commit service refused (`health lost in the settle window: ... not active`) and **rebooted by itself**; back on A/2.04 within 30 s, tryboot flag 0, `state=fallback version=2.06 candidate_slot=B`, `update-refusal` written with the reason (`--refused-reason` unknown to the 2.04 slot, as expected: the fallback slot's engine publishes it) | 2026-09-29 | 2.04 -> 2.06 |
+| Refusal record cleared by a 2.06+ arm | OTA 2.06 again (armed by the 2.04 installer): committed on B at 47.9 s, the record stayed; OTA 2.07 (armed by the 2.06 installer): committed on A at 47.0 s and **the arm removed `update-refusal`**; `dirty_ratio` 20 afterwards | 2026-09-29 | 2.04 -> 2.06 -> 2.07 |
+| System Manager `--auto-install`, three passes on the 2.07 engine | 2.04 on the stick, OTA 2.07 return trips: committed at 50.0 / 48.0 / 48.0 s, return trips 47.9 / 47.9 s; no reset, no lock left | 2026-09-29 | 2.07 -> 2.04 -> 2.07 |
+| ssh host keys across slot switches | identical fingerprint before and after a reboot that also switched slots (restore unit before sshd, regenerators masked); keys change only on a fresh flash or a factory reset | 2026-09-29 | 2.06/2.07 |
+| Fresh 2.06 card | `sudo ab-update` shows **no check section**; the app offers the stick's 2.07 with the signature line and *Hold to install*; badge *Image update on USB*; `ab-factory-reset --yes` wiped and reseeded `/data` (marker gone), display type kept, back up unaided | 2026-09-29 | 2.06 (fresh card) |
+| **Hand-held install on the panel, Ethernet unplugged** (owner) | *Hold to install* -> 2.07 written, verified, armed, rebooted; **committed on B at 48.8 s**; app log complete (`exit 0`), no lock, no mount; the section reads *Running 2.07 (committed)* and the stick *Already running this version* | 2026-09-29 | 2.06 -> 2.07 |

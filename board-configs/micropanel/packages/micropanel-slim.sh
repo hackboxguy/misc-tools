@@ -181,9 +181,12 @@ if [ "$runtime_deps" != "none" ] && [ -f "$runtime_deps" ]; then
             }
         }')
     missing=""
+    # A here-string, not `printf | grep -q`: grep -q exits at the first match,
+    # the printf side can then take SIGPIPE, and under pipefail a package that
+    # is installed reads as missing (the 2.04 build failed on fxload so).
     while IFS= read -r pkg; do
         [ -n "$pkg" ] || continue
-        printf '%s\n' "$satisfied" | grep -Fqx "$pkg" || missing="$missing $pkg"
+        grep -Fqx -- "$pkg" <<< "$satisfied" || missing="$missing $pkg"
     done < <(sed -e 's/#.*//' -e 's/[[:space:]]//g' "$runtime_deps" | sed '/^$/d')
     [ -z "$missing" ] || die "the purge cascade removed declared runtime packages:$missing"
 fi

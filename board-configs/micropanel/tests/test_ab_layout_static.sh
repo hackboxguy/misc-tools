@@ -232,6 +232,13 @@ grep -Fq 'systemctl enable micropanel-debug-journal.service' "$appliance" || fai
 grep -Fq 'stdbuf -oL dmesg -w 2>&1 | capped "$prefix.dmesg" &' "$support/micropanel-debug-journal" || fail 'debug-journal dmesg mirror is not line-buffered'
 grep -Fq '"$dir/boot-counter"' "$support/micropanel-debug-journal" || fail 'debug-journal files are not ordered by a boot counter'
 grep -Fq 'sample_line >> "$prefix.sample"' "$support/micropanel-debug-journal" || fail 'debug-journal has no sampler'
+# The slim guard's membership test must not pipe the package inventory into
+# grep -q under pipefail (SIGPIPE made an installed fxload read as removed).
+if grep -Eq 'printf .*"\$satisfied" *\| *grep' "$board/packages/micropanel-slim.sh"; then
+    fail 'micropanel-slim.sh pipes the package inventory into grep -q (SIGPIPE under pipefail)'
+fi
+grep -Fq 'grep -Fqx -- "$pkg" <<< "$satisfied"' "$board/packages/micropanel-slim.sh" || \
+    fail 'micropanel-slim.sh lost its here-string membership test'
 # The mirror writer must not be awk: bookworm's mawk reads its input a block
 # at a time, and the .dmesg mirror stopped at the backlog on the rig.
 awk '/^capped\(\) \{/ { c = 1 } c && /awk/ { bad = 1 } c && /^}/ { c = 0 } END { exit bad }' \

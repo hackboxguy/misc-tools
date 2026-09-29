@@ -257,6 +257,9 @@ run_handler() { # $1=source enum; stdin is the bundle for the `stdin` source
 reset_target() {
     rm -f "$selector_log" "$reboot_log"
     rm -rf "$state_dir"
+    # A refusal left by an earlier candidate; arming a new one clears it.
+    install -d -m0700 "$state_dir"
+    printf '%s\n' version=old candidate_slot=B 'refused_reason=an earlier candidate' > "$state_dir/update-refusal"
     set_vm 0 20 0 10
     e2label "${loop}p6" MP_ROOT_STALE
     rm -rf "$boot_mount/B"
@@ -277,6 +280,7 @@ assert_candidate_armed() { # $1=case label
     test ! -e "$boot_mount/B/cmdline.txt.template"
     test ! -e "$boot_mount/B/obsolete"
     grep -Fqx 'state=candidate-armed' "$state_dir/update-state"
+    [ ! -e "$state_dir/update-refusal" ] || { echo "ERROR: $1 kept an earlier candidate's refusal" >&2; exit 1; }
     grep -Fqx 'candidate_slot=B' "$state_dir/update-state"
     grep -Fqx 'version=fixture' "$state_dir/update-state"
     grep -Fqx 'arm-candidate B' "$selector_log"

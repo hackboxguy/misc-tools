@@ -689,6 +689,8 @@ write_update_state() {
     chmod 0600 "$temporary"
     sync -f "$temporary"
     mv -f "$temporary" "$state_dir/update-state"
+    # A refusal recorded for an earlier candidate is not this one's.
+    rm -f -- "$state_dir/update-refusal"
     sync -f "$state_dir"
 }
 

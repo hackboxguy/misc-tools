@@ -43,6 +43,8 @@ AB_RUNTIME_DIR=/run/…                           # progress/status telemetry
 AB_HEALTH_UNITS=a.service b.service             # all active, none restarted
 AB_HEALTH_HOOK=/usr/lib/…/update-health         # optional extra predicate, exit 0
 AB_SETTLE_SECONDS=30
+AB_COMMIT_WAIT_SECONDS=120                      # readiness wait before the settle window
+AB_ON_REFUSAL=reboot                            # reboot|stay: what a refused candidate does
 
 # Updates: authenticity, and where releases come from
 AB_SIGNING_KEY=/usr/lib/pi-ab-update/update-signing-key.pub   # pinned, root-owned
@@ -190,6 +192,21 @@ new device-side flag against that baseline; the handler loopback fixture's
   a loop device with one cache layer (as the device has): no throughput cost -
   544 MiB/s uncapped, 23.9 MiB/s against a 25 MiB/s write cap, the same as
   `oflag=direct` (23.7) - with peak dirty memory 8-10 MiB instead of ~950.
+
+## A refused candidate
+
+When the commit service refuses a tryboot candidate (not healthy within
+`AB_COMMIT_WAIT_SECONDS`, health lost in the settle window, a health unit
+restarted), it logs the reason, records it in `<AB_STATE_DIR>/update-refusal`
+(root-only: `version=`, `candidate_slot=`, `refused_reason=`) and, with
+`AB_ON_REFUSAL=reboot` (the default), reboots. The tryboot flag is one-shot, so
+the committed slot boots; its commit service records `state=fallback` and
+publishes `refused_reason=` in the public status beside it (`ab-update
+--refused-reason`). `stay` keeps the refused candidate up for inspection; it
+still falls back at the next reboot. The reason is deliberately not a key of
+`update-state`: the slot that boots after a refusal is the older image, and its
+commit service parses `update-state` strictly. Installing a new candidate
+clears the record.
 
 ## Format and layout constants
 

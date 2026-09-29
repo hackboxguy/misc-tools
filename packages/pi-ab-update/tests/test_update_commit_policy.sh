@@ -36,6 +36,19 @@ grep -Fq "give_up \"not healthy within \${wait_seconds} s: \$(health_failure \"\
 if awk '/^publish_status candidate-armed$/ { armed = 1 } armed && /\|\| exit 0$/ { found = 1 } END { exit !found }' "$commit_helper"; then
     echo 'a candidate-boot exit path gives no reason' >&2; exit 1
 fi
+# A refused candidate does not keep running (v11 §3.1b): after give_up's line,
+# reboot - only on a tryboot candidate boot, only with AB_ON_REFUSAL=reboot
+# (the default) - and record the reason beside update-state, never in it (an
+# older committed image parses update-state strictly).
+grep -Fq 'on_refusal=$(ab_setting "${AB_ON_REFUSAL:-}" AB_ON_REFUSAL reboot)' "$commit_helper"
+grep -Fq 'if [ "$on_refusal" = reboot ] && is_tryboot_candidate; then' "$commit_helper"
+grep -Fq 'case "$on_refusal" in reboot|stay) ;; *) die' "$commit_helper"
+grep -Fq 'refusal_file=${AB_REFUSAL_FILE:-$state_dir/update-refusal}' "$commit_helper"
+awk '/^give_up\(\) \{/ { g = 1 } g && /record_refusal/ { r = 1 } g && /"\$reboot_command"/ { b = r } g && /^}/ { g = 0 } END { exit !b }' "$commit_helper" || {
+    echo 'give_up does not record the reason before it reboots' >&2; exit 1; }
+if awk '/^write_update_state\(\) \{/ { w = 1 } w && /refused/ { bad = 1 } w && /^}/ { w = 0 } END { exit !bad }' "$commit_helper"; then
+    echo 'the refusal reason went into update-state (older images parse it strictly)' >&2; exit 1
+fi
 # Ordering after the health units is a per-board drop-in the finalizer writes
 # from AB_HEALTH_UNITS, so the shared unit itself names none of them.
 if grep -Eq 'micropanel|MicroPanel' "$unit"; then echo "test_update_commit_policy.sh: forbidden pattern found (line $LINENO)" >&2; exit 1; fi

@@ -113,6 +113,8 @@ grep -Fqx 'AB_APP_ACCOUNT=pi' "$ab_conf" || fail 'ab-update.conf AB_APP_ACCOUNT'
 grep -Fqx 'AB_STATE_DIR=/data/micropanel-system' "$ab_conf" || fail 'ab-update.conf AB_STATE_DIR'
 grep -Fq 'AB_RESET_BEFORE=' "$ab_conf" || fail 'ab-update.conf AB_RESET_BEFORE'
 grep -Fq 'AB_RESET_SEED=' "$ab_conf" || fail 'ab-update.conf AB_RESET_SEED'
+# A refused candidate reboots to the committed slot (v11 §3.1b).
+grep -Fqx 'AB_ON_REFUSAL=reboot' "$ab_conf" || fail 'ab-update.conf: AB_ON_REFUSAL is not reboot'
 health_units=$(sed -n 's/^AB_HEALTH_UNITS=//p' "$ab_conf")
 [ -n "$health_units" ] || fail 'AB_HEALTH_UNITS is empty'
 # A health unit nothing enables never starts, and every update falls back.

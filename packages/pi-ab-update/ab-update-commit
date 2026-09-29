@@ -45,6 +45,17 @@ data_mount=$(ab_setting "${AB_DATA_MOUNT:-}" AB_DATA_MOUNT /data)
 tryboot_marker=${AB_TRYBOOT_MARKER:-/proc/device-tree/chosen/bootloader/tryboot}
 settle_seconds=$(ab_setting "${AB_SETTLE_SECONDS:-}" AB_SETTLE_SECONDS 30)
 wait_seconds=$(ab_setting "${AB_COMMIT_WAIT_SECONDS:-}" AB_COMMIT_WAIT_SECONDS 120)
+# What a refused candidate boot does next: reboot (default) or stay up for
+# inspection (a bench setting). See give_up.
+on_refusal=$(ab_setting "${AB_ON_REFUSAL:-}" AB_ON_REFUSAL reboot)
+# Same fixed-command seam as the installer's; fixtures never reboot the host.
+reboot_command=${AB_REBOOT_COMMAND:-/usr/sbin/reboot}
+# Why the last candidate was refused, for the fallback that follows. A file of
+# its own, not a key in update-state: after the refusal the committed slot
+# boots, and an older image's commit helper parses update-state strictly
+# (exactly four keys) - an extra key would make it ignore the state and never
+# record the fallback. Root-only, like update-state.
+refusal_file=${AB_REFUSAL_FILE:-$state_dir/update-refusal}
 
 die() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
 
@@ -116,9 +127,49 @@ health_failure() { # $1=restart counts at the start of the window
     printf 'no predicate failed on re-check (transient)\n'
 }
 
-# Every way out of a candidate boot without a commit says why, once.
+# The recorded reason is one line of printable text, bounded, so no reader
+# ever has to defend against it.
+record_refusal() { # $1=reason
+    local reason temporary
+    reason=$(printf '%s' "$1" | tr -c '[:print:]' ' ' | cut -c1-200)
+    data_is_writable || return 1
+    temporary=$(mktemp "$state_dir/.update-refusal.XXXXXX") || return 1
+    {
+        printf 'version=%s\n' "${update_state[version]}"
+        printf 'candidate_slot=%s\n' "${update_state[candidate_slot]}"
+        printf 'refused_reason=%s\n' "$reason"
+    } > "$temporary"
+    chmod 0600 "$temporary"
+    sync -f "$temporary"
+    mv -f "$temporary" "$refusal_file"
+    sync -f "$state_dir"
+}
+
+# The reason recorded for the candidate this state is about; nothing for any
+# other (a stale record from an earlier candidate is not this one's).
+refusal_reason() {
+    [ -f "$refusal_file" ] && [ ! -L "$refusal_file" ] || return 1
+    [ "$(awk -F= '$1 == "version" { print substr($0, 9); exit }' "$refusal_file")" = "${update_state[version]}" ] || return 1
+    [ "$(awk -F= '$1 == "candidate_slot" { print substr($0, 16); exit }' "$refusal_file")" = "${update_state[candidate_slot]}" ] || return 1
+    awk -F= '$1 == "refused_reason" { print substr($0, 16); found = 1; exit } END { exit !found }' "$refusal_file"
+}
+
+# Every way out of a candidate boot without a commit says why, once - and a
+# refused candidate does not keep running. The service has judged it not
+# acceptable; left up, it stays uncommitted and nothing records the fallback
+# or tells the operator until some later reboot happens to roll it back
+# (found on the bench: 7 minutes and counting). The tryboot flag is one-shot,
+# so a plain reboot boots the committed slot, whose commit service then records
+# `fallback` (the normal-slot rule) with this reason alongside.
+# AB_ON_REFUSAL=stay keeps a refused candidate up for inspection.
 give_up() {
     printf '[INFO] not committing candidate slot %s: %s\n' "${update_state[candidate_slot]}" "$*"
+    record_refusal "$*" || printf '%s\n' '[WARN] could not record the refusal reason' >&2
+    if [ "$on_refusal" = reboot ] && is_tryboot_candidate; then
+        printf '[INFO] rebooting to the committed slot (AB_ON_REFUSAL=reboot)\n'
+        sync
+        "$reboot_command" || printf '[ERROR] reboot failed (%s); the candidate stays up until the next reboot\n' "$reboot_command" >&2
+    fi
     exit 0
 }
 
@@ -155,14 +206,20 @@ write_update_state() { # $1=state
 # fallback truthfully without gaining access to update control state.
 # state= stays first; version= and candidate_slot= name the candidate the state
 # is about, so a UI can say which release fell back without its own record.
+# refused_reason= follows on a fallback whose candidate the service refused
+# (a candidate that never reached the service - a boot that hung, a power
+# cut - has none).
 publish_status() { # $1=committed|candidate-armed|fallback
-    local public_state=$1 temporary
+    local public_state=$1 temporary reason
     install -d -m0755 "$status_dir"
     temporary=$(mktemp "$status_dir/.status.XXXXXX")
     {
         printf 'state=%s\n' "$public_state"
         printf 'version=%s\n' "${update_state[version]}"
         printf 'candidate_slot=%s\n' "${update_state[candidate_slot]}"
+        if [ "$public_state" = fallback ] && reason=$(refusal_reason 2>/dev/null); then
+            printf 'refused_reason=%s\n' "$reason"
+        fi
     } > "$temporary"
     chmod 0644 "$temporary"
     mv -f "$temporary" "$status_file"
@@ -171,6 +228,7 @@ publish_status() { # $1=committed|candidate-armed|fallback
 [ -n "$health_units" ] || die 'AB_HEALTH_UNITS is empty; refusing to commit on a health check that asserts nothing'
 is_positive_integer "$settle_seconds" || die 'commit settle interval is invalid'
 is_positive_integer "$wait_seconds" || die 'commit readiness wait interval is invalid'
+case "$on_refusal" in reboot|stay) ;; *) die "AB_ON_REFUSAL must be reboot or stay, not '$on_refusal'" ;; esac
 [ -f "$state_file" ] && [ ! -L "$state_file" ] || exit 0
 load_state || { printf '%s\n' '[ERROR] ignoring malformed update state' >&2; exit 0; }
 case "${update_state[state]}" in

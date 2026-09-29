@@ -178,6 +178,11 @@ require grep -Fqx 'Type=exec' "$root_a_mount/lib/systemd/system/ab-update-commit
 require test -L "$root_a_mount/etc/systemd/system/multi-user.target.wants/ab-update-commit.service"
 require test -f "$root_a_mount$engine_lib_dir/ab-update.conf"
 require grep -Eq '^AB_HEALTH_UNITS=[^[:space:]].*$' "$root_a_mount$engine_lib_dir/ab-update.conf"
+# The commit service refuses to run at all on any other value, so a typo here
+# would leave every candidate uncommitted.
+if grep -Eq '^AB_ON_REFUSAL=' "$root_a_mount$engine_lib_dir/ab-update.conf"; then
+    require grep -Eqx 'AB_ON_REFUSAL=(reboot|stay)' "$root_a_mount$engine_lib_dir/ab-update.conf"
+fi
 # The commit service pulls its health units in but is never ordered after them:
 # After= with a unit ordered after multi-user.target is a cycle systemd breaks
 # by deleting the commit job.

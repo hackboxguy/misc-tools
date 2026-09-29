@@ -20,6 +20,7 @@
 #   --active-version --active-slot --active-partition --active-revision
 #   --inactive-version --inactive-partition
 #   --state --update-state --check-state --progress
+#   --refused-reason   why the commit service refused the candidate that fell back
 #
 # Options:
 #   --source-config=FILE   bench override for the release source (URLs are
@@ -159,6 +160,10 @@ show_status() {
             published_value "$update_state_file" "$k" >/dev/null 2>&1 && \
                 printf '  %-18s %s\n' "$k" "$(published_value "$update_state_file" "$k")"
         done
+        # Published by the commit service only for the fallback it is about.
+        if reason=$(published_value "$public_status_file" refused_reason 2>/dev/null); then
+            printf '  %-18s %s\n' 'refused because' "$reason"
+        fi
     else
         printf '  state              none recorded (no update has run on this device)\n'
     fi
@@ -252,6 +257,7 @@ case "${1:-status}" in
     --inactive-version)  need_root --inactive-version; inactive_version ;;
     --state|--update-state) update_state_value state || die 'no update state recorded' ;;
     --check-state)       published_value "$check_file" state || die 'no check has run' ;;
+    --refused-reason)    published_value "$public_status_file" refused_reason || die 'no refused candidate recorded' ;;
     --progress)          [ -f "$progress_file" ] && cat "$progress_file" || die 'no update has run' ;;
 
     status)  show_status ;;

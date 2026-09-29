@@ -86,6 +86,21 @@ out=$(run --state)
     || fail "--state preferred the summary and gave '$out'"
 rm -f "$work/run/status"
 
+# --- a refused candidate's reason, as the commit service publishes it ------
+run --refused-reason >/dev/null 2>&1 && fail '--refused-reason succeeded with nothing recorded' \
+    || ok 'query: --refused-reason with none' 'fails rather than inventing one'
+printf '%s\n' 'state=fallback' 'version=00.37' 'candidate_slot=A' \
+    'refused_reason=health lost in the settle window: health unit x.service is not active' > "$work/run/status"
+out=$(run --refused-reason)
+[ "$out" = 'health lost in the settle window: health unit x.service is not active' ] && \
+    ok 'query: --refused-reason' 'one line, as published' || fail "--refused-reason gave '$out'"
+status_output=$(run status 2>/dev/null || true)
+case "$status_output" in
+    *"refused because"*"health lost in the settle window"*) ok 'status: names the refusal' 'refused because ...' ;;
+    *) fail 'status did not name the refusal' ;;
+esac
+rm -f "$work/run/status"
+
 # --- status is a superset, and mentions what a person needs ---------------
 out=$(run status)
 for want in '00.36' 'committed' 'available' 'writing'; do

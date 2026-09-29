@@ -188,7 +188,6 @@ env -u DATA_PARTITION_MB \
     UPDATE_RELEASE_URL_TEMPLATE='https://example.invalid/releases/latest/download/@ASSET@' \
     AB_PRODUCT=micropanel-touch \
     AB_MANIFEST_PATH="$ab_manifest_path" \
-    AB_LIB_DIR=/usr/lib/micropanel-touch \
     AB_APP_ACCOUNT=micropanel-touch \
     AB_APP_REVISION_KEY=MICROPANEL_TOUCH_REVISION \
     AB_APP_REVISION="$fixture_app_revision" \

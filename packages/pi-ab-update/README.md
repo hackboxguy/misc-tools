@@ -142,7 +142,7 @@ syncs. Harmless in itself, but anything doing TLS early — an update check, for
 instance — should expect and name that case rather than reporting a confusing
 certificate failure.
 
-The build side additionally passes `AB_MANIFEST_PATH`, `AB_LIB_DIR`,
+The build side additionally passes `AB_MANIFEST_PATH`,
 `AB_APP_ACCOUNT`, `AB_APP_REVISION_KEY`/`AB_APP_REVISION`,
 `DATA_SKELETON_SCRIPT`, `AB_UPDATE_CONF` and `AB_ASSERTIONS` — see
 `board-configs/micropanel-touch/board.conf` for a worked example.

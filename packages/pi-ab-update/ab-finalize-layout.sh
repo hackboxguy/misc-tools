@@ -2,7 +2,7 @@
 # pi-ab-update: host-side post-image hook for A/B storage layouts.
 #
 # Board-agnostic. Everything product-specific arrives as environment from the
-# builder (AB_PRODUCT, AB_MANIFEST_PATH, AB_LIB_DIR, AB_APP_ACCOUNT,
+# builder (AB_PRODUCT, AB_MANIFEST_PATH, AB_APP_ACCOUNT,
 # AB_APP_REVISION_KEY/AB_APP_REVISION, DATA_SKELETON_SCRIPT, AB_UPDATE_CONF).
 # The engine scripts themselves are installed from this directory, so the
 # adopting board ships no copy of them.
@@ -24,7 +24,6 @@ ab_factory_partition_mb=${AB_FACTORY_PARTITION_MB:-2048}
 slot_compatible_boards=${SLOT_COMPATIBLE_BOARDS:-pi4}
 ab_product=${AB_PRODUCT:-pi-ab-update}
 ab_manifest_path=${AB_MANIFEST_PATH:-}
-ab_lib_dir=${AB_LIB_DIR:-/usr/lib/pi-ab-update}
 ab_app_account=${AB_APP_ACCOUNT:-}
 ab_app_revision_key=${AB_APP_REVISION_KEY:-}
 expected_app_revision=${AB_APP_REVISION:-}

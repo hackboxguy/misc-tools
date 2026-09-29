@@ -208,8 +208,10 @@ Rules that bit before:
 An image + a bundle for the next version is two builds: the image build
 (`--payload` gives you its bundle too) for a version people will flash, and
 a payload-only version after it so a device has something newer to install.
-Today's pair is 2.06 (image + bundle) and 2.07 (bundle), pending their
-bench; 2.04/2.05 passed theirs (`BUILD.md` §Versions).
+The version line restarts at 2.00 on `main`: the first release is 2.00
+(image + bundle) and 2.01 (bundle), built from misc-tools `main` at or after
+`00a7bea`; every earlier `02.xx`/`2.xx` was a pre-merge bench build and is
+retired (`BUILD.md` §Versions says why reusing the numbers once is safe).
 
 ## 8. Flashing, updating, resetting (device side)
 
@@ -289,18 +291,19 @@ The effort ran as a loop: a reviewer session writes
 `tmp-docs/micropanel-ota-update-prompt-vN.md` (one step, with a hazards
 list), an implementer session does it and writes `…-report-vN.md`, the
 reviewer checks the report against the code, re-runs the gates, benches on
-the rig and writes the next prompt. Eleven rounds so far; the prompts and
+the rig and writes the next prompt. Twelve rounds so far; the prompts and
 reports are the history of every decision, and `CLAUDE.md` holds the
 build-system traps. A new session should start with `CLAUDE.md`, this file,
 `BUILD.md`, `PERSISTENCE.md`, the engine README, and the last report.
 
-Branch state (2026-09-29): misc-tools A/B work is on `feature/A-B-Update`
-(the owner merges to `main` when they decide); micropanel and br-wrapper are
-on their `main`. `hooks-ab.txt` and `hooks.txt` both clone micropanel
-`main`.
+Branch state (2026-09-29): everything is on `main`. misc-tools
+`feature/A-B-Update` was fast-forwarded into `main` at `00a7bea` and is kept
+for history only; work on `main` in every repo. micropanel and br-wrapper
+(System Manager) are on their `main`, and `hooks-ab.txt` and `hooks.txt` both
+clone micropanel `main`.
 
 Open items at the time of writing: online updates (deferred by the owner;
 see `micropanel-sdcard-online-ab-update.md`); the factory partition p7 is
-allocated but unused; merging misc-tools to `main` (the owner's call);
-System Manager could name `refused_reason=` on its rolled-back line
-(br-wrapper).
+allocated but unused; the automated build (`micropanel-automated-build-setup.md`).
+System Manager names the refusal reason on its rolled-back line from
+br-wrapper `d950c15`.

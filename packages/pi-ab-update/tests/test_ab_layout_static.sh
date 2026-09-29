@@ -485,3 +485,12 @@ expected_candidate_a=$(printf 'os_prefix=A/\ndtoverlay=vc4-kms-v3d')
 [ "$normal_a" = "$expected_normal_a" ]
 [ "$normal_b" = "$expected_normal_b" ]
 [ "$candidate_a" = "$expected_candidate_a" ]
+
+# E4: the runtime watchdog stays (a hung candidate PID 1 must fall back) but at
+# 60 s, not 20 s: a slot write saturating the SD card stalled PID 1 past 20 s
+# on the bench. The finalizer writes it and the verifier insists on it.
+grep -Fqx 'RuntimeWatchdogSec=60s' "$finalizer"
+grep -Fq "'RuntimeWatchdogSec=60s'" "$verifier"
+if grep -Eq '^RuntimeWatchdogSec=([0-9]|[1-5][0-9])s$' "$finalizer"; then
+    echo 'ERROR: the runtime watchdog is below 60 s again' >&2; exit 1
+fi

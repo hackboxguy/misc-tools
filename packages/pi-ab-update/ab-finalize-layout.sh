@@ -337,7 +337,21 @@ write_watchdog_config() { # $1=root mount
 [Manager]
 # Stage 0 verified that PID 1 owns the BCM2835 watchdog and resets a wedged
 # tryboot candidate after this interval.  Do not add a test/fault service.
-RuntimeWatchdogSec=20s
+#
+# Why 60 s and not the original 20 s (2026-09-29, bookworm adopter bench, E4):
+# - What this bounds is PID 1 falling silent. A hung kernel is not this
+#   value's business: the BCM2835 counter tops out near 16 s, and the kernel's
+#   watchdog core pings it from its own worker while this longer timeout runs,
+#   so a wedged kernel still resets in about 16 s.
+# - A candidate that hangs is reset either way and falls back to the committed
+#   slot; 40 s more before that happens costs an appliance nothing.
+# - A false reset costs a lot. The update streams gigabytes to the same SD
+#   card PID 1 pages its code from; the bench board reset mid-write with the
+#   rest of the system still running (rsts 0x20), PID 1 in the middle of a
+#   service restart. That abandons the write and looks like a fault. 60 s
+#   leaves room for a saturated card; 20 s did not.
+# Do not remove it: without it a hung candidate PID 1 never falls back.
+RuntimeWatchdogSec=60s
 EOF
 }
 

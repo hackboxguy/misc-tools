@@ -173,6 +173,24 @@ partition number now comes from `/sys/class/block/<dev>/partition`. Check any
 new device-side flag against that baseline; the handler loopback fixture's
 `lsblk` refuses `PARTN` the way bookworm does.
 
+## System settings the engine changes
+
+- **Runtime watchdog, 60 s** (`/etc/systemd/system.conf.d/90-pi-ab-update-watchdog.conf`,
+  written by the finalizer, required by the verifier). It resets a candidate
+  whose PID 1 has hung, so the tryboot falls back. It was 20 s until a bench
+  board reset in the middle of a slot write with PID 1 stalled on a saturated
+  SD card; the reasoning is in the file.
+- **Dirty page cache, while an install runs**: `vm.dirty_bytes` 16 MiB and
+  `vm.dirty_background_bytes` 8 MiB from just before the slot is first
+  written until the handler exits; the kernel's own values (bytes or ratio,
+  whichever was in force) are restored on every exit, and kept in
+  `/run/ab-update/private/dirty-limits.saved` so a killed run's successor
+  restores them too. Without it the stream builds up about a gigabyte of dirty
+  pages and flushes them in bursts that stall every other writer. Measured on
+  a loop device with one cache layer (as the device has): no throughput cost -
+  544 MiB/s uncapped, 23.9 MiB/s against a 25 MiB/s write cap, the same as
+  `oflag=direct` (23.7) - with peak dirty memory 8-10 MiB instead of ~950.
+
 ## Format and layout constants
 
 `MP_BOOT_A`/`MP_BOOT_B`/`MP_ROOT_A`/`MP_ROOT_B`/`MP_FACTORY`/`MICROPANEL_DATA`

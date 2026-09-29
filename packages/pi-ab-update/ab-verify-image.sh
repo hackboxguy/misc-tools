@@ -187,7 +187,7 @@ if grep -Eq '^(After|Before)=' "$health_dropin"; then
     echo "ERROR: the commit service's health drop-in orders it against its health units (cycle)" >&2
     exit 1
 fi
-require grep -Fq 'RuntimeWatchdogSec=20s' \
+require grep -Fqx 'RuntimeWatchdogSec=60s' \
     "$root_a_mount/etc/systemd/system.conf.d/90-pi-ab-update-watchdog.conf"
 # The layout/update contract inside the board's image manifest.
 require grep -Fq 'IMAGE_LAYOUT=ab' "$image_manifest"

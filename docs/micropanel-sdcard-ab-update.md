@@ -57,8 +57,10 @@ boots `tryboot.txt` exactly once; the next reboot or power cut boots
 
 - **arm** = write `tryboot.txt` for the candidate slot and reboot with the
   tryboot flag (`ab-slot-selector arm-candidate`);
-- **commit** = copy the candidate's selector into `config.txt`
-  (`ab-slot-selector commit`);
+- **commit** = rewrite `config.txt` to select the running candidate, after
+  first rewriting `tryboot.txt` to select the other slot, so a complete
+  fallback selector exists at every instant (`ab-slot-selector commit`,
+  refused unless the slot named is the one running);
 - **fallback** = do nothing: any reboot returns to `config.txt`'s slot.
 
 The device tree exposes whether the current boot is a tryboot
@@ -79,24 +81,32 @@ one board file at `/usr/lib/pi-ab-update/ab-update.conf` (authored as
 
 | On the device | Role |
 |---|---|
-| `ab-update` | front door: `status`, `check`, `install usb\|ota\|--file=`, `watch`, `log`, `--active-slot`, `--active-version`, `--state`, `--progress`; composes, never decides |
-| `ab-system-update` | the installer: finds the bundle (USB: exactly one `.mpupdate` at the top of a FAT32/exFAT/NTFS stick; OTA: `update-source.conf`; file), verifies the signature *before* parsing anything, streams `rootfs.img.xz` into the inactive root slot (dirty page cache bounded to 16/8 MiB meanwhile), extracts `boot.tar` into the inactive boot directory, checks both digests against the signed manifest, arms, reboots |
-| `ab-slot-selector` | `current-slot`, `normal-slot`, `arm-candidate`, `commit` (the `os_prefix` protocol above) |
-| `ab-update-commit` + `.service` | on every boot: if this is a candidate boot, wait for the health units (`AB_HEALTH_UNITS`, today `qt-demo-launcher.service`) to be active, then 30 s settle with no restart and `/data` writable, then commit. `Type=exec` so it never holds `multi-user.target` back. Otherwise records `fallback` when the durable state says a candidate was armed but this is the committed slot again |
-| `ab-update-check` | fetches only manifest + signature from the release source, verifies, publishes `available`/`up-to-date` |
+| `ab-update` (`/usr/local/bin`) | front door, composes and never decides. Commands: `status` (default), `check`, `install usb\|ota\|--file=PATH`, `watch`, `log [N]`. One-line queries: `--active-version`, `--active-slot`, `--active-partition`, `--active-revision`, `--inactive-version` (root), `--inactive-partition`, `--state`/`--update-state`, `--check-state`, `--progress`, `--refused-reason`. Option `--source-config=FILE` (bench OTA source). `install` needs root |
+| `ab-system-update` | the installer, sources `usb`, `ota`, `stdin` (`--file=` feeds `stdin`). In order: `validating` (lock, tools, running image); `scanning` (USB: exactly one `.mpupdate` at the top of a FAT32/exFAT/NTFS stick) or `fetching` (OTA: `update-source.conf`); the manifest's ed25519 signature is verified before the manifest is parsed; version (must differ from the running one), board and variant checks; `boot.tar` is staged and its digest checked *before anything is written*; `preparing` (the target's superblock cleared); `writing` (`rootfs.img.xz` streamed into the inactive root, digest computed on the way, dirty page cache bounded to 16/8 MiB); root digest checked; `checking` (e2fsck, then the slot label); `boot-files` (`boot.tar` into the inactive boot directory); `arming`; reboot with the tryboot flag |
+| `ab-slot-selector` | `current-slot`, `normal-slot`, `render-normal`, `render-candidate`, `arm-candidate`, `commit` (the `os_prefix` protocol above) |
+| `ab-update-commit` + `.service` | on every boot. On a candidate boot: wait up to `AB_COMMIT_WAIT_SECONDS` (120) for the health units (`AB_HEALTH_UNITS`, today `qt-demo-launcher.service`) to be active, then `AB_SETTLE_SECONDS` (30) with none restarted and `/data` writable, then commit. A refusal is logged with its reason, recorded in `update-refusal`, and (since pi-ab-update `27e3e3e`, `AB_ON_REFUSAL=reboot`) the device reboots to the committed slot at once. `Type=exec` so it never holds `multi-user.target` back. On a normal boot: records `fallback` when the durable state says a candidate was armed but another slot is running, or `committed` when the candidate is running as the normal slot (committed out of band) |
+| `ab-update-check` | fetches only manifest + signature from the release source, verifies, publishes `checking`, then `available` or `up-to-date` with the version, or the failure (`network`, `clock`, `signature`, `payload`, `compatibility`, `image`, `internal`) |
 | `ab-factory-reset`, `ab-factory-reset-boot` + `.service` | marker now, wipe on the next boot before any consumer of `/data`, reseed with the same skeleton the image build used |
 
 Telemetry for a UI: `/run/ab-update/progress` (`phase=`, `progress=`; phases
-`scanning`, `fetching`, `preparing`, `validating`, `writing`, `boot-files`,
-`checking`, `arming`, `failed-*`),
+in order `validating`, `scanning` or `fetching`, `preparing`, `writing`,
+`checking`, `boot-files`, `arming`, or `failed-<class>`),
 `/run/ab-update/status` (`state=committed|candidate-armed|fallback`,
-`version=`, `candidate_slot=`), `/run/ab-update/check`. Durable state:
-`/data/micropanel-system/update-state`.
+`version=`, `candidate_slot=`, and `refused_reason=` on a fallback the commit
+service refused), `/run/ab-update/check`. Durable, root-only:
+`/data/micropanel-system/update-state` (exactly `state`, `candidate_slot`,
+`version`, `variant` - never add a key: after a fallback the *older* image's
+commit service reads this file, strictly) and `update-refusal` beside it.
 
-Failure classes an operator sees: `failed-source` (no or unmountable stick),
-`failed-payload` (zero or two bundles), `failed-signature`,
-`failed-integrity` (digest mismatch, torn download), `failed-network`,
-`failed-target`, `failed-internal`. None of them arms anything.
+Failure classes (`phase=failed-<class>`), none of which arms anything:
+`source` (no stick, or none mountable), `payload` (zero or several bundles, a
+malformed bundle or manifest), `signature`, `compatibility` (other board or
+variant), `version` (already running this version), `integrity` (a digest
+mismatch; a corrupt or torn stream), `stall` (the write stopped progressing
+for `AB_STALL_SECONDS`), `target`, `selector`, `boot`, `image` (device-side
+problems preparing the other slot, or the running image's own manifest),
+`internal`, and on the OTA path only `network` and `clock`. System Manager
+maps each to a title and a next step (br-wrapper `SystemImageController.cpp`).
 
 The signing: a raw ed25519 signature over the manifest, key pinned in the
 image at `/usr/lib/pi-ab-update/update-signing-key.pub`. Private half on the
@@ -247,8 +257,24 @@ Things learned that are not obvious from the code:
 - A commit-service unit must never be `After=` its health units (ordering
   cycle) and must not be a oneshot in `multi-user.target` (holds the target
   back from the application). Both were found on hardware.
-- A refused candidate (health unit down) is logged and left running until
-  the next reboot rolls it back; see the open items below.
+- A refused candidate (health unit down) used to be logged and left running
+  until some later reboot rolled it back (up to 2.05). From pi-ab-update
+  `27e3e3e` it reboots to the committed slot at once and the reason is shown
+  with the fallback (`ab-update --refused-reason`). The *fallback* slot's
+  engine publishes the reason, so an image older than that change shows the
+  fallback without it.
+- Fixtures reboot nothing: every engine script that reboots takes
+  `AB_REBOOT_COMMAND`, and the suites run as root - a new test that reaches a
+  reboot path without that seam would reboot the build host.
+- The engine is shared: `board-configs/micropanel-touch` uses the same
+  `packages/pi-ab-update`, and `packages/pi-ab-update/tests/test_ab_layout_static.sh`
+  is touch's board static test. An engine change is a touch change too.
+- The system ships USB-only (owner, 2026-09-29): nothing on the device needs
+  the network, and `ab-update status` says nothing about a release source until
+  a check has run. The handler fixture's FAT32 case runs with a tripwire curl.
+- Rig access: key login is not set up; ssh as `pi` with the image password
+  (`DEFAULT_PASSWORD` in `base-configs/qt-bookworm/profile.conf`). A reflash
+  changes the host key. i2c-tools live in `/usr/sbin`, outside `pi`'s PATH.
 - The board reset twice mid-write on 2.03 while PID 1 was busy with the
   OLED unit's restart loop and the dirty cache held ~1 GB; the dirty bound,
   the 60 s runtime watchdog and the standing-down unit closed it (three
@@ -272,7 +298,8 @@ Branch state (2026-09-29): misc-tools A/B work is on `feature/A-B-Update`
 on their `main`. `hooks-ab.txt` and `hooks.txt` both clone micropanel
 `main`.
 
-Open items at the time of writing: reboot-on-refusal for a candidate whose
-health unit is down (prompt v11); online updates (see
-`micropanel-sdcard-online-ab-update.md`); the factory partition p7 is
-allocated but unused; merging misc-tools to `main`.
+Open items at the time of writing: online updates (deferred by the owner;
+see `micropanel-sdcard-online-ab-update.md`); the factory partition p7 is
+allocated but unused; merging misc-tools to `main` (the owner's call);
+System Manager could name `refused_reason=` on its rolled-back line
+(br-wrapper).

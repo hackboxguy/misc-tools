@@ -210,6 +210,18 @@ grep -Fq '[ "$lock_held" -eq 1 ] || return 0' "$handler"
 # RAM or /tmp".)
 if grep -Eq '^[^#]*((^|[^[:alnum:]_.-])/tmp([^[:alnum:]_.-]|$)|\$TMPDIR|\$\{TMPDIR)' "$handler"; then echo "test_system_update_handler_policy.sh: forbidden pattern found (line $LINENO)" >&2; exit 1; fi
 
+# E4: the dirty page cache is bounded before the slot is touched (16 MiB, 8 MiB
+# background) and the kernel's values come back on every exit. The loopback
+# fixture proves the values; this pins the order and the trap.
+grep -Fq "printf '16777216\\n' > \"\$vm_sysctl_dir/dirty_bytes\"" "$handler"
+grep -Fq "printf '8388608\\n' > \"\$vm_sysctl_dir/dirty_background_bytes\"" "$handler"
+bound_line=$(grep -nx 'bound_dirty_cache' "$handler" | cut -d: -f1)
+zero_line=$(grep -n '^dd if=/dev/zero of="\$target_root"' "$handler" | cut -d: -f1)
+[ -n "$bound_line" ] && [ -n "$zero_line" ] && [ "$bound_line" -lt "$zero_line" ] || {
+    echo 'ERROR: the dirty page cache is not bounded before the first write to the slot' >&2; exit 1; }
+awk '/^cleanup\(\) \{/ { c = 1 } c && /^    restore_dirty_cache$/ { found = 1 } c && /^}/ { c = 0 } END { exit !found }' "$handler" || {
+    echo 'ERROR: the exit trap does not restore the dirty page cache limits' >&2; exit 1; }
+
 # Failure phases are explicit protocol values, not a by-product of matching an
 # error sentence. Exercise the running-image edge that previously blamed USB.
 temporary_directory=$(mktemp -d)

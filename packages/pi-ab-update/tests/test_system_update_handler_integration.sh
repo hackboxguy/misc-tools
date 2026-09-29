@@ -180,10 +180,35 @@ chmod 0755 "$selector"
 
 reboot_command="$work/reboot"
 reboot_log="$work/reboot.log"
+# The reboot stand-in also records the dirty page cache limits in force at
+# that moment: the handler holds them bounded from the slot write on (E4).
+# Then it does what the kernel did when the byte limits were written - zero
+# the ratios - so that the handler's exit has to write the ratios back.
 printf '%s\n' \
     '#!/bin/sh' \
-    'printf "%s\\n" "$*" > "$REBOOT_LOG"' > "$reboot_command"
+    'printf "%s\\n" "$*" > "$REBOOT_LOG"' \
+    'printf "dirty_bytes=%s dirty_background_bytes=%s\\n" "$(cat "$VM_DIR/dirty_bytes")" "$(cat "$VM_DIR/dirty_background_bytes")" >> "$REBOOT_LOG"' \
+    'echo 0 > "$VM_DIR/dirty_ratio"; echo 0 > "$VM_DIR/dirty_background_ratio"' \
+    > "$reboot_command"
 chmod 0755 "$reboot_command"
+
+# A stand-in for /proc/sys/vm. The kernel keeps each limit as bytes or as a
+# ratio, writing one zeroes the other; plain files do not, so the expected
+# values below are what the handler wrote, not what a kernel would show.
+vm_dir="$work/vm"
+install -d "$vm_dir"
+set_vm() { # $1..$4 = dirty_bytes dirty_ratio dirty_background_bytes dirty_background_ratio
+    printf '%s\n' "$1" > "$vm_dir/dirty_bytes"
+    printf '%s\n' "$2" > "$vm_dir/dirty_ratio"
+    printf '%s\n' "$3" > "$vm_dir/dirty_background_bytes"
+    printf '%s\n' "$4" > "$vm_dir/dirty_background_ratio"
+}
+assert_vm() { # $1=case label, $2..$5 as set_vm
+    local got
+    got=$(cat "$vm_dir/dirty_bytes" "$vm_dir/dirty_ratio" "$vm_dir/dirty_background_bytes" "$vm_dir/dirty_background_ratio" | tr '\n' ' ')
+    [ "$got" = "$2 $3 $4 $5 " ] || {
+        echo "ERROR: $1: dirty limits after exit are '$got', expected '$2 $3 $4 $5 '" >&2; exit 1; }
+}
 
 # The handler resolves its own block-device inventory. Present a synthetic one
 # for the USB scan and delegate every other query to the real tool - as the
@@ -213,6 +238,8 @@ runtime_dir="$work/runtime"
 run_handler() { # $1=source enum; stdin is the bundle for the `stdin` source
     SELECTOR_LOG="$selector_log" \
     REBOOT_LOG="$reboot_log" \
+    VM_DIR="$vm_dir" \
+    AB_VM_SYSCTL_DIR="$vm_dir" \
     AB_IMAGE_MANIFEST="$image_manifest" \
     AB_SLOT_SELECTOR="$selector" \
     AB_BOOT_DIR="$boot_mount" \
@@ -230,6 +257,7 @@ run_handler() { # $1=source enum; stdin is the bundle for the `stdin` source
 reset_target() {
     rm -f "$selector_log" "$reboot_log"
     rm -rf "$state_dir"
+    set_vm 0 20 0 10
     e2label "${loop}p6" MP_ROOT_STALE
     rm -rf "$boot_mount/B"
     install -d "$boot_mount/B"
@@ -253,6 +281,10 @@ assert_candidate_armed() { # $1=case label
     grep -Fqx 'version=fixture' "$state_dir/update-state"
     grep -Fqx 'arm-candidate B' "$selector_log"
     grep -Fqx '0 tryboot' "$reboot_log"
+    grep -Fqx 'dirty_bytes=16777216 dirty_background_bytes=8388608' "$reboot_log" || {
+        echo "ERROR: $1: the dirty page cache was not bounded through the write" >&2; exit 1; }
+    # Ratios written back (the stand-in zeroed them), byte limits untouched.
+    assert_vm "$1" 16777216 20 8388608 10
     grep -Fqx 'phase=arming' "$runtime_dir/progress"
     grep -Fqx 'progress=100' "$runtime_dir/progress"
     printf '  ok  %s\n' "$1"
@@ -325,7 +357,23 @@ assert_candidate_armed 'bundle streamed through a pipe armed candidate B'
 
 # --- 2. integrity refusal on the pipe path --------------------------------
 reset_target
+# Byte-valued limits this time: a refusal after the write started restores
+# them as bytes (dirty) and as the ratio (background), whichever was in force.
+set_vm 33554432 0 0 10
 expect_failure 'one changed rootfs byte' failed-integrity stdin "$work/corrupt.mpupdate"
+assert_vm 'one changed rootfs byte' 33554432 0 8388608 10
+[ ! -e "$runtime_dir/private/dirty-limits.saved" ] || {
+    echo 'ERROR: the saved dirty limits outlived a restore' >&2; exit 1; }
+# A run killed before its trap (SIGKILL) left the limits bounded and its saved
+# originals behind; the next run restores those originals, not the bounded
+# values it finds.
+reset_target
+set_vm 16777216 0 8388608 0
+install -d -m0700 "$runtime_dir/private"
+printf '%s\n' dirty_bytes=0 dirty_ratio=20 dirty_background_bytes=0 dirty_background_ratio=10 \
+    > "$runtime_dir/private/dirty-limits.saved"
+expect_failure 'dirty limits left by a killed run' failed-integrity stdin "$work/corrupt.mpupdate"
+assert_vm 'dirty limits left by a killed run' 16777216 20 8388608 10
 # The pre-stream superblock clear is deliberate: a refused or interrupted
 # transfer must leave a dirty *unlabelled* target, never a second MP_ROOT_B.
 [ "$(e2label "${loop}p6" 2>/dev/null || true)" != MP_ROOT_B ] || {

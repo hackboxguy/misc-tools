@@ -65,6 +65,9 @@ lsblk_command=${AB_LSBLK:-lsblk}
 # phase, so it detects its own stall instead of relying on the caller's
 # ceiling. Every other phase remains covered by that ceiling.
 stall_seconds=$(ab_setting "${AB_STALL_SECONDS:-}" AB_STALL_SECONDS 300)
+# Where the dirty page cache limits live; a seam so the fixture can check that
+# the write bounds them and the exit restores them, without touching the host.
+vm_sysctl_dir=${AB_VM_SYSCTL_DIR:-/proc/sys/vm}
 # The release public key is pinned in the image at build time. Verification is
 # a raw ed25519 check over the manifest bytes - deliberately not an X.509
 # chain, so it has no validity window and works on a device whose clock is
@@ -238,6 +241,55 @@ terminal_failure_published() {
     grep -q '^phase=failed-' "$progress_file"
 }
 
+# The slot write streams gigabytes at an SD card that absorbs them far slower
+# than xz produces them. With the kernel's default limits (a percentage of
+# RAM) that is hundreds of megabytes of dirty pages, flushed in bursts that
+# stall every other writer - journald, the application, the systemd watchdog
+# ping path - for seconds at a time; the bench board reset during writes (E4).
+# For the duration of the install the dirty cache is held to 16 MiB (writers
+# throttled from there) with background flushing from 8 MiB, which keeps the
+# card busy continuously instead of in bursts. The kernel's own values are
+# restored on every exit. A limit is either bytes or a ratio: writing one
+# zeroes the other, so what was in force is what gets written back. The
+# kernel's values are kept in the runtime directory, not only in this shell: a
+# run killed before its trap (SIGKILL) leaves the file, and the next run takes
+# the originals from it instead of saving the bounded values as if they were
+# the kernel's. /run is tmpfs, and a reboot restores the defaults anyway.
+dirty_saved_file=$private_runtime_dir/dirty-limits.saved
+dirty_bounded=0
+bound_dirty_cache() {
+    local name value saved=""
+    if [ ! -s "$dirty_saved_file" ]; then
+        for name in dirty_bytes dirty_ratio dirty_background_bytes dirty_background_ratio; do
+            value=$(cat "$vm_sysctl_dir/$name" 2>/dev/null) || return 0
+            [[ $value =~ ^[0-9]+$ ]] || return 0
+            saved="$saved$name=$value"$'\n'
+        done
+        printf '%s' "$saved" > "$dirty_saved_file" || return 0
+    fi
+    dirty_bounded=1
+    { printf '16777216\n' > "$vm_sysctl_dir/dirty_bytes" &&
+      printf '8388608\n' > "$vm_sysctl_dir/dirty_background_bytes"; } 2>/dev/null ||
+        printf '[INFO] could not bound the dirty page cache; writing with the kernel defaults\n' >&2
+}
+restore_dirty_cache() {
+    [ "$dirty_bounded" = 1 ] && [ -s "$dirty_saved_file" ] || return 0
+    local name key value
+    declare -A was=()
+    while IFS='=' read -r key value; do
+        [[ $key =~ ^dirty_(background_)?(bytes|ratio)$ && $value =~ ^[0-9]+$ ]] && was[$key]=$value
+    done < "$dirty_saved_file"
+    [ "${#was[@]}" -eq 4 ] || return 0
+    for name in dirty dirty_background; do
+        if [ "${was[${name}_bytes]}" != 0 ]; then
+            printf '%s\n' "${was[${name}_bytes]}" > "$vm_sysctl_dir/${name}_bytes"
+        else
+            printf '%s\n' "${was[${name}_ratio]}" > "$vm_sysctl_dir/${name}_ratio"
+        fi
+    done 2>/dev/null && rm -f -- "$dirty_saved_file"
+    dirty_bounded=0
+}
+
 cleanup() {
     local status=$?
     # V5-01: the signal traps re-enter this handler through EXIT. Disarm every
@@ -258,6 +310,7 @@ cleanup() {
     fi
     [ -z "$hash_pid" ] || wait "$hash_pid" 2>/dev/null || true
     [ -z "$count_pid" ] || wait "$count_pid" 2>/dev/null || true
+    restore_dirty_cache
     rm -f -- "$hash_fifo" "$count_fifo" "$hash_output" "$count_output" "$dd_pid_file" \
         "$header_file" "$manifest_file" "$signature_file" "$boot_archive" "$fetch_stderr_file"
     # O-01: the bundle is still open on fd 0/3 on every failure path, and an
@@ -813,6 +866,7 @@ findmnt -rn -S "$target_root" >/dev/null 2>&1 && die target 'refusing to overwri
 # label-neutral artifact, a power cut can leave only an unlabeled dirty
 # inactive partition, never a duplicate label for the committed slot.
 write_update_progress preparing 0
+bound_dirty_cache
 dd if=/dev/zero of="$target_root" bs=1M count=1 conv=fsync status=none
 
 # The multi-gigabyte path streams straight from the bundle to the inactive

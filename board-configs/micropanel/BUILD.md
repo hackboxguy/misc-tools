@@ -32,11 +32,17 @@ failed install prints `line 187: [: missing ']'`; pi-ab-update `97dd66a`) and
 the 20 s runtime watchdog, so they are the bench references, not the first
 release.
 
+**2.04 and 2.05 passed the bench** (§7, E4 closed) and are good, but a
+candidate the commit service refuses stays up until some later reboot rolls
+it back. **2.06 (image + payload) and 2.07 (payload)** add the reboot on
+refusal (pi-ab-update `27e3e3e`) and the status screen that says nothing
+about a release source on a device that never checked (`a8edb1a`).
+
 The **release baseline** is built with the production release URL (no
 `--release-url-template`), so the bench-tested image is byte for byte the
-shippable one: pending the bench, `2.04` (image + payload) is the first
-shippable image and `2.05` (payload) the first bundle; a later fix becomes
-`2.06`, `2.07`, ... Version numbers
+shippable one: pending the bench, `2.06` (image + payload) is the first
+shippable image and `2.07` (payload) the first bundle; a later fix becomes
+`2.08`, `2.09`, ... Version numbers
 are never reissued: the engine refuses an update whose version equals the
 running one, and a reissued number makes bench evidence ambiguous.
 (Single-slot keeps its own 01.xx line.)

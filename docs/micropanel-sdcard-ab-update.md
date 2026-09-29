@@ -208,7 +208,8 @@ Rules that bit before:
 An image + a bundle for the next version is two builds: the image build
 (`--payload` gives you its bundle too) for a version people will flash, and
 a payload-only version after it so a device has something newer to install.
-Today's pair is 2.04 (image + bundle) and 2.05 (bundle).
+Today's pair is 2.06 (image + bundle) and 2.07 (bundle), pending their
+bench; 2.04/2.05 passed theirs (`BUILD.md` §Versions).
 
 ## 8. Flashing, updating, resetting (device side)
 

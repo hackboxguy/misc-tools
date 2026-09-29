@@ -92,11 +92,21 @@ display file (it is not on `/data`).
 
 A candidate slot commits only when every `AB_HEALTH_UNITS` unit stays active
 with no restarts for the settle window. Today that is `qt-demo-launcher.service`
-alone: `micropanel.service` restarts in the Pi 4 + 983 display-diagnostics
-mode, which has no SSD1306 menu display. When the standalone mode (SSD1306 +
-navigation board) is on the bench, either the daemon idles instead of exiting
-without a display and returns to the health units, or that mode gets its own
-`ab-update.conf` through a build variant.
+alone.
+
+**`micropanel.service` inactive is the expected state on a head-unit board.**
+A board with no SSD1306 on i2c-3 (and no USB dongle) runs on the 983HH adapter
+as an automotive head unit, not as the hand-held flashing tool, and there the
+OLED menu is not wanted (owner, 2026-09-29). The unit's `ExecCondition=`
+(`micropanel-oled-present.sh`, micropanel repo) probes 0x3c once per boot;
+with nothing there systemd skips the unit - `inactive (dead)`, "Skipped due to
+'exec-condition'", not failed, never restarted - until the next boot probes
+again. With the panel present `Restart=on-failure` still covers a crash.
+Before this (images up to 2.03) the unit restarted every 5 s for as long as
+the board ran (5491 restarts overnight on the bench rig). Because it is
+inactive on a head unit, it cannot be a health unit; if the flashing-tool role
+ever needs its own health check, that mode gets its own `ab-update.conf`
+through a build variant.
 
 ## Services changed by the appliance conversion
 

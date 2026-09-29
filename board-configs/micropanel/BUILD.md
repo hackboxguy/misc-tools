@@ -211,6 +211,11 @@ returns to the committed slot and the state reads `fallback`.
 The display type (`/boot/firmware/micropanel-display.txt`) is device-owned
 and survives updates and factory resets.
 
+`micropanel.service` **inactive** is expected on a head-unit board (no SSD1306
+on i2c-3, no USB dongle): its `ExecCondition=` skips it for that boot
+(`systemctl status micropanel` says "Skipped due to 'exec-condition'"). It is
+not a fault, and not a health unit. See PERSISTENCE.md, "Update health".
+
 ## 7. Acceptance records
 
 Placeholders; Step 7 fills them from the bench reports.

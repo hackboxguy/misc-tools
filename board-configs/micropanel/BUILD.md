@@ -8,11 +8,11 @@ design and the persistence contract are in `PERSISTENCE.md`; the engine is
 > br-wrapper, which the sources stage pulls on every run; without the flag any
 > br-wrapper commit triggers a ~45-minute kernel rebuild.
 
-> **Status (2026-09-28):** A/B is opt-in (`--layout=ab`) and lives on the
-> `feature/A-B-Update` branch of both misc-tools and micropanel. `hooks-ab.txt`
-> clones micropanel `feature/A-B-Update`; flip it back to `main` when the split
-> boot configuration lands there. This file is started in Step 6 and completed
-> in Step 7.
+> **Status (2026-09-29):** A/B is opt-in (`--layout=ab`) and lives on the
+> `feature/A-B-Update` branch of misc-tools. Every other repo it builds from is
+> on its default branch: micropanel's A/B work (split boot configuration, HPD
+> toggle, the no-SSD1306 ExecCondition) was merged to micropanel `main` on
+> 2026-09-29, and `hooks-ab.txt` clones `main`, as `hooks.txt` does.
 
 ## Versions
 

@@ -147,14 +147,14 @@ done
 
 # --- Hook lists: the A/B list is hooks.txt plus the appliance conversion, last -----
 hook_lines() { grep -Ev '^[[:space:]]*(#|$)' "$1"; }
-# Only the micropanel line's ref may differ: the A/B image needs a micropanel
-# branch the single-slot image does not (see the comment in hooks-ab.txt).
-mask_micropanel_ref() { sed -E 's#^(packages/micropanel-hook\.sh\|[^|]*\|)[^|]*(\|)#\1<ref>\2#'; }
+# Line for line, refs included: the micropanel A/B work is on micropanel main
+# since 2026-09-29, so no A/B-only branch remains (the build is made from each
+# repo's default branch).
 single_hooks=$(hook_lines "$board/hooks.txt")
 single_count=$(printf '%s\n' "$single_hooks" | wc -l)
 ab_prefix=$(hook_lines "$board/hooks-ab.txt" | head -n "$single_count")
-[ "$(printf '%s\n' "$ab_prefix" | mask_micropanel_ref)" = "$(printf '%s\n' "$single_hooks" | mask_micropanel_ref)" ] || \
-    fail 'hooks-ab.txt no longer starts with the lines of hooks.txt (only the micropanel ref may differ)'
+[ "$ab_prefix" = "$single_hooks" ] || \
+    fail 'hooks-ab.txt no longer starts with exactly the lines of hooks.txt'
 # ...and that ref must exist, or git_remote_rev would stamp the literal name and
 # the in-chroot clone would fail 40 minutes in. Skipped only without network.
 ab_micropanel=$(hook_lines "$board/hooks-ab.txt" | grep '^packages/micropanel-hook\.sh|')

@@ -80,7 +80,7 @@ Jobs, all `runs-on: [self-hosted, micropanel-build]`, all sequential:
 
 1. **detect** — writes `inputs.lock`: one line per input with its current
    revision, from `git ls-remote` (no clone), for
-   - misc-tools (`feature/A-B-Update` until the merge, then `main`),
+   - misc-tools `main` (the A/B work is on it since 2026-09-29),
    - every git hook line of `board-configs/micropanel/hooks-ab.txt`
      (micropanel `main`, br-wrapper `main`, als-dimmer, disp-report-card,
      kodi-custom-addons, streamdeck-ctrl `display-control`, xc3sprog,
@@ -170,11 +170,16 @@ month and a fresh clone of media-files alone is 86 MB).
   installs) and unmistakable next to the `2.xx` release line. The builder
   accepts any version string.
 - **Nightly signing key:** its own key at `/etc/micropanel/nightly-signing/`
-  (created once with `ab-release-key.sh`, root 0700), selected by exporting
-  `AB_RELEASE_KEY_DIR` for nightly runs — the builder honours the
-  environment over the board's `AB_RELEASE_KEY_DIR` (verify this on the
-  first run; `build-image.sh` exports it at line ~498). An image pins the
-  public half of the key that built it, so **nightly bundles install only
+  (created once with `ab-release-key.sh`, root 0700), selected with
+  `--signing-key=/etc/micropanel/nightly-signing/ed25519-release.key` on the
+  nightly `build-image.sh` command. That option sets both the key the bundle
+  is signed with and the public half pinned in the image (`build-image.sh`,
+  `RELEASE_SIGNING_KEY` / `RELEASE_SIGNING_PUBLIC_KEY`). **Exporting
+  `AB_RELEASE_KEY_DIR` does not work:** `board.conf` is sourced after the
+  environment and sets it, so the release key would silently sign the
+  nightly. The job should check the pinned key's hash in the built image
+  against the nightly key before publishing. An image pins the public half of
+  the key that built it, so **nightly bundles install only
   on devices flashed with a nightly image, and release bundles only on
   release images.** This is the safety line that keeps an experimental
   build off a fielded device that happens to have a USB stick plugged in.
@@ -241,9 +246,10 @@ month and a fresh clone of media-files alone is 86 MB).
 
 ## 10. Open points for the owner
 
+Settled: the nightly follows misc-tools `main` (the A/B work was merged into
+it on 2026-09-29; `feature/A-B-Update` is kept for history only).
+
 - Notification channel (email / ntfy / Telegram / a GitHub issue comment).
 - Whether the smoke-test rig is the OTS-OLED head unit or a second device
   kept on the nightly key.
 - Which repository the rh850 and pixelpipe-fpga jobs live in.
-- The misc-tools branch the nightly follows until `feature/A-B-Update` is
-  merged to `main`.

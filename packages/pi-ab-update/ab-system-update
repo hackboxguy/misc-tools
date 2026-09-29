@@ -184,7 +184,7 @@ fetch_terminated() {
     [ -n "${fetch_pid:-}" ] || return 1
     kill -0 "$fetch_pid" 2>/dev/null || return 0
     [ "$(awk '{ n = split($0, after, ") "); split(after[n], f, " "); print f[1] }' \
-         "/proc/$fetch_pid/stat" 2>/dev/null)" = Z
+         "/proc/$fetch_pid/stat" 2>/dev/null)" = Z ]
 }
 
 fetch_exit_status() { # prints curl's exit status, or nothing if not knowable

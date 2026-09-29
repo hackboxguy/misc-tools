@@ -258,13 +258,25 @@ assert_candidate_armed() { # $1=case label
     printf '  ok  %s\n' "$1"
 }
 
+# An operator must never see the shell's own complaints ("line 187: [: missing
+# `]'"): a malformed test in the handler is a bug even when the run fails for
+# its real reason anyway. bash -n cannot see those; only running the failure
+# paths can.
+assert_no_shell_diagnostic() { # $1=case label; reads $work/handler.stderr
+    if grep -E ': line [0-9]+: ' "$work/handler.stderr" >&2; then
+        echo "ERROR: $1: the handler printed a shell diagnostic (above)" >&2
+        exit 1
+    fi
+}
+
 expect_failure() { # $1=case label $2=expected phase $3=source enum [stdin file]
     local label=$1 phase=$2 source=$3 input=${4:-/dev/null}
     rm -f "$runtime_dir/progress"
-    if run_handler "$source" < "$input" >/dev/null 2>&1; then
+    if run_handler "$source" < "$input" >/dev/null 2>"$work/handler.stderr"; then
         echo "ERROR: $label was accepted" >&2
         exit 1
     fi
+    assert_no_shell_diagnostic "$label"
     grep -Fqx "phase=$phase" "$runtime_dir/progress" || {
         echo "ERROR: $label reported $(sed -n 's/^phase=//p' "$runtime_dir/progress") not $phase" >&2
         exit 1
@@ -410,9 +422,10 @@ if command -v python3 >/dev/null 2>&1; then
     # a fixed byte count would silently copy this small fixture whole.
     head -c "$(( $(stat -c %s "$bundle") * 3 / 4 ))" "$bundle" > "$ota_serve/truncated.mpupdate"
     printf 'BUNDLE_URL=http://127.0.0.1:%s/truncated.mpupdate\n' "$ota_port" > "$ota_config"
-    if AB_SOURCE_CONFIG="$ota_config" run_handler ota >/dev/null 2>&1; then
+    if AB_SOURCE_CONFIG="$ota_config" run_handler ota >/dev/null 2>"$work/handler.stderr"; then
         echo 'ERROR: a truncated download was accepted' >&2; exit 1
     fi
+    assert_no_shell_diagnostic 'truncated download'
     truncated_phase=$(sed -n 's/^phase=//p' "$runtime_dir/progress")
     case "$truncated_phase" in
         failed-payload|failed-integrity|failed-network)
@@ -447,9 +460,10 @@ SLOW
     chmod 0755 "$work/slow-curl"
     reset_target
     slow_started=$SECONDS
-    if AB_CURL="$work/slow-curl" AB_SOURCE_CONFIG="$ota_config" run_handler ota >/dev/null 2>&1; then
+    if AB_CURL="$work/slow-curl" AB_SOURCE_CONFIG="$ota_config" run_handler ota >/dev/null 2>"$work/handler.stderr"; then
         echo 'ERROR: a bundle signed by an untrusted key was accepted' >&2; exit 1
     fi
+    assert_no_shell_diagnostic 'untrusted key mid-download'
     slow_elapsed=$((SECONDS - slow_started))
     slow_phase=$(sed -n 's/^phase=//p' "$runtime_dir/progress")
     [ "$slow_phase" = failed-signature ] || {
@@ -458,6 +472,27 @@ SLOW
         echo "ERROR: refusal waited ${slow_elapsed}s for the download to finish" >&2; exit 1; }
     printf '  ok  %-46s -> %s (%ss)\n' 'mid-download failure not blamed on transport' \
         "$slow_phase" "$slow_elapsed"
+
+    # The opposite case: the fetch itself died part way (curl exit 18, partial
+    # transfer) while the handler was still reading. Curl is then an unreaped
+    # zombie, which still answers kill -0; only its state in /proc says it has
+    # exited, and that is what lets the handler blame the transport, which is
+    # what actually failed.
+    cat > "$work/dying-curl" <<DYING
+#!/bin/sh
+head -c $(( $(stat -c %s "$bundle") * 3 / 4 )) "$bundle"
+exit 18
+DYING
+    chmod 0755 "$work/dying-curl"
+    reset_target
+    if AB_CURL="$work/dying-curl" AB_SOURCE_CONFIG="$ota_config" run_handler ota >/dev/null 2>"$work/handler.stderr"; then
+        echo 'ERROR: a download that died part way was accepted' >&2; exit 1
+    fi
+    assert_no_shell_diagnostic 'download died part way'
+    dying_phase=$(sed -n 's/^phase=//p' "$runtime_dir/progress")
+    [ "$dying_phase" = failed-network ] || {
+        echo "ERROR: a download that died part way reported $dying_phase, not failed-network" >&2; exit 1; }
+    printf '  ok  %-46s -> %s\n' 'download died part way blamed on transport' "$dying_phase"
 
     # A server that accepts the connection and then goes quiet. Until the
     # rootfs member starts there is no other detector watching - the engine's

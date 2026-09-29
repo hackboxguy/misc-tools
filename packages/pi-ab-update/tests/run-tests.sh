@@ -20,6 +20,17 @@ run() { # $1=label, rest=command
 }
 
 run 'static contract'        sh "$engine/tests/test_ab_layout_static.sh"
+# Soft gate: shellcheck finds what bash -n cannot (a `[` with no `]` parses
+# fine and fails only when run). Errors only; skipped when not installed.
+if command -v shellcheck >/dev/null 2>&1; then
+    run 'shellcheck (errors)' shellcheck -S error -s bash \
+        "$engine"/ab-system-update "$engine"/ab-update "$engine"/ab-update-check \
+        "$engine"/ab-update-commit "$engine"/ab-slot-selector "$engine"/ab-factory-reset \
+        "$engine"/ab-factory-reset-boot "$engine"/ab-finalize-layout.sh \
+        "$engine"/ab-make-payload.sh "$engine"/ab-verify-image.sh "$engine"/ab-release-key.sh
+else
+    printf '\nSKIP: shellcheck is not installed (soft gate)\n'
+fi
 run 'handler policy'         sh "$engine/tests/test_system_update_handler_policy.sh" "$engine/ab-system-update"
 run 'bundle reader'          bash "$engine/tests/test_update_bundle_reader.sh" "$engine/ab-system-update"
 run 'commit policy'          sh "$engine/tests/test_update_commit_policy.sh" "$engine/ab-update-commit" "$engine/ab-update-commit.service"

@@ -166,6 +166,10 @@ if [ -z "$running_board" ]; then
         *) die compatibility 'unsupported Raspberry Pi board' ;;
     esac
 fi
+# As the installer does: a board the running image does not enable is refused
+# before anything is fetched, so the check never offers what install refuses.
+safe_boards "$running_boards" || die image 'running board allow-list is unsafe'
+contains_board "$running_boards" "$running_board" || die compatibility 'this board is not enabled by the running image'
 
 manifest_url=$(source_config_value MANIFEST_URL) || die image 'no release manifest URL is configured'
 signature_url=$(source_config_value MANIFEST_SIG_URL) || die image 'no release signature URL is configured'

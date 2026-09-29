@@ -114,6 +114,15 @@ run_check
 [ "$(state)" = compatibility ] && ok 'release for another board' 'compatibility' \
     || fail "wrong board: state=$(state)"
 
+# --- a board the running image itself does not enable (the installer refuses
+# it; the check must not offer it) -----------------------------------------
+write_release 00.35
+sed -i 's/^SLOT_COMPATIBLE_BOARDS=pi4$/SLOT_COMPATIBLE_BOARDS=pi5/' "$image_manifest"
+run_check
+[ "$(state)" = compatibility ] && ok 'board not enabled by the running image' 'compatibility' \
+    || fail "board not enabled: state=$(state)"
+sed -i 's/^SLOT_COMPATIBLE_BOARDS=pi5$/SLOT_COMPATIBLE_BOARDS=pi4/' "$image_manifest"
+
 # --- a server that connects and then says nothing --------------------------
 # The failure mode --max-time exists for: without it this holds "checking" until
 # the client's reply timeout, for two files totalling a few hundred bytes.

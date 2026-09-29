@@ -21,7 +21,7 @@ design and the persistence contract are in `PERSISTENCE.md`; the engine is
 **The shippable line starts at `2.00`, built from misc-tools `main` at or
 after `00a7bea`** (the commit `main` was fast-forwarded to when the A/B work
 was merged, 2026-09-29): **`2.00` (image + payload) is the first release and
-`2.01` (payload) its first update.** Record the misc-tools SHA each release
+`2.01` (payload) its first update.** The first pair was built from `58df54c` (2026-09-29, §7). Record the misc-tools SHA each release
 was built from next to its version (§7); the image manifest records every
 other source revision (`BR_WRAPPER_REVISION`, `MICROPANEL_REVISION`, ...).
 
@@ -271,3 +271,4 @@ after boot; each logged
 | ssh host keys across slot switches | identical fingerprint before and after a reboot that also switched slots (restore unit before sshd, regenerators masked); keys change only on a fresh flash or a factory reset | 2026-09-29 | 2.06/2.07 |
 | Fresh 2.06 card | `sudo ab-update` shows **no check section**; the app offers the stick's 2.07 with the signature line and *Hold to install*; badge *Image update on USB*; `ab-factory-reset --yes` wiped and reseeded `/data` (marker gone), display type kept, back up unaided | 2026-09-29 | 2.06 (fresh card) |
 | **Hand-held install on the panel, Ethernet unplugged** (owner) | *Hold to install* -> 2.07 written, verified, armed, rebooted; **committed on B at 48.8 s**; app log complete (`exit 0`), no lock, no mount; the section reads *Running 2.07 (committed)* and the stick *Already running this version* | 2026-09-29 | 2.06 -> 2.07 |
+| **Release pair 2.00/2.01 from `main`** (owner) | 2.00 image (sha256 `cdf18375…`, misc-tools `58df54c`, micropanel `c4608b6`, br-wrapper `d950c15`, archsp6 `8e78cb6`) flashed to a fresh card, booted on the OTS-OLED rig; 2.01 bundle (`bdb2ff2c…`) on the stick, installed by hand from System Manager: written, armed, rebooted, **committed on B at 48.0 s**; app log complete, no lock, no failed unit, display type kept, no check section (USB-only). 2.00 bundle `fdd436da…` | 2026-09-29 | 2.00 -> 2.01 |

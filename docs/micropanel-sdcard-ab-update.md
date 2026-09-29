@@ -307,3 +307,15 @@ see `micropanel-sdcard-online-ab-update.md`); the factory partition p7 is
 allocated but unused; the automated build (`micropanel-automated-build-setup.md`).
 System Manager names the refusal reason on its rolled-back line from
 br-wrapper `d950c15`.
+
+## 11. Release record
+
+| Version | Built from | Carries | Proof |
+|---|---|---|---|
+| **2.00** image + bundle | misc-tools `main` `58df54c`, 2026-09-29 | micropanel `c4608b6`, br-wrapper `d950c15`, archsp6 `8e78cb6`; `AB_ON_REFUSAL=reboot`, 60 s watchdog, dirty-cache bound, USB-only status | image sha256 `cdf18375…`, bundle `fdd436da…`; flashed by the owner, booted on the OTS-OLED rig |
+| **2.01** bundle | same | same | bundle sha256 `bdb2ff2c…`; installed by hand from System Manager on the panel, committed on B at 48.0 s, app log complete |
+
+Full hashes are in `~/pi-image-workspace/out/micropanel-ab/` and in the
+report `tmp-docs/micropanel-ota-update-report-v12.md`'s successor; the
+acceptance row is `BUILD.md` §7. The next release is `2.02`, and it takes a
+bench like `BUILD.md` §7's rows before it is handed out.

@@ -101,6 +101,14 @@ slim_list="$board/slim-remove.txt"
 bash -n "$slim_hook"
 [ -x "$slim_hook" ] || { echo "slim hook is not executable: $slim_hook" >&2; exit 1; }
 grep -Fqx 'IMAGE_SLIM_HOOK=packages/micropanel-touch-slim.sh' "$board/board.conf"
+# The runtime-deps guard's membership test must not pipe the package inventory
+# into grep -q under pipefail (SIGPIPE made an installed package read as
+# removed; it failed a micropanel build).
+if grep -Eq 'printf .*"\$satisfied" *\| *grep' "$slim_hook"; then
+    echo "slim hook pipes the package inventory into grep -q (SIGPIPE under pipefail): $slim_hook" >&2; exit 1
+fi
+grep -Fq 'grep -Fqx -- "$pkg" <<< "$satisfied"' "$slim_hook" || {
+    echo "slim hook lost its here-string membership test: $slim_hook" >&2; exit 1; }
 grep -Fqx 'SLIM_REMOVE=slim-remove.txt' "$board/board.conf"
 # A trailing comment is fine: board.conf is sourced as shell.
 grep -Eq '^SLIM_MAX_ROOT_MB=[1-9][0-9]*([[:space:]]+#.*)?$' "$board/board.conf"

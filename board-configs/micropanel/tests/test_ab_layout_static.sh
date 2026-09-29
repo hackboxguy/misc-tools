@@ -227,6 +227,11 @@ bash -n "$support/micropanel-debug-journal"
 grep -Fqx 'ConditionKernelCommandLine=|micropanel.debug-journal=1' "$support/micropanel-debug-journal.service" || fail 'debug-journal unit is not gated on the cmdline token'
 grep -Fqx 'ConditionPathExists=|/data/micropanel-system/debug/enabled' "$support/micropanel-debug-journal.service" || fail 'debug-journal unit is not gated on the marker'
 grep -Fq 'systemctl enable micropanel-debug-journal.service' "$appliance" || fail 'appliance hook does not enable the debug-journal unit'
+# Its kernel-log mirror must be unbuffered (block-buffered, it stopped at 6 s of
+# uptime on every boot) and its files ordered by a counter, not the fake clock.
+grep -Fq 'stdbuf -oL dmesg -w 2>&1 | capped "$prefix.dmesg" &' "$support/micropanel-debug-journal" || fail 'debug-journal dmesg mirror is not line-buffered'
+grep -Fq '"$dir/boot-counter"' "$support/micropanel-debug-journal" || fail 'debug-journal files are not ordered by a boot counter'
+grep -Fq 'sample_line >> "$prefix.sample"' "$support/micropanel-debug-journal" || fail 'debug-journal has no sampler'
 grep -Fq 'systemctl enable micropanel-machine-id.service micropanel-ssh-host-keys.service' "$appliance" || \
     fail 'appliance hook does not enable the restore units'
 # The config.txt include split: the hook points pi-config-txt.sh at the display

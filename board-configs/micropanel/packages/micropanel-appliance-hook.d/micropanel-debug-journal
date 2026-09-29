@@ -4,18 +4,27 @@
 # unless the kernel command line carries micropanel.debug-journal=1 or
 # /data/micropanel-system/debug/enabled exists.
 #
-# Per boot, in /data/micropanel-system/debug/:
-#   <stamp>-<boot-id>.start    what can be known at start: the previous boot's
-#                              journal (empty on a volatile journal - which is
-#                              why the mirrors exist), systemd-analyze timing,
-#                              the watchdog settings and the firmware's reset
-#                              and throttle flags
-#   <stamp>-<boot-id>.dmesg    `dmesg -w`, line by line
-#   <stamp>-<boot-id>.journal  `journalctl -f -o short-monotonic`, line by line
-# Each mirror stops at DEBUG_JOURNAL_MAX_BYTES; the newest DEBUG_JOURNAL_KEEP
-# boots are kept. The files are written a line at a time and the filesystem is
-# synced once a minute, so a reset mid-boot leaves them readable up to the
-# last sync.
+# Per boot, in /data/micropanel-system/debug/, named boot-<NNNN>-<boot-id>:
+#   .start    at start: cmdline, watchdog settings and status, the firmware's
+#             reset and throttle flags, the previous boot's journal (empty on
+#             a volatile journal - the reason the mirrors exist)
+#   .late     90 s later: systemd-analyze timing, once boot has finished
+#   .dmesg    the kernel log, a record per line as it is written
+#   .journal  `journalctl -b -f -o short-monotonic`, a line per entry
+#   .sample   every 5 s: uptime, throttle flags, load, memory and I/O pressure
+#             (PSI "full avg10"), requests in flight on the SD card, and the
+#             update engine's progress when an update is running
+#
+# NNNN is a boot counter kept in the directory. The Pi has no RTC: the clock at
+# this point is fake-hwclock's, the same on every boot of a session, so it
+# cannot order anything. The newest DEBUG_JOURNAL_KEEP boots are kept; each
+# file stops at DEBUG_JOURNAL_MAX_BYTES.
+#
+# What survives a reset: every line is handed to the kernel as soon as it is
+# produced (no stdio buffering anywhere in the pipelines), so what bounds the
+# loss is ext4's own journal commit, 5 s by default - measured on the bench,
+# both mirrors ended 0-30 s before a reset. The once-a-minute `sync -f` below
+# is a second, coarser bound, not the main one.
 set -u
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -23,15 +32,22 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 dir=${DEBUG_JOURNAL_DIR:-/data/micropanel-system/debug}
 max_bytes=${DEBUG_JOURNAL_MAX_BYTES:-20971520}
 keep=${DEBUG_JOURNAL_KEEP:-5}
+sample_seconds=${DEBUG_JOURNAL_SAMPLE_SECONDS:-5}
+late_seconds=${DEBUG_JOURNAL_LATE_SECONDS:-90}
+progress_file=${DEBUG_JOURNAL_PROGRESS_FILE:-/run/ab-update/progress}
 
 install -d -m0700 "$dir" || exit 1
 boot_id=$(tr -d '-' < /proc/sys/kernel/random/boot_id)
-# The clock may be far off (no RTC); the uptime-free stamp only orders files.
-prefix="$dir/$(date +%Y%m%dT%H%M%S)-$boot_id"
+counter=$(cat "$dir/boot-counter" 2>/dev/null || echo 0)
+[[ $counter =~ ^[0-9]+$ ]] || counter=0
+counter=$((counter + 1))
+printf '%s\n' "$counter" > "$dir/boot-counter"
+prefix=$(printf '%s/boot-%04d-%s' "$dir" "$counter" "$boot_id")
 
-# Keep the newest (keep - 1) earlier boots, plus this one.
-ls -1t "$dir"/*.start 2>/dev/null | tail -n +"$keep" | while IFS= read -r old; do
-    rm -f -- "${old%.start}".start "${old%.start}".dmesg "${old%.start}".journal
+# Keep the newest (keep - 1) earlier boots, plus this one (counter order).
+ls -1 "$dir"/boot-*.start 2>/dev/null | sort | head -n "-$((keep - 1))" | while IFS= read -r old; do
+    rm -f -- "${old%.start}".start "${old%.start}".late "${old%.start}".dmesg \
+             "${old%.start}".journal "${old%.start}".sample
 done
 
 capped() { # stdin -> $1, a line at a time, until max_bytes
@@ -41,7 +57,7 @@ capped() { # stdin -> $1, a line at a time, until max_bytes
 }
 
 {
-    echo "== boot $boot_id, uptime $(cut -d' ' -f1 /proc/uptime) s"
+    echo "== boot #$counter $boot_id, uptime $(cut -d' ' -f1 /proc/uptime) s"
     echo "== cmdline"; cat /proc/cmdline
     echo "== watchdog"; systemctl show -p RuntimeWatchdogUSec -p RebootWatchdogUSec 2>&1
     for w in /sys/class/watchdog/watchdog*; do
@@ -52,13 +68,47 @@ capped() { # stdin -> $1, a line at a time, until max_bytes
     done
     echo "== firmware"; vcgencmd get_throttled 2>&1; vcgencmd get_rsts 2>&1
     echo "== previous boot (empty on a volatile journal)"; journalctl -b -1 -n 300 --no-pager -o short-monotonic 2>&1
-    echo "== systemd-analyze"; systemd-analyze 2>&1; systemd-analyze blame 2>&1 | head -n 40
 } > "$prefix.start" 2>&1
 
-dmesg -w 2>&1 | capped "$prefix.dmesg" &
+# The kernel log, unbuffered: dmesg writes through stdio, which a pipe makes
+# block-buffered (the first mirror stopped at 6 s of uptime on every boot);
+# stdbuf makes it line-buffered. /dev/kmsg directly is the fallback.
+if command -v stdbuf >/dev/null 2>&1; then
+    stdbuf -oL dmesg -w 2>&1 | capped "$prefix.dmesg" &
+else
+    cat /dev/kmsg 2>&1 | capped "$prefix.dmesg" &
+fi
 journalctl -b -f -o short-monotonic --no-pager 2>&1 | capped "$prefix.journal" &
 
-while :; do
-    sleep 60
-    sync -f "$dir" 2>/dev/null || sync
-done
+( sleep "$late_seconds"
+  { echo "== uptime $(cut -d' ' -f1 /proc/uptime) s"
+    echo "== systemd-analyze"; systemd-analyze 2>&1; systemd-analyze blame 2>&1 | head -n 40
+    echo "== critical chain"; systemd-analyze critical-chain 2>&1 | head -n 30
+  } > "$prefix.late" 2>&1 ) &
+
+psi_full() { # $1=/proc/pressure/<resource>; prints the "full avg10" value
+    awk '$1 == "full" { for (i = 2; i <= NF; ++i) if ($i ~ /^avg10=/) { sub(/^avg10=/, "", $i); print $i } }' "$1" 2>/dev/null
+}
+sample_line() {
+    local progress=""
+    [ -r "$progress_file" ] && progress=$(tr '\n' ' ' < "$progress_file")
+    printf 'up=%s throttled=%s load=%s io_full=%s mem_full=%s mmc_inflight=%s progress=%s\n' \
+        "$(cut -d' ' -f1 /proc/uptime)" \
+        "$(vcgencmd get_throttled 2>/dev/null | cut -d= -f2)" \
+        "$(cut -d' ' -f1-3 /proc/loadavg)" \
+        "$(psi_full /proc/pressure/io)" "$(psi_full /proc/pressure/memory)" \
+        "$(tr -s ' ' < /sys/block/mmcblk0/inflight 2>/dev/null | sed 's/^ //')" \
+        "${progress% }"
+}
+( elapsed_since_sync=0
+  while :; do
+      [ "$(stat -c %s "$prefix.sample" 2>/dev/null || echo 0)" -lt "$max_bytes" ] && sample_line >> "$prefix.sample"
+      sleep "$sample_seconds"
+      elapsed_since_sync=$((elapsed_since_sync + sample_seconds))
+      if [ "$elapsed_since_sync" -ge 60 ]; then
+          sync -f "$dir" 2>/dev/null || sync
+          elapsed_since_sync=0
+      fi
+  done ) &
+
+wait

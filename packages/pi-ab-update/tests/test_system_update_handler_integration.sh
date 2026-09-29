@@ -603,10 +603,19 @@ else
 fi
 
 # --- 4. FAT32 happy path, zero preparation --------------------------------
+# Also the USB-only shipping mode: a device that has never been online. The
+# USB path must not touch the release source at all - curl is a tripwire and
+# the source config does not exist.
+offline_curl="$work/offline-curl"
+printf '%s\n' '#!/bin/sh' "echo called >> '$work/offline-curl.log'" 'exit 7' > "$offline_curl"
+chmod 0755 "$offline_curl"
+rm -f "$work/offline-curl.log"
 reset_target
 record_usb "$usb_one"
-run_handler usb
+AB_CURL="$offline_curl" AB_SOURCE_CONFIG="$work/no-such-source.conf" run_handler usb
 assert_candidate_armed 'unlabelled FAT32 stick armed candidate B'
+[ ! -e "$work/offline-curl.log" ] || { echo 'ERROR: a USB install used the network' >&2; exit 1; }
+printf '  ok  %-46s -> %s\n' 'USB install offline (no source, no curl)' 'never touched the release source'
 mountpoint -q "$runtime_dir/source" && {
     echo 'ERROR: the handler left its USB source mounted' >&2
     exit 1

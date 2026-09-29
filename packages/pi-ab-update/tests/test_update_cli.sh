@@ -102,6 +102,18 @@ esac
 rm -f "$work/run/status"
 
 # --- status is a superset, and mentions what a person needs ---------------
+# ...and reads only what is published: it never asks the release source (a
+# USB-only device may never have been online).
+rm -f "$work/calls"
+mv "$work/run/check" "$work/run/check.hidden"
+out=$(run status)
+[ ! -s "$work/calls" ] && ok 'status: offline-safe' 'never runs the update check' \
+    || fail "status invoked the engine: $(cat "$work/calls")"
+case "$out" in
+    *'update check'*|*'Last update'*) fail 'status mentions an update check on a device that never ran one' ;;
+    *) ok 'status: never-online device' 'says nothing about a release source' ;;
+esac
+mv "$work/run/check.hidden" "$work/run/check"
 out=$(run status)
 for want in '00.36' 'committed' 'available' 'writing'; do
     printf '%s' "$out" | grep -Fq "$want" || fail "status omitted '$want'"

@@ -173,13 +173,13 @@ show_status() {
         printf '  last/current run   %s (%s%%)\n' "$phase" "$pct"
     fi
 
-    printf '\nLast update check\n'
+    # Only once a check has run: a USB-only device may never be online, and
+    # its status screen has nothing to say about a release source.
     if check_state=$(published_value "$check_file" state 2>/dev/null); then
         check_version=$(published_value "$check_file" version 2>/dev/null || true)
+        printf '\nLast update check\n'
         printf '  result             %s%s\n' "$check_state" \
             "${check_version:+ ($check_version)}"
-    else
-        printf '  result             never run\n'
     fi
 
     # The single most surprising operational fact, stated where it is needed:

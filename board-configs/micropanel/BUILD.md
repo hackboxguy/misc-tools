@@ -26,11 +26,17 @@ candidate from committing or recording a fallback (E2: pi-ab-update `4df206a`).
 `multi-user.target` back from its own health unit for the whole readiness
 wait, so no candidate ever committed by itself; pi-ab-update fix in Step 9).
 
+**2.02 and 2.03 are not burned** - every update path works on them (§7) - but
+they carry the `fetch_terminated` malformed test on their failure path (every
+failed install prints `line 187: [: missing ']'`; pi-ab-update `97dd66a`) and
+the 20 s runtime watchdog, so they are the bench references, not the first
+release.
+
 The **release baseline** is built with the production release URL (no
 `--release-url-template`), so the bench-tested image is byte for byte the
-shippable one: pending the bench, `2.02` (image + payload) is the first
-shippable image and `2.03` (payload) the first bundle; a later fix becomes
-`2.04`, `2.05`, ... Version numbers
+shippable one: pending the bench, `2.04` (image + payload) is the first
+shippable image and `2.05` (payload) the first bundle; a later fix becomes
+`2.06`, `2.07`, ... Version numbers
 are never reissued: the engine refuses an update whose version equals the
 running one, and a reissued number makes bench evidence ambiguous.
 (Single-slot keeps its own 01.xx line.)
@@ -218,7 +224,10 @@ not a fault, and not a health unit. See PERSISTENCE.md, "Update health".
 
 ## 7. Acceptance records
 
-Placeholders; Step 7 fills them from the bench reports.
+From the bench reports (reviewer on the OTS-OLED head-unit rig, over SSH;
+power cuts by a Tasmota plug). Commits are by `ab-update-commit` alone, times
+after boot; each logged
+`[SUCCESS] committed candidate slot <X> after 30 seconds of health`.
 
 | Item | Result | Date | Image |
 | --- | --- | --- | --- |
@@ -228,10 +237,12 @@ Placeholders; Step 7 fills them from the bench reports.
 | E1 first install attempt | refused: `lsblk: unknown column: PARTN` (fixed in 02.05) | 2026-09-28 | 02.01 |
 | USB install 02.05 -> 02.06 | written, armed, booted B; commit never ran (E2, fixed in 2.00) | 2026-09-28 | 02.05 |
 | USB install 02.06 -> 2.00, OTA 2.00 -> 2.01 (`--source-config`) | written, armed, booted; commit service ran (E2 fixed) but gave up after 120 s (E3); manual commit worked | 2026-09-28 | 2.00, 2.01 |
-| Fallback (health window not met) | | | |
-| USB update + commit | | | |
-| OTA update + commit | | | |
-| Downgrade | | | |
-| Power cut mid-write | | | |
-| Integrity refusal | | | |
-| Factory reset + reseed | | | |
+| Fallback (health window not met) | not yet run on hardware (fixture-covered) | | |
+| USB update + commit | 2.01 -> 2.02 from an NTFS stick (`ntfs3`), B -> A: written in ~3 min, armed; committed at 49.9 s | 2026-09-29 | 2.01 -> 2.02 |
+| OTA update + commit | 2.02 -> 2.03 from the bench server (`--source-config`), A -> B: committed at 48.0 s | 2026-09-29 | 2.02 -> 2.03 |
+| Downgrade | signed 2.02 from USB on 2.03, B -> A: committed at 50.0 s | 2026-09-29 | 2.03 -> 2.02 |
+| Power cut mid-write | cut at `writing 40 %` of OTA 2.03: back on committed A/2.02 unattended, tryboot flag 0, `state=committed`, `get_rsts=1000` (power-on reset), no lock, `/run/ab-update` clean, torn B untouched by the selector; the same install then committed on B at 48.0 s | 2026-09-29 | 2.02 -> 2.03 |
+| Integrity refusal | byte flipped in `rootfs.img.xz`: `xz: Compressed data is corrupt` -> `[ERROR] root filesystem stream failed`, `failed-integrity`, nothing armed, rc 1. In `boot.tar`: `payload boot archive digest does not match its manifest` in 1 s, `failed-integrity`, nothing armed. (Both also printed the `line 187` diagnostic, fixed in 2.04.) | 2026-09-29 | 2.02 |
+| System Manager offer + install (offscreen) | offer card correct (running 2.03 on B committed; 2.02 on `/dev/sda1`, signed with this device's key); lock held by the PID, lock and mounts gone after the reboot | 2026-09-29 | 2.03 |
+| System Manager `--auto-install`, twice | **board reset at ~50 % written both times** (66 s, 81 s into `writing`; `get_rsts=0x20`), back on committed B/2.03, nothing armed - E4; defences in 2.04 (dirty page cache bound, 60 s watchdog, micropanel.service stands down without SSD1306) | 2026-09-29 | 2.03 -> 2.02 |
+| Factory reset + reseed | pending: on a fresh 2.04 card (the rig's factory slot is 02.06) | | |

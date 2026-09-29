@@ -109,6 +109,9 @@ by the builder.)
 
 ## 3. Publishing a release on GitHub (draft — not yet run)
 
+The system ships USB-only for now; this recipe is part of the deferred online
+path, planned in `docs/micropanel-sdcard-online-ab-update.md`.
+
 The device fetches from `releases/latest/download/`, which skips drafts and
 pre-releases: publish a normal release.
 

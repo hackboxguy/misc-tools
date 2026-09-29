@@ -181,8 +181,9 @@ The micropanel board also builds an opt-in A/B image for a 16 GB card:
 `--layout=ab`. It carries the `packages/pi-ab-update` engine (the same one
 micropanel-touch uses): two root slots, a read-only overlay root, durable
 state on `/data`, and signed `.mpupdate` bundles installed from USB (FAT32,
-exFAT or NTFS) or over the network, booted once through the firmware's
-`tryboot` and committed only after the health window.
+exFAT or NTFS), booted once through the firmware's `tryboot` and committed
+only after the health window. It ships USB-only; the network path exists in
+the engine but is not switched on.
 
 ```bash
 ./build-image.sh --board=micropanel --base-profile=qt-bookworm --layout=ab --version=2.xx --skip-kernel --dry-run
@@ -193,6 +194,11 @@ The single-slot `01.xx` product is unchanged by it. The full command
 reference (payloads, publishing, flashing, the bench OTA rehearsal, on-device
 commands, version rules) is `board-configs/micropanel/BUILD.md`; what lives
 where on the device is `board-configs/micropanel/PERSISTENCE.md`.
+
+- [`docs/micropanel-sdcard-ab-update.md`](docs/micropanel-sdcard-ab-update.md) -
+  how the A/B system works and how to build it: the map to read first.
+- [`docs/micropanel-sdcard-online-ab-update.md`](docs/micropanel-sdcard-online-ab-update.md) -
+  the plan for online (over-the-air) updates, deferred.
 
 ## Repository layout
 

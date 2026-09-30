@@ -350,7 +350,7 @@ if [ "$(id -u)" -eq 0 ]; then
     for expected in 'micropanel 1000:1000:755' 'micropanel-system/ssh-host-keys 0:0:700' \
         'micropanel-system/var-lib-micropanel 0:0:755' 'micropanel-system 0:0:700' \
         'disp-settings 1000:1000:755' 'kodi 1000:1000:755' \
-        'system-manager 1000:1000:755' 'system-manager/logs 1000:1000:755' 'disptool-results 1000:1000:755' \
+        'system-manager 1000:1000:755' 'system-manager/logs 1000:1000:755' 'disptool-results 1000:1000:755' 'test-reports 1000:1000:755' \
         'als-dimmer 0:0:755' 'NetworkManager/system-connections 0:0:700'; do
         path=${expected% *}
         [ "$(stat -c '%u:%g:%a' "$data/$path")" = "${expected#* }" ] || \

@@ -129,6 +129,7 @@ fi
 install -d -m0755 /var/lib/micropanel /var/lib/disp-settings
 install -d -m0755 -o 1000 -g 1000 /home/pi/.kodi
 install -d -m0755 -o 1000 -g 1000 /home/pi/micropanel/share/disptool/display-test-framework/results
+install -d -m0755 -o 1000 -g 1000 /home/pi/test-reports
 bind_lines=$(grep -Ev '^[[:space:]]*(#|$)' "$support/fstab.binds")
 while IFS= read -r line; do
     target=$(printf '%s\n' "$line" | awk '{print $2}')

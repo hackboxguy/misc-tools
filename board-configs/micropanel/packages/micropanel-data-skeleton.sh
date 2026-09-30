@@ -83,6 +83,9 @@ install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/system-manager
 install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/kodi"
 # Bound to the disptool test framework's results directory (measurements).
 install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/disptool-results"
+# Bound to /home/pi/test-reports: the launcher's display-analysis reports
+# (Analyze Color Gamut, Local Dimming APL) - report PNGs and their data.
+install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/test-reports"
 
 # als-dimmer's state (mode, manual brightness): every installed als-dimmer config
 # names its state_file in here (the appliance hook rewrites them). root: the

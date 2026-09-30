@@ -10,3 +10,4 @@
 /data/disp-settings /var/lib/disp-settings none bind,nofail,x-systemd.requires=data.mount,x-systemd.after=ab-factory-reset.service,x-systemd.before=disp-settings-dual-display-restore.service 0 0
 /data/kodi /home/pi/.kodi none bind,nofail,x-systemd.requires=data.mount,x-systemd.after=ab-factory-reset.service,x-systemd.before=micropanel.service 0 0
 /data/disptool-results /home/pi/micropanel/share/disptool/display-test-framework/results none bind,nofail,x-systemd.requires=data.mount,x-systemd.after=ab-factory-reset.service,x-systemd.before=micropanel.service 0 0
+/data/test-reports /home/pi/test-reports none bind,nofail,x-systemd.requires=data.mount,x-systemd.after=ab-factory-reset.service,x-systemd.before=qt-demo-launcher.service 0 0

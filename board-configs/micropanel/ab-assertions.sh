@@ -119,6 +119,7 @@ require test "$(stat -c '%u:%g:%a' "$data_mount/kodi")" = "${app_account}:755"
 require test "$(stat -c '%u:%g:%a' "$data_mount/system-manager")" = "${app_account}:755"
 require test "$(stat -c '%u:%g:%a' "$data_mount/system-manager/logs")" = "${app_account}:755"
 require test "$(stat -c '%u:%g:%a' "$data_mount/disptool-results")" = "${app_account}:755"
+require test "$(stat -c '%u:%g:%a' "$data_mount/als-dimmer")" = '0:0:755'
 require test "$(stat -c '%u:%g:%a' "$data_mount/NetworkManager/system-connections")" = '0:0:700'
 # The kodi profile the image authored is seeded into /data on first flash.
 if [ -n "$(ls -A "$root_mount/home/pi/.kodi" 2>/dev/null)" ]; then
@@ -161,6 +162,9 @@ require test -f "$root_mount/usr/share/initramfs-tools/scripts/init-bottom/overl
 require grep -Fq '"file_path": "/data/micropanel/settings.json"' \
     "$root_mount/home/pi/micropanel/etc/micropanel/config.json"
 require test "$(readlink "$root_mount/home/pi/micropanel/settings.json")" = /data/micropanel/settings.json
+# als-dimmer keeps its state (mode, manual brightness) on /data: no installed config
+# may name a state_file anywhere else (the shipped ones say /tmp or /home/pi).
+require test -z "$(grep -h '"state_file"' "$root_mount"/home/pi/als-dimmer/etc/als-dimmer/*.json | grep -v '"/data/als-dimmer/[^/"]*"')"
 
 # --- What the engine needs from this image --------------------------------------
 # Every health unit must be enabled: a unit that never starts fails every

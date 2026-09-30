@@ -84,6 +84,11 @@ install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/kodi"
 # Bound to the disptool test framework's results directory (measurements).
 install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/disptool-results"
 
+# als-dimmer's state (mode, manual brightness): every installed als-dimmer config
+# names its state_file in here (the appliance hook rewrites them). root: the
+# daemon runs as root. A reset empties it, so the dimmer starts in AUTO again.
+install -d -m0755 -o root -g root "$data_root/als-dimmer"
+
 # NetworkManager's keyfile backend requires this restrictive mode.
 install -d -m0700 -o root -g root "$data_root/NetworkManager/system-connections"
 

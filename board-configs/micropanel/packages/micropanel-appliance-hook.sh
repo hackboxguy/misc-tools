@@ -167,6 +167,28 @@ ln -sfn "$new_settings" "$old_settings"
 chown -h 1000:1000 "$old_settings"
 say "persistence: persistent_data.file_path -> $new_settings; $old_settings -> symlink"
 
+# als-dimmer: its state file (AUTO/MANUAL mode, manual brightness, offset) is
+# named by control.state_file in each config, and the shipped configs say /tmp or
+# /home/pi - both volatile here, so every power cycle fell back to AUTO. Point
+# every installed config into /data/als-dimmer (keeping each file name, so the
+# secondary PWM instance keeps its own file). Which config runs is decided at
+# boot by the display type, so all of them are rewritten, not just the default.
+als_etc=/home/pi/als-dimmer/etc/als-dimmer
+if [ -d "$als_etc" ]; then
+    als_count=0
+    for cfg in "$als_etc"/*.json; do
+        [ -f "$cfg" ] && [ ! -L "$cfg" ] || continue
+        grep -q '"state_file"' "$cfg" || continue
+        sed -i -E 's#("state_file"[[:space:]]*:[[:space:]]*")[^"]*/([^/"]+)"#\1/data/als-dimmer/\2"#' "$cfg"
+        grep -Eq '"state_file"[[:space:]]*:[[:space:]]*"/data/als-dimmer/[^/"]+"' "$cfg" || \
+            die "unable to redirect state_file in $cfg"
+        als_count=$((als_count + 1))
+    done
+    say "persistence: als-dimmer state_file -> /data/als-dimmer/ in $als_count configs"
+else
+    say "persistence: no als-dimmer installed ($als_etc missing), nothing to redirect"
+fi
+
 # --- 4. Overlayroot and an initramfs for the custom kernel ----------------------
 # Incremental builds install runtime deps only after the hooks, so install here.
 if ! dpkg -s overlayroot >/dev/null 2>&1; then

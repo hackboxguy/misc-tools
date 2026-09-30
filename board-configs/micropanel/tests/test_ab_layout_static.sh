@@ -351,7 +351,7 @@ if [ "$(id -u)" -eq 0 ]; then
         'micropanel-system/var-lib-micropanel 0:0:755' 'micropanel-system 0:0:700' \
         'disp-settings 1000:1000:755' 'kodi 1000:1000:755' \
         'system-manager 1000:1000:755' 'system-manager/logs 1000:1000:755' 'disptool-results 1000:1000:755' \
-        'NetworkManager/system-connections 0:0:700'; do
+        'als-dimmer 0:0:755' 'NetworkManager/system-connections 0:0:700'; do
         path=${expected% *}
         [ "$(stat -c '%u:%g:%a' "$data/$path")" = "${expected#* }" ] || \
             fail "skeleton: $path is $(stat -c '%u:%g:%a' "$data/$path"), expected ${expected#* }"

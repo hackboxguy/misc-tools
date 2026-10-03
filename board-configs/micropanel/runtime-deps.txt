@@ -64,3 +64,7 @@ gstreamer1.0-plugins-good
 gstreamer1.0-plugins-bad
 gstreamer1.0-tools
 libdrm2
+# USB Media (dual-video-player --playlist): avdec_h265/avdec_h264 for HEVC and
+# above-1080p H.264 (software path), json-glib for micropanel-playlist.json.
+gstreamer1.0-libav
+libjson-glib-1.0-0

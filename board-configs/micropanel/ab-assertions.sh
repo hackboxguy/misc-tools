@@ -45,6 +45,15 @@ for device_line in '^[[:space:]]*os_prefix=' '^hdmi_timings=' '^dtoverlay=himax-
         exit 1
     fi
 done
+# gpu_mem travels with the release (the template, never the device's display
+# file), so a rollback restores the old value with the old player: USB Media's
+# next-item prefetch runs two H.264 hardware decoders, which starve or wedge
+# the codec firmware at the 76 MB default.
+require grep -Eqx 'gpu_mem=128' "$template"
+if grep -Eq '^[[:space:]]*gpu_mem' "$display_file"; then
+    echo "ERROR: board assertion failed: the display file sets gpu_mem (it belongs to the release)" >&2
+    exit 1
+fi
 # pi-config-txt.sh is told to use the display file.
 require grep -Fqx 'MICROPANEL_BOOT_CONFIG=/boot/firmware/micropanel-display.txt' "$root_mount/etc/default/micropanel"
 # The overlay contract. The firmware resolves overlays under os_prefix, i.e.

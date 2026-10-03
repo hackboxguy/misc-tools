@@ -271,6 +271,8 @@ grep -Fq 'rm -f /etc/init.d/resize2fs_once' "$appliance" || fail 'appliance hook
 grep -Fq '"MICROPANEL_BOOT_CONFIG=$display_file" > /etc/default/micropanel' "$appliance" || \
     fail 'appliance hook does not write /etc/default/micropanel'
 grep -Fq -- '--emit-base="$config"' "$appliance" || fail 'appliance hook does not emit the base config.txt'
+grep -Fq "require grep -Eqx 'gpu_mem=128' \"\$template\"" "$board/ab-assertions.sh" || \
+    fail 'board assertions no longer require gpu_mem=128 in the release-owned template'
 grep -Fq "grep -q -- '--emit-base' \"\$pi_config\"" "$appliance" || \
     fail 'appliance hook does not refuse a pi-config-txt.sh that predates the split'
 

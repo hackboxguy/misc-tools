@@ -666,4 +666,24 @@ else
     echo '  skip  NTFS case: mkfs.ntfs (ntfs-3g) is unavailable'
 fi
 
+# --- 8. a stick someone already mounted read-write ------------------------
+# udisks2 mounts the stick read-write for the launcher's media apps; a second,
+# read-only mount of that filesystem is refused ("would change RO state"). The
+# engine reads it through a read-only bind and leaves the other mount alone.
+make_usb_filesystem "$work/usb-busy.img" mkfs_vfat32
+usb_busy=$usb_loop_device
+reset_target
+publish_bundle_to_usb "$usb_busy" "$bundle"
+record_usb "$usb_busy"
+busy_mount="$work/udisks-mount"
+install -d "$busy_mount"
+mount -o rw "$usb_busy" "$busy_mount"
+run_handler usb
+assert_candidate_armed 'stick already mounted read-write elsewhere armed candidate B'
+findmnt -n -o OPTIONS --target "$busy_mount" | grep -q '^rw' || {
+    echo 'ERROR: the existing read-write mount of the stick was changed' >&2; exit 1; }
+[ "$(findmnt -n --source "$usb_busy" | wc -l)" -eq 1 ] || {
+    echo 'ERROR: the engine left a mount of the busy stick behind' >&2; exit 1; }
+umount "$busy_mount"
+
 echo 'system-update-handler-integration: PASS'

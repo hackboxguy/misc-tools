@@ -437,14 +437,35 @@ reclaim_stale_source_mount() {
     umount "$source_mount" 2>/dev/null || die source 'a stale update source mount is still busy'
 }
 
+# A filesystem someone already mounted (udisks2 mounts the stick read-write
+# for the launcher's media apps) refuses a second, read-only mount ("would
+# change RO state"). A bind of that mount, remounted read-only, gives the same
+# private read-only view without touching the other mount.
+bind_existing_mount() { # $1=device
+    local existing
+    existing=$(findmnt -n -o TARGET --source "$1" 2>/dev/null | head -n 1)
+    [ -n "$existing" ] && [ -d "$existing" ] || return 1
+    mount --bind -- "$existing" "$source_mount" 2>/dev/null || return 1
+    mount -o remount,bind,ro,nosuid,nodev,noexec -- "$source_mount" 2>/dev/null || {
+        umount "$source_mount" 2>/dev/null || true
+        return 1
+    }
+    printf '[INFO] USB filesystem %s is mounted at %s; reading it through a read-only bind\n' "$1" "$existing" >&2
+}
+
 # FAT32, exFAT or NTFS (sticks from Windows PCs). NTFS tries the in-kernel
 # ntfs3 driver first; a plain mount then lets ntfs-3g serve where the kernel
-# has none. A volume neither will mount read-only - an NTFS left dirty by an
-# unclean removal, typically - is named in the journal.
+# has none; an already-mounted filesystem is read through a read-only bind.
+# A volume none of these reach - an NTFS left dirty by an unclean removal,
+# typically - is named in the journal.
 mount_source_device() { # $1=device
     local fstype
     fstype=$(blkid -s TYPE -o value "$1" 2>/dev/null || true)
     if [ "$fstype" = ntfs ] && mount -t ntfs3 -o ro,nosuid,nodev,noexec -- "$1" "$source_mount" 2>/dev/null; then
+        source_was_mounted=1
+        return 0
+    fi
+    if bind_existing_mount "$1"; then
         source_was_mounted=1
         return 0
     fi

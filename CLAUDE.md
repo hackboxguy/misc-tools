@@ -127,6 +127,10 @@ phases under QEMU are normal, not hangs.
   cmake-installable package → `share/sp6bins/config/`. Requires `git lfs
   install` on the host (preflight checks). GitHub free LFS bandwidth is
   1GB/month; fallback plan if exceeded: release asset + download step.
+  `-DMEDIA_PROFILE=cluster` installs qt-cluster-demo's Video-1/Video-2 clips
+  to `/home/pi/media/videos/` instead. Every board consuming it must list it
+  in its own SOURCES, or the build uses whatever stale checkout another
+  board's build left in sources/ (qt-cluster-demo once missed a new clip so).
 - `qt-cluster-demo` (PRIVATE → must be a file:// local source, cloned
   host-side via SOURCES; an in-chroot git clone of a private repo prompts
   for credentials and hangs unattended builds - learned the hard way). Its

@@ -85,6 +85,14 @@ done
 # The derived module configuration is regenerated every boot; nothing loads the
 # drivers from a static list before it has run.
 require test -L "$root_mount/etc/systemd/system/multi-user.target.wants/micropanel-display-derive.service"
+# USB Media autostart (br-wrapper qt-demo-launcher) is enabled under
+# graphical.target: qt-demo-launcher.service is After=multi-user.target, so
+# under multi-user.target the unit is an ordering cycle and systemd drops it.
+require test -L "$root_mount/etc/systemd/system/graphical.target.wants/usb-media-autostart.service"
+if [ -e "$root_mount/etc/systemd/system/multi-user.target.wants/usb-media-autostart.service" ]; then
+    echo "ERROR: board assertion failed: usb-media-autostart.service is wanted by multi-user.target (ordering cycle)" >&2
+    exit 1
+fi
 require test ! -e "$root_mount/etc/modules-load.d/custom-drivers.conf"
 # ...nor by alias: a driver loaded before the derive unit would need a reload.
 for module in hh983_serializer himax_mmi himax_oled; do

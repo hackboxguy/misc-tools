@@ -271,6 +271,12 @@ grep -Fq 'rm -f /etc/init.d/resize2fs_once' "$appliance" || fail 'appliance hook
 grep -Fq '"MICROPANEL_BOOT_CONFIG=$display_file" > /etc/default/micropanel' "$appliance" || \
     fail 'appliance hook does not write /etc/default/micropanel'
 grep -Fq -- '--emit-base="$config"' "$appliance" || fail 'appliance hook does not emit the base config.txt'
+for hooks in hooks.txt hooks-ab.txt; do
+    grep -Fq 'systemctl enable /home/pi/micropanel/lib/systemd/system/usb-media-autostart.service' "$board/$hooks" || \
+        fail "$hooks does not enable usb-media-autostart.service"
+done
+grep -Fq 'graphical.target.wants/usb-media-autostart.service' "$board/ab-assertions.sh" || \
+    fail 'board assertions no longer check the USB Media autostart unit'
 grep -Fq "require grep -Eqx 'gpu_mem=128' \"\$template\"" "$board/ab-assertions.sh" || \
     fail 'board assertions no longer require gpu_mem=128 in the release-owned template'
 grep -Fq "grep -q -- '--emit-base' \"\$pi_config\"" "$appliance" || \

@@ -29,7 +29,7 @@ packages/micropanel-hook.sh|https://github.com/hackboxguy/micropanel.git|main|/h
 #qt-demo-launcher's dual-video-player; libjson-glib-dev: its USB Media playlist mode
 #(cmake skips it without them; pkg-config is listed because an earlier hook's
 #purge removes it). Its runtime libs are pinned in runtime-deps*.txt.
-../../custom-pi-imager/packages/generic-package-hook.sh|https://github.com/hackboxguy/br-wrapper.git|main|/home/pi/micropanel|qtquickcontrols2-5-dev,qtdeclarative5-dev,libgstreamer1.0-dev,libgstreamer-plugins-base1.0-dev,libdrm-dev,libjson-glib-dev,pkg-config|systemctl mask getty@tty1.service;systemctl enable /home/pi/micropanel/lib/systemd/system/qt-demo-launcher.service|-DLAUNCHER_CONFIG=qt-demo-launcher-pios.json
+../../custom-pi-imager/packages/generic-package-hook.sh|https://github.com/hackboxguy/br-wrapper.git|main|/home/pi/micropanel|qtquickcontrols2-5-dev,qtdeclarative5-dev,libgstreamer1.0-dev,libgstreamer-plugins-base1.0-dev,libdrm-dev,libjson-glib-dev,pkg-config|systemctl mask getty@tty1.service;systemctl enable /home/pi/micropanel/lib/systemd/system/qt-demo-launcher.service;systemctl enable /home/pi/micropanel/lib/systemd/system/usb-media-autostart.service|-DLAUNCHER_CONFIG=qt-demo-launcher-pios.json
 
 #mcu binaries + fpga bitstreams as a local source package.
 #SP6BINS_MICROPANEL_COMPAT=ON additionally installs fpga/bitbin + fpga/bin

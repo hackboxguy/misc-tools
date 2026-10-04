@@ -482,6 +482,31 @@ unmount_source() {
     source_was_mounted=0
 }
 
+# The candidate root's selector template, copied to the private runtime
+# directory; prints its path, nothing when the release has none, fails on a
+# template that would fight the selector (its own os_prefix or [tryboot]).
+read_candidate_template() {
+    local mnt copy="$private_runtime_dir/candidate-boot-selector-config.base" found=0
+    local rel=usr/lib/pi-ab-update/boot-selector-config.base
+    rm -f -- "$copy"
+    mnt=$(mktemp -d "$private_runtime_dir/.candidate-root.XXXXXX")
+    # noload: a read-only look must not replay the journal of a slot nothing has booted yet
+    if mount -t ext4 -o ro,noload,nosuid,nodev,noexec -- "$target_root" "$mnt" 2>/dev/null; then
+        if [ -f "$mnt/$rel" ] && [ ! -L "$mnt/$rel" ] && [ -s "$mnt/$rel" ]; then
+            install -m0644 -- "$mnt/$rel" "$copy" && found=1
+        fi
+        umount "$mnt" 2>/dev/null || true
+    else
+        printf '[WARN] cannot mount the candidate root read-only to read its boot template\n' >&2
+    fi
+    rmdir "$mnt" 2>/dev/null || true
+    [ "$found" = 1 ] || return 0
+    if grep -Eq '^[[:space:]]*(os_prefix=|\[tryboot\])' "$copy"; then
+        return 1
+    fi
+    printf '%s\n' "$copy"
+}
+
 # Exactly one bundle across every USB filesystem; fail closed on zero or many.
 discover_usb_bundle() {
     local -a devices=() found_devices=() found_names=()
@@ -999,7 +1024,19 @@ unmount_source || printf '[WARN] update source stayed mounted; the reboot releas
 # a cut after arm leaves the candidate enough durable state to prove+commit.
 write_update_state "$target_slot" "${payload[version]}" "${payload[variant]}"
 write_update_progress arming 100
-"$selector" arm-candidate "$target_slot"
+# The trial boot runs tryboot.txt, rendered here. Render it from the
+# candidate release's own selector template, not this (old) release's:
+# otherwise every release-owned config.txt line (gpu_mem=128 in 2.05) takes
+# effect only after the commit re-renders config.txt, and the trial boot -
+# the boot that decides the commit - runs the new rootfs with the old firmware
+# settings. A release without a template (none is known) keeps the old one.
+candidate_template=$(read_candidate_template) || die boot 'the candidate release carries an invalid boot configuration template'
+if [ -n "$candidate_template" ]; then
+    AB_BOOT_CONFIG_TEMPLATE="$candidate_template" "$selector" arm-candidate "$target_slot"
+else
+    printf '[WARN] candidate release has no boot configuration template; the trial boot uses the running one\n' >&2
+    "$selector" arm-candidate "$target_slot"
+fi
 sync
 printf '[SUCCESS] payload verified; slot %s is armed for one candidate boot\n' "$target_slot"
 "$reboot_command" "0 tryboot"

@@ -95,6 +95,10 @@ install -d "$boot_mount" "$lower_root_mount" "$target_root_mount" "$usb_stage"
 mount "${loop}p1" "$boot_mount"
 mount "${loop}p5" "$lower_root_mount"
 printf '%s\n' 'handler integration root marker' > "$lower_root_mount/payload-marker"
+# The release's selector template: the trial boot must be rendered from this
+# one (the candidate's), not from the running release's.
+install -d "$lower_root_mount/usr/lib/pi-ab-update"
+printf '%s\n' 'gpu_mem=128' '# candidate template marker' > "$lower_root_mount/usr/lib/pi-ab-update/boot-selector-config.base"
 sync
 umount "$lower_root_mount"
 mount -o ro "${loop}p5" "$lower_root_mount"
@@ -173,7 +177,8 @@ printf '%s\n' \
     '#!/bin/sh' \
     'case "$1" in' \
     '  current-slot) printf "%s\\n" A ;;' \
-    '  arm-candidate) [ "$2" = B ] && printf "%s %s\\n" "$1" "$2" > "$SELECTOR_LOG" ;;' \
+    '  arm-candidate) [ "$2" = B ] && printf "%s %s\\n" "$1" "$2" > "$SELECTOR_LOG" &&' \
+    '                 printf "template: %s\\n" "$(cat "${AB_BOOT_CONFIG_TEMPLATE:-/nonexistent}" 2>/dev/null | tr "\\n" "|")" >> "$SELECTOR_LOG" ;;' \
     '  *) exit 64 ;;' \
     'esac' > "$selector"
 chmod 0755 "$selector"
@@ -284,6 +289,8 @@ assert_candidate_armed() { # $1=case label
     grep -Fqx 'candidate_slot=B' "$state_dir/update-state"
     grep -Fqx 'version=fixture' "$state_dir/update-state"
     grep -Fqx 'arm-candidate B' "$selector_log"
+    grep -Fqx 'template: gpu_mem=128|# candidate template marker|' "$selector_log" || {
+        echo "ERROR: $1: the candidate was not armed with its own boot template" >&2; cat "$selector_log" >&2; exit 1; }
     grep -Fqx '0 tryboot' "$reboot_log"
     grep -Fqx 'dirty_bytes=16777216 dirty_background_bytes=8388608' "$reboot_log" || {
         echo "ERROR: $1: the dirty page cache was not bounded through the write" >&2; exit 1; }

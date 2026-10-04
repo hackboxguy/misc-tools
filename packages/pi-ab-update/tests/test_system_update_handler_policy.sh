@@ -145,7 +145,10 @@ rootfs_line=$(grep -nF '[ "$member_name" = "$bundle_rootfs_member" ] || die' "$h
 version_line=$(grep -nF 'die version ' "$handler" | cut -d: -f1)
 hash_line=$(grep -nF '[ "$rootfs_sha256" = "${payload[rootfs_sha256]}" ] || die' "$handler" | cut -d: -f1)
 label_line=$(grep -nF 'e2label "$target_root" "MP_ROOT_${target_slot}"' "$handler" | cut -d: -f1)
-arm_line=$(grep -nF '"$selector" arm-candidate "$target_slot"' "$handler" | cut -d: -f1)
+# Two arm calls (with the candidate's own boot template, or the running one's
+# when the release has none); both follow the template read, which follows the relabel.
+arm_line=$(grep -nF '"$selector" arm-candidate "$target_slot"' "$handler" | head -n 1 | cut -d: -f1)
+template_line=$(grep -nF 'candidate_template=$(read_candidate_template)' "$handler" | cut -d: -f1)
 [ "$manifest_line" -lt "$signature_line" ]
 [ "$signature_line" -lt "$boot_line" ]
 [ "$boot_line" -lt "$rootfs_line" ]
@@ -153,7 +156,8 @@ arm_line=$(grep -nF '"$selector" arm-candidate "$target_slot"' "$handler" | cut 
 # rootfs members, so nothing large is ever transferred for a known release.
 [ "$version_line" -lt "$boot_line" ]
 [ "$hash_line" -lt "$label_line" ]
-[ "$label_line" -lt "$arm_line" ]
+[ "$label_line" -lt "$template_line" ]
+[ "$template_line" -lt "$arm_line" ]
 
 # V5-01: cleanup must disarm its own traps before doing any work.
 cleanup_line=$(grep -nF 'cleanup() {' "$handler" | cut -d: -f1)

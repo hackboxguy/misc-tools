@@ -214,7 +214,7 @@ done
 # runtime lists, and the hook that masks the system dnsmasq, installs the
 # shared-mode no-gateway drop-in and switches WiFi on at boot (country DE).
 for package in network-manager wpasupplicant firmware-brcm80211 wireless-regdb iw rfkill nftables dnsmasq-base \
-               python3 dnsmasq iperf3; do
+               python3 dnsmasq iperf3 curl ca-certificates iproute2; do
     for list in runtime-deps.txt runtime-deps-ab.txt; do
         strip_list "$board/$list" | grep -Fqx "$package" || fail "$list lacks $package (network-manager-app)"
     done

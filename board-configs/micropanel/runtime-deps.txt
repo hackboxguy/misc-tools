@@ -74,6 +74,8 @@ libjson-glib-1.0-0
 # drives, nftables (shared mode's masquerade; the image has no iptables),
 # dnsmasq-base (NetworkManager's own dnsmasq for a port in DHCP-server mode),
 # python3 (net-dhcp-probe.py). dnsmasq (the full package) and iperf3 are above.
+# The Tools: iperf3 (above); curl and ca-certificates for the internet check's
+# HTTPS step; iproute2 for ss (is port 5201 taken?).
 network-manager
 wpasupplicant
 firmware-brcm80211
@@ -83,3 +85,6 @@ rfkill
 nftables
 dnsmasq-base
 python3
+curl
+ca-certificates
+iproute2

@@ -21,6 +21,14 @@
 #     WiFi networks then reconnect at boot without anyone opening the app.
 #     The app reports the image default from the regdom line ("wifiboot=on"),
 #     so keep that form.
+#  4. The DHCP guard: br-wrapper installs its NetworkManager dispatcher script
+#     (share/network-manager-app/90-net-ctl-guard, with the path of its
+#     net-ctl.sh filled in); NetworkManager runs dispatcher scripts only from
+#     /etc/NetworkManager/dispatcher.d, owned by root and not writable by
+#     others, and pre-up ones only through pre-up.d/. A port in the app's
+#     DHCP-server mode that comes up then asks the network first, and stops
+#     serving if another DHCP server answers - with the app closed too.
+#     br-wrapper is installed by an earlier line of the hooks list.
 #
 # Why both layouts: on the A/B image /etc and /var are rebuilt from the image
 # at every boot, so these are the device's settings for good; on the
@@ -41,6 +49,8 @@ dropin=/etc/NetworkManager/dnsmasq-shared.d/90-micropanel-no-gateway.conf
 nm_state=/var/lib/NetworkManager/NetworkManager.state
 rfkill_state=/var/lib/systemd/rfkill/platform-fe300000.mmcnr:wlan
 regdom=/etc/modprobe.d/cfg80211-regdom.conf
+guard_src=${MICROPANEL_PREFIX:-/home/pi/micropanel}/share/network-manager-app/90-net-ctl-guard
+dispatcher=/etc/NetworkManager/dispatcher.d
 
 # --- 1. The system dnsmasq off ------------------------------------------------
 systemctl disable dnsmasq.service 2>/dev/null || true
@@ -85,3 +95,15 @@ printf '# micropanel: WiFi regulatory domain (network-manager-app plan 5.4)\nopt
 chmod 0644 "$regdom"
 grep -qx "options cfg80211 ieee80211_regdom=$country" "$regdom" || die "regulatory domain not written: $regdom"
 say "WiFi on at boot: WirelessEnabled=true, $rfkill_state = 0, cfg80211 regdom $country"
+
+# --- 4. The DHCP guard ------------------------------------------------------------
+[ -f "$guard_src" ] || die "br-wrapper's dispatcher script is missing: $guard_src (is br-wrapper installed first?)"
+install -d -m0755 "$dispatcher/pre-up.d"
+install -o root -g root -m0755 "$guard_src" "$dispatcher/90-net-ctl-guard"
+ln -sfn ../90-net-ctl-guard "$dispatcher/pre-up.d/90-net-ctl-guard"
+# shellcheck disable=SC2016 # a literal ${NET_CTL:-...} in the pattern
+net_ctl=$(sed -n 's/^NET_CTL=\${NET_CTL:-\(.*\)}$/\1/p' "$dispatcher/90-net-ctl-guard")
+[ -x "$net_ctl" ] || die "the dispatcher script calls $net_ctl, which is not installed"
+[ "$(stat -c '%U %a' "$dispatcher/90-net-ctl-guard")" = "root 755" ] || die "the dispatcher script is not root-owned 0755"
+[ "$(readlink "$dispatcher/pre-up.d/90-net-ctl-guard")" = ../90-net-ctl-guard ] || die "pre-up.d link missing"
+say "DHCP guard: $dispatcher/90-net-ctl-guard (+ pre-up.d), calls $net_ctl"

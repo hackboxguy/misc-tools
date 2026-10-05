@@ -212,7 +212,8 @@ done
 # --- Network defaults (br-wrapper network-manager-app, its plan 5.4) -----------------
 # Both layouts: the packages the app's net-ctl.sh drives, declared in both
 # runtime lists, and the hook that masks the system dnsmasq, installs the
-# shared-mode no-gateway drop-in and switches WiFi on at boot (country DE).
+# shared-mode no-gateway drop-in, switches WiFi on at boot (country DE) and
+# puts the DHCP guard's dispatcher script in place.
 for package in network-manager wpasupplicant firmware-brcm80211 wireless-regdb iw rfkill nftables dnsmasq-base \
                python3 dnsmasq iperf3 curl ca-certificates iproute2; do
     for list in runtime-deps.txt runtime-deps-ab.txt; do
@@ -237,9 +238,23 @@ for needle in \
     "printf '0\\n' > \"\$rfkill_state\"" \
     'regdom=/etc/modprobe.d/cfg80211-regdom.conf' \
     'options cfg80211 ieee80211_regdom=%s' \
-    'country=${MICROPANEL_WIFI_COUNTRY:-DE}'; do
+    'country=${MICROPANEL_WIFI_COUNTRY:-DE}' \
+    'guard_src=${MICROPANEL_PREFIX:-/home/pi/micropanel}/share/network-manager-app/90-net-ctl-guard' \
+    'install -o root -g root -m0755 "$guard_src" "$dispatcher/90-net-ctl-guard"' \
+    'ln -sfn ../90-net-ctl-guard "$dispatcher/pre-up.d/90-net-ctl-guard"'; do
     grep -Fq -- "$needle" "$network_hook" || fail "network hook lacks: $needle"
 done
+# The guard's script comes from br-wrapper, installed by an earlier hooks line
+for list in hooks.txt hooks-ab.txt; do
+    wrapper_line=$(grep -n 'github.com/hackboxguy/br-wrapper.git' "$board/$list" | head -n 1 | cut -d: -f1)
+    hook_line=$(grep -nFx 'packages/micropanel-network-hook.sh' "$board/$list" | cut -d: -f1)
+    [ -n "$wrapper_line" ] && [ "$wrapper_line" -lt "$hook_line" ] || fail "$list: br-wrapper must come before the network hook"
+done
+if [ -d "$repo_root/../br-wrapper" ]; then
+    grep -Fq 'DESTINATION ${CMAKE_INSTALL_DATADIR}/network-manager-app' "$repo_root/../br-wrapper/package/network-manager-app/CMakeLists.txt" \
+        || fail "br-wrapper no longer installs the dispatcher script to share/network-manager-app"
+    [ -f "$repo_root/../br-wrapper/package/network-manager-app/src/90-net-ctl-guard.in" ] || fail "br-wrapper lacks 90-net-ctl-guard.in"
+fi
 # The app reads the image's WiFi default from exactly this form (wifiboot=on)
 grep -Fq "grep -qs 'ieee80211_regdom=' \"\$MODPROBE_DIR\"/*.conf" "$repo_root/../br-wrapper/package/network-manager-app/src/net-ctl.sh" 2>/dev/null || \
     [ ! -d "$repo_root/../br-wrapper" ] || fail "br-wrapper's net-ctl.sh no longer reads the regdom line the network hook writes"

@@ -84,6 +84,15 @@ display file (it is not on `/data`).
 - `/tmp/micropanel.log` (the System → Transfer Logs feature copies it to USB),
   FPGA/RH850/Vivado flash logs, hdmi-patch state, ping output, `/run/als-dimmer`
   and the als-dimmer socket: per-boot diagnostics and scratch.
+- The WiFi radio state and the regulatory country: NetworkManager's
+  `WirelessEnabled` (`/var/lib/NetworkManager/NetworkManager.state`), the saved
+  rfkill state (`/var/lib/systemd/rfkill/`) and the cfg80211 regdom option
+  (`/etc/modprobe.d/cfg80211-regdom.conf`) all come from the image
+  (`packages/micropanel-network-hook.sh`: WiFi on, country DE) at every boot.
+  Switching WiFi off - from the Network app or with `nmcli radio wifi off` -
+  lasts until the next boot. The WiFi *profiles* (saved networks and their
+  keys) persist through the NetworkManager bind above, so a saved network
+  rejoins at boot.
 - System journal, apt state, NetworkManager DHCP leases, dnsmasq leases, and the
   time-sync cache. The Pi has no RTC: a factory-reset device boots in the past
   until NTP syncs.
@@ -125,6 +134,15 @@ through a build variant.
 | `systemd-networkd-wait-online.service` | masked | NetworkManager owns networking |
 | `systemd-remount-fs.service`, `systemd-growfs-root.service` | skipped when `overlayroot=` is on the cmdline | an overlay root is neither remountable nor growable |
 | `ab-update-commit.service`, `ab-factory-reset.service` | installed by the A/B finalizer | the engine |
+
+Changed for every layout by `packages/micropanel-network-hook.sh` (the
+Network app's needs, br-wrapper `docs/network-manager-app-plan.md` 5.4):
+`dnsmasq.service` is disabled and masked - it holds port 53 and NetworkManager's
+shared mode (the app's DHCP-server mode) cannot start its own dnsmasq beside
+it; the OLED menu's DHCP-server mode unmasks it when used. The hook also
+installs `/etc/NetworkManager/dnsmasq-shared.d/90-micropanel-no-gateway.conf`
+(a serving port announces no router and no DNS server) and switches WiFi on
+at boot (see "Intentionally volatile").
 
 Measured on the 01.33 image: cloud-init is not installed (the hook would
 silence its key output if it were); `userconfig.service` exists but is not

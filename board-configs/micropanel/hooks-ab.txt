@@ -69,5 +69,9 @@ packages/disp-report-card-hook.sh|https://github.com/hackboxguy/disp-report-card
 #kodi custom add-on(video loop button)
 packages/kodi-custom-addons-hook.sh|https://github.com/hackboxguy/kodi-custom-addons.git|main|/home/pi/kodi-custom-addons|sqlite3
 
+#network defaults for br-wrapper's network-manager-app (plan 5.4): system dnsmasq masked,
+#shared-mode no-gateway drop-in, WiFi on at boot with country DE. No repo: nothing is cloned.
+packages/micropanel-network-hook.sh
+
 # Appliance conversion (A/B only). Must stay the last line.
 packages/micropanel-appliance-hook.sh

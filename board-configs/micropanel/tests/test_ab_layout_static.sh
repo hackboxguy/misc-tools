@@ -209,6 +209,41 @@ for survivor in '"$boot/Image"' '"$boot/initramfs-custom"' '"$root_mount/boot/co
     grep -Fq "$survivor" "$slim_hook" || fail "slim hook does not assert that $survivor survives"
 done
 
+# --- Network defaults (br-wrapper network-manager-app, its plan 5.4) -----------------
+# Both layouts: the packages the app's net-ctl.sh drives, declared in both
+# runtime lists, and the hook that masks the system dnsmasq, installs the
+# shared-mode no-gateway drop-in and switches WiFi on at boot (country DE).
+for package in network-manager wpasupplicant firmware-brcm80211 wireless-regdb iw rfkill nftables dnsmasq-base \
+               python3 dnsmasq iperf3; do
+    for list in runtime-deps.txt runtime-deps-ab.txt; do
+        strip_list "$board/$list" | grep -Fqx "$package" || fail "$list lacks $package (network-manager-app)"
+    done
+done
+network_hook="$board/packages/micropanel-network-hook.sh"
+[ -x "$network_hook" ] || fail "network hook missing or not executable: $network_hook"
+bash -n "$network_hook"
+for list in hooks.txt hooks-ab.txt; do
+    grep -Fqx 'packages/micropanel-network-hook.sh' "$board/$list" || fail "$list does not run the network hook"
+done
+for needle in \
+    'systemctl mask dnsmasq.service' \
+    '[ "$(readlink /etc/systemd/system/dnsmasq.service)" = /dev/null ]' \
+    'dropin=/etc/NetworkManager/dnsmasq-shared.d/90-micropanel-no-gateway.conf' \
+    '# network-manager-app: serve addresses only - no router, no DNS server announced' \
+    "for option in 'dhcp-option=3' 'dhcp-option=6'; do" \
+    'nm_state=/var/lib/NetworkManager/NetworkManager.state' \
+    "sed -i 's/^WirelessEnabled=.*/WirelessEnabled=true/'" \
+    'rfkill_state=/var/lib/systemd/rfkill/platform-fe300000.mmcnr:wlan' \
+    "printf '0\\n' > \"\$rfkill_state\"" \
+    'regdom=/etc/modprobe.d/cfg80211-regdom.conf' \
+    'options cfg80211 ieee80211_regdom=%s' \
+    'country=${MICROPANEL_WIFI_COUNTRY:-DE}'; do
+    grep -Fq -- "$needle" "$network_hook" || fail "network hook lacks: $needle"
+done
+# The app reads the image's WiFi default from exactly this form (wifiboot=on)
+grep -Fq "grep -qs 'ieee80211_regdom=' \"\$MODPROBE_DIR\"/*.conf" "$repo_root/../br-wrapper/package/network-manager-app/src/net-ctl.sh" 2>/dev/null || \
+    [ ! -d "$repo_root/../br-wrapper" ] || fail "br-wrapper's net-ctl.sh no longer reads the regdom line the network hook writes"
+
 # --- The appliance hook and its support files --------------------------------------
 appliance="$board/packages/micropanel-appliance-hook.sh"
 support="$board/packages/micropanel-appliance-hook.d"

@@ -73,8 +73,25 @@ else
     git checkout "$REF"
 fi
 
+# HOOK_DEP_LIST (the hook line's deps field, comma-separated): build packages
+# an earlier hook may have purged - on micropanel the br-wrapper line purges
+# qtdeclarative5-dev and pkg-config after its own build. Installed only when
+# missing, and purged again after the build: only what this hook installed.
+installed_deps=()
+for pkg in ${HOOK_DEP_LIST//,/ }; do
+    dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "install ok installed" || installed_deps+=("$pkg")
+done
+if [ ${#installed_deps[@]} -gt 0 ]; then
+    echo "Installing build packages an earlier hook purged: ${installed_deps[*]}"
+    apt-get install -y --no-install-recommends "${installed_deps[@]}"
+fi
+
 echo "[2/4] Building (build-and-deploy.sh, build-only)..."
 ./scripts/build-and-deploy.sh --mode=demo --dms=enable --skip-tests --skip-deploy
+
+if [ ${#installed_deps[@]} -gt 0 ]; then
+    apt-get purge -y "${installed_deps[@]}"
+fi
 
 # demo: the cluster's own drive cycle. proxy: the car-can-proxy contract on
 # vcan0, i.e. the bench vehicle the other two hooks install. Set per board in

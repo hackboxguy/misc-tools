@@ -67,7 +67,9 @@ packages/kodi-custom-addons-hook.sh|https://github.com/hackboxguy/kodi-custom-ad
 #proxy and emulator units are enabled (vcan only). qt-cluster-demo is private: cloned
 #on the build host (board.conf SOURCES). Own prefixes, not /home/pi/micropanel: both
 #repos install a qt-cluster-demo binary and a share/qt-apps/cluster-launcher.sh.
-../qt-cluster-demo/packages/qt-cluster-demo-hook.sh|file://${REPOBINS}/qt-cluster-demo|local|/home/pi/qt-cluster-demo
+#Deps field: what the cluster build needs that the br-wrapper line's purge took
+#away (the hook installs them only when missing and purges them again).
+../qt-cluster-demo/packages/qt-cluster-demo-hook.sh|file://${REPOBINS}/qt-cluster-demo|local|/home/pi/qt-cluster-demo|qtdeclarative5-dev,pkg-config
 ../qt-cluster-demo/packages/car-can-proxy-hook.sh|https://github.com/hackboxguy/car-can-proxy.git|main|/home/pi/car-can-proxy|
 ../qt-cluster-demo/packages/car-can-emulator-hook.sh|https://github.com/hackboxguy/car-can-emulator.git|main|/home/pi/car-can-emulator|
 

@@ -263,7 +263,7 @@ grep -Fq "grep -qs 'ieee80211_regdom=' \"\$MODPROBE_DIR\"/*.conf" "$repo_root/..
 # The stand-alone cluster board's hooks, in both lists, after br-wrapper and before
 # the network hook; the private repo cloned host-side; the micropanel switches (no
 # cluster unit, pruned); the runtime packages in both lists.
-cluster_hooks="../qt-cluster-demo/packages/qt-cluster-demo-hook.sh|file://\${REPOBINS}/qt-cluster-demo|local|/home/pi/qt-cluster-demo
+cluster_hooks="../qt-cluster-demo/packages/qt-cluster-demo-hook.sh|file://\${REPOBINS}/qt-cluster-demo|local|/home/pi/qt-cluster-demo|qtdeclarative5-dev,pkg-config
 ../qt-cluster-demo/packages/car-can-proxy-hook.sh|https://github.com/hackboxguy/car-can-proxy.git|main|/home/pi/car-can-proxy|
 ../qt-cluster-demo/packages/car-can-emulator-hook.sh|https://github.com/hackboxguy/car-can-emulator.git|main|/home/pi/car-can-emulator|"
 for list in hooks.txt hooks-ab.txt; do

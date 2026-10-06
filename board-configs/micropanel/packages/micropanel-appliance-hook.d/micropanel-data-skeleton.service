@@ -1,0 +1,25 @@
+[Unit]
+Description=Create the /data paths this image describes (additive; an update brings its new ones)
+# The same script the image finalizer runs on first flash and the factory
+# reset runs after a wipe; at every boot it creates only what is missing, so a
+# device updated in place gets the /data paths a newer image adds. Nothing
+# that exists is touched. Early: after /data and a requested reset, before
+# every bind in fstab.binds (they carry x-systemd.after= on this unit) and
+# before the restore units that read the skeleton's paths.
+DefaultDependencies=no
+Wants=data.mount
+After=data.mount ab-factory-reset.service
+Before=micropanel-machine-id.service micropanel-ssh-host-keys.service micropanel-debug-journal.service
+# No ordering against local-fs.target: /data and its binds are nofail and come
+# after it on this board (measured on rig 1), so a missing data partition must
+# not hold the boot up through this unit. Wanted like ab-factory-reset.service.
+# Without /data mounted the paths would go into the empty mount point in RAM
+ConditionPathIsMountPoint=/data
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ab-data-skeleton --root /data --account pi
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

@@ -291,6 +291,28 @@ cluster_hook="$board/../qt-cluster-demo/packages/qt-cluster-demo-hook.sh"
 awk '/^if \[ "\$CLUSTER_SERVICE" = 0 \]; then$/ { inside = 1 } inside && /^else$/ { exit found } inside && /systemctl enable|cluster-video/ { found = 1 } END { exit found }' "$cluster_hook" || \
     fail "qt-cluster-demo-hook.sh enables the cluster in its CLUSTER_SERVICE=0 branch"
 grep -Fq 'if [ "$CLUSTER_SERVICE" = 0 ]; then' "$cluster_hook" || fail "qt-cluster-demo-hook.sh lacks the CLUSTER_SERVICE switch"
+# The skeleton at every boot: the unit is installed and enabled by the appliance
+# hook, runs after /data and the reset, only with /data mounted, before the
+# restore units; every bind waits for it; the skeleton itself never touches an
+# existing directory (install -d would reset its mode and owner)
+skel_unit="$board/packages/micropanel-appliance-hook.d/micropanel-data-skeleton.service"
+[ -f "$skel_unit" ] || fail "micropanel-data-skeleton.service is missing"
+grep -Fqx 'ExecStart=/usr/local/sbin/ab-data-skeleton --root /data --account pi' "$skel_unit" || fail "the skeleton unit does not run ab-data-skeleton on /data"
+grep -Fqx 'After=data.mount ab-factory-reset.service' "$skel_unit" || fail "the skeleton unit is not ordered after /data and the reset"
+grep -Fqx 'ConditionPathIsMountPoint=/data' "$skel_unit" || fail "the skeleton unit would run without /data"
+for unit in micropanel-machine-id.service micropanel-ssh-host-keys.service; do
+    grep -E '^Before=' "$skel_unit" | grep -Fqw "$unit" || fail "the skeleton unit does not precede $unit"
+done
+# /data is nofail and comes after local-fs.target here: ordering the unit before
+# it would hold the boot up for the device timeout when the partition is missing
+grep -Eq '^(Before|WantedBy|RequiredBy)=.*local-fs\.target' "$skel_unit" && fail "the skeleton unit must not order or pull local-fs.target"
+grep -Fq 'systemctl enable micropanel-data-skeleton.service' "$board/packages/micropanel-appliance-hook.sh" || \
+    fail "the appliance hook does not enable micropanel-data-skeleton.service"
+grep -Ev '^[[:space:]]*(#|$)' "$board/packages/micropanel-appliance-hook.d/fstab.binds" | while IFS= read -r b; do
+    case $b in *x-systemd.after=micropanel-data-skeleton.service*) ;; *) fail "bind does not wait for the skeleton: $b" ;; esac
+done
+grep -Eq '^(install -d|[[:space:]]+install -d) ' "$skeleton" && fail "the skeleton calls install -d directly (an existing directory's mode and owner would be reset)"
+
 # Reserved addresses (network-manager-app): the network hook names the file in
 # /var/lib/micropanel, which is bound from /data before NetworkManager starts,
 # and the skeleton creates it empty (0644: dnsmasq reads it as nobody)
@@ -305,7 +327,7 @@ grep -Fq 'install -m0644 -o root -g root /dev/null "$data_root/micropanel-system
 # CLUSTER_DATA_ENV=1: the units read /data/cluster, which the data skeleton
 # creates (pi-owned: the operator writes it over SSH), so they wait for a reset
 grep -Fqx 'CLUSTER_DATA_ENV=1' "$board/board.conf" || fail "board.conf lacks CLUSTER_DATA_ENV=1"
-grep -Fq 'install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/cluster"' \
+grep -Fq 'new_dir -m0755 -o "$account_uid" -g "$account_gid" "$data_root/cluster"' \
     "$board/packages/micropanel-data-skeleton.sh" || fail "the data skeleton does not create /data/cluster"
 for unit in can-proxy-links.service can-proxyd.service car-can-emulator.service; do
     printf '%s\n' "$(sed -n 's/^AB_RESET_BEFORE=//p' "$ab_conf")" | grep -Fqw "$unit" || \

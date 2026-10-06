@@ -58,6 +58,11 @@ systemctl mask regenerate_ssh_host_keys.service sshd-keygen.service
 install -Dm0755 "$support/micropanel-debug-journal" /usr/local/sbin/micropanel-debug-journal
 install -Dm0644 "$support/micropanel-debug-journal.service" /etc/systemd/system/micropanel-debug-journal.service
 systemctl enable micropanel-debug-journal.service
+
+# The data skeleton at every boot (PERSISTENCE.md): a device updated in place
+# gets the /data paths a newer image adds; the binds in fstab.binds wait for it
+install -Dm0644 "$support/micropanel-data-skeleton.service" /etc/systemd/system/micropanel-data-skeleton.service
+systemctl enable micropanel-data-skeleton.service
 say "identity: machine-id emptied; micropanel-machine-id and micropanel-ssh-host-keys enabled; regenerate_ssh_host_keys and sshd-keygen masked"
 
 # --- 2. Services that must not run on an overlay root ----------------------------

@@ -14,15 +14,22 @@ Mechanisms, in one place:
 
 - **Data skeleton** `packages/micropanel-data-skeleton.sh` creates the `/data`
   layout below. The image finalizer runs it on first flash; the factory reset
-  runs the same script (`/usr/local/sbin/ab-data-skeleton`) after the wipe, so
-  a reset device and a freshly flashed one cannot drift. Seeds come from the
+  runs the same script (`/usr/local/sbin/ab-data-skeleton`) after the wipe;
+  and `micropanel-data-skeleton.service` runs it at every boot (after
+  `data.mount` and `ab-factory-reset.service`, before every bind below and the
+  restore units; only when `/data` is mounted), so a reset device, a freshly
+  flashed one and one updated in place cannot drift: an A/B update brings the
+  `/data` paths its image adds. The script is additive - it creates what is
+  missing and never touches a path that exists (its content, owner or mode);
+  the only re-chown is the disp-settings restore's, below. Seeds come from the
   image: `$AB_SEED_ROOT` (the authored root) at finalize time,
   `/media/root-ro` (the read-only lower root) at reset time, and only into an
   empty destination.
 - **Bind mounts** are listed in `packages/micropanel-appliance-hook.d/fstab.binds`
   and appended to `/etc/fstab` by the appliance hook. Each is
   `nofail`, requires `data.mount`, runs after `ab-factory-reset.service` and
-  before its consumer; every consumer is in `ab-update.conf`
+  `micropanel-data-skeleton.service` (its source exists) and before its
+  consumer; every consumer is in `ab-update.conf`
   `AB_RESET_BEFORE`. If `/data` fails to mount the paths fall back to the
   (empty, volatile) lower-root directories - the device boots, forgetfully.
 - **Restore units** copy durable identity into the volatile root early in boot.

@@ -1,9 +1,11 @@
 #!/bin/bash
 # Create the durable micropanel state layout on /data (A/B images only).
 #
-# Run by the host-side image finalizer on first flash and by the engine's
-# factory reset on the device (installed as /usr/local/sbin/ab-data-skeleton),
-# so a reset device and a freshly flashed one cannot drift. Keep every
+# Run by the host-side image finalizer on first flash, by the engine's
+# factory reset on the device (installed as /usr/local/sbin/ab-data-skeleton)
+# and at every boot by micropanel-data-skeleton.service, so a reset device, a
+# freshly flashed one and one updated in place cannot drift. Additive: a path
+# that exists is left as it is. Keep every
 # first-boot state directory here. PERSISTENCE.md says what binds to what.
 #
 # Pristine seeds come from the image itself: $AB_SEED_ROOT is the mounted
@@ -58,18 +60,28 @@ fi
 
 seed_root=${AB_SEED_ROOT:-/media/root-ro}
 
+# new_dir <install -d options...> <path>: create the directory with its owner
+# and mode - only when it is not there. The skeleton also runs at every boot
+# (micropanel-data-skeleton.service), so a device updated to a newer image
+# gets the paths that image adds; what a device already has is never touched
+# (install -d alone would reset an existing directory's mode and owner).
+new_dir() {
+    local path="${*: -1}"
+    [ -d "$path" ] || install -d "$@"
+}
+
 # micropanel's own settings (settings.json is a symlink into here).
-install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/micropanel"
+new_dir -m0755 -o "$account_uid" -g "$account_gid" "$data_root/micropanel"
 
 # Device identity and update state (AB_STATE_DIR) are root-only system state.
 # The two below live here rather than under the pi-owned micropanel/ so that pi
 # cannot rename the host-key directory or the DIP-switch guard.
-install -d -m0700 -o root -g root "$data_root/micropanel-system"
+new_dir -m0700 -o root -g root "$data_root/micropanel-system"
 # Restored into /etc/ssh at boot, so a device keeps its host keys across updates.
-install -d -m0700 -o root -g root "$data_root/micropanel-system/ssh-host-keys"
+new_dir -m0700 -o root -g root "$data_root/micropanel-system/ssh-host-keys"
 # Bound to /var/lib/micropanel. It holds the DIP-switch service's reboot-loop
 # guard, which must survive the reboot it triggers.
-install -d -m0755 -o root -g root "$data_root/micropanel-system/var-lib-micropanel"
+new_dir -m0755 -o root -g root "$data_root/micropanel-system/var-lib-micropanel"
 # ... and the Network app's reserved DHCP addresses (net-ctl.sh dhcp-reserve;
 # dnsmasq reads the file as nobody, hence 0644). Empty: no reservations.
 [ -e "$data_root/micropanel-system/var-lib-micropanel/dhcp-reservations" ] || \
@@ -78,31 +90,31 @@ install -d -m0755 -o root -g root "$data_root/micropanel-system/var-lib-micropan
 # Bound to /var/lib/disp-settings (the dual-display mode restored at boot).
 # pi-owned: disp-settings-dual-display-restore.service chowns it to pi:pi on
 # every boot anyway, so a reset device must start where a running one is.
-install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/disp-settings"
+new_dir -m0755 -o "$account_uid" -g "$account_gid" "$data_root/disp-settings"
 # System Manager (br-wrapper): the logs of its sections, the last-install
 # record and the acknowledged fallback. Not device state; a reset empties it.
-install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/system-manager"
-install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/system-manager/logs"
+new_dir -m0755 -o "$account_uid" -g "$account_gid" "$data_root/system-manager"
+new_dir -m0755 -o "$account_uid" -g "$account_gid" "$data_root/system-manager/logs"
 # Bound to /home/pi/.kodi (database, add-ons, settings).
-install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/kodi"
+new_dir -m0755 -o "$account_uid" -g "$account_gid" "$data_root/kodi"
 # Bound to the disptool test framework's results directory (measurements).
-install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/disptool-results"
+new_dir -m0755 -o "$account_uid" -g "$account_gid" "$data_root/disptool-results"
 # Bound to /home/pi/test-reports: the launcher's display-analysis reports
 # (Analyze Color Gamut, Local Dimming APL) - report PNGs and their data.
-install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/test-reports"
+new_dir -m0755 -o "$account_uid" -g "$account_gid" "$data_root/test-reports"
 
 # als-dimmer's state (mode, manual brightness): every installed als-dimmer config
 # names its state_file in here (the appliance hook rewrites them). root: the
 # daemon runs as root. A reset empties it, so the dimmer starts in AUTO again.
-install -d -m0755 -o root -g root "$data_root/als-dimmer"
+new_dir -m0755 -o root -g root "$data_root/als-dimmer"
 
 # Cluster Demo V2: the operator's overrides of the proxy's, the emulator's and
 # the cluster's env files (can-proxyd.env, car-can-emulator.env,
 # qt-cluster-demo.env), read after the image's. Empty: the image's defaults.
-install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/cluster"
+new_dir -m0755 -o "$account_uid" -g "$account_gid" "$data_root/cluster"
 
 # NetworkManager's keyfile backend requires this restrictive mode.
-install -d -m0700 -o root -g root "$data_root/NetworkManager/system-connections"
+new_dir -m0700 -o root -g root "$data_root/NetworkManager/system-connections"
 
 # --- Seeds ------------------------------------------------------------------
 # kodi: the image's add-ons hook builds a profile (database, keymaps, skin

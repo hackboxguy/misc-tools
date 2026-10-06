@@ -70,6 +70,10 @@ install -d -m0700 -o root -g root "$data_root/micropanel-system/ssh-host-keys"
 # Bound to /var/lib/micropanel. It holds the DIP-switch service's reboot-loop
 # guard, which must survive the reboot it triggers.
 install -d -m0755 -o root -g root "$data_root/micropanel-system/var-lib-micropanel"
+# ... and the Network app's reserved DHCP addresses (net-ctl.sh dhcp-reserve;
+# dnsmasq reads the file as nobody, hence 0644). Empty: no reservations.
+[ -e "$data_root/micropanel-system/var-lib-micropanel/dhcp-reservations" ] || \
+    install -m0644 -o root -g root /dev/null "$data_root/micropanel-system/var-lib-micropanel/dhcp-reservations"
 
 # Bound to /var/lib/disp-settings (the dual-display mode restored at boot).
 # pi-owned: disp-settings-dual-display-restore.service chowns it to pi:pi on
@@ -91,6 +95,11 @@ install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/test-reports"
 # names its state_file in here (the appliance hook rewrites them). root: the
 # daemon runs as root. A reset empties it, so the dimmer starts in AUTO again.
 install -d -m0755 -o root -g root "$data_root/als-dimmer"
+
+# Cluster Demo V2: the operator's overrides of the proxy's, the emulator's and
+# the cluster's env files (can-proxyd.env, car-can-emulator.env,
+# qt-cluster-demo.env), read after the image's. Empty: the image's defaults.
+install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/cluster"
 
 # NetworkManager's keyfile backend requires this restrictive mode.
 install -d -m0700 -o root -g root "$data_root/NetworkManager/system-connections"

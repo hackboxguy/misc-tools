@@ -18,6 +18,27 @@ set -e
 # CLUSTER_PRUNE=1 (board.conf, see qt-cluster-demo-hook.sh): keep only what
 # the unit runs - the binary, the drive cycles, systemd/ and the README.
 CLUSTER_PRUNE="${CLUSTER_PRUNE:-0}"
+# CLUSTER_DATA_ENV=1 (see qt-cluster-demo-hook.sh): the unit(s) also read
+# /data/cluster/<env file> after the image's.
+CLUSTER_DATA_ENV="${CLUSTER_DATA_ENV:-0}"
+
+# data_env_dropin <unit> <env file name>: CLUSTER_DATA_ENV=1's drop-in. Wants=,
+# not Requires=: without /data the unit still starts, on the image's defaults.
+data_env_dropin() {
+    install -d "/etc/systemd/system/$1.d"
+    cat > "/etc/systemd/system/$1.d/50-data-env.conf" <<EOF
+# CLUSTER_DATA_ENV=1 (board.conf): an operator's override on /data, read after
+# the image's env file - the later file wins. Survives reboots and updates; a
+# factory reset empties /data/cluster.
+[Unit]
+Wants=data.mount
+After=data.mount
+[Service]
+EnvironmentFile=-/data/cluster/$2
+EOF
+    echo "  $1: reads /data/cluster/$2 after the image's env file"
+}
+
 
 # prune_to <dir> <path>...: keep only the listed paths (relative to <dir>)
 # and delete the rest of the tree - sources, object files, tests, .git. For
@@ -75,6 +96,10 @@ EMULATOR_ARGS=--node=vcan1 --car=hybrid --drive-cycle=$DEST/cycles/demo.cycle
 #EMULATOR_ARGS=--node=can0 --car=ice --debugprint=true
 ENVEOF
 systemctl enable "$DEST/systemd/car-can-emulator.service"
+
+if [ "$CLUSTER_DATA_ENV" = 1 ]; then
+    data_env_dropin car-can-emulator.service car-can-emulator.env
+fi
 
 if [ "$CLUSTER_PRUNE" = 1 ]; then
     echo "Pruning to the runtime files (CLUSTER_PRUNE=1)..."

@@ -291,6 +291,30 @@ cluster_hook="$board/../qt-cluster-demo/packages/qt-cluster-demo-hook.sh"
 awk '/^if \[ "\$CLUSTER_SERVICE" = 0 \]; then$/ { inside = 1 } inside && /^else$/ { exit found } inside && /systemctl enable|cluster-video/ { found = 1 } END { exit found }' "$cluster_hook" || \
     fail "qt-cluster-demo-hook.sh enables the cluster in its CLUSTER_SERVICE=0 branch"
 grep -Fq 'if [ "$CLUSTER_SERVICE" = 0 ]; then' "$cluster_hook" || fail "qt-cluster-demo-hook.sh lacks the CLUSTER_SERVICE switch"
+# Reserved addresses (network-manager-app): the network hook names the file in
+# /var/lib/micropanel, which is bound from /data before NetworkManager starts,
+# and the skeleton creates it empty (0644: dnsmasq reads it as nobody)
+grep -Fq 'res_file=/var/lib/micropanel/dhcp-reservations' "$board/packages/micropanel-network-hook.sh" && \
+    grep -Fq 'dhcp-hostsfile=$res_file' "$board/packages/micropanel-network-hook.sh" || \
+    fail "the network hook does not install the reservation drop-in"
+grep -E '^/data/micropanel-system/var-lib-micropanel /var/lib/micropanel ' "$board/packages/micropanel-appliance-hook.d/fstab.binds" | \
+    grep -Fq 'x-systemd.before=NetworkManager.service' || fail "the /var/lib/micropanel bind is not ordered before NetworkManager"
+grep -Fq 'install -m0644 -o root -g root /dev/null "$data_root/micropanel-system/var-lib-micropanel/dhcp-reservations"' \
+    "$skeleton" || fail "the data skeleton does not create the reservation file"
+
+# CLUSTER_DATA_ENV=1: the units read /data/cluster, which the data skeleton
+# creates (pi-owned: the operator writes it over SSH), so they wait for a reset
+grep -Fqx 'CLUSTER_DATA_ENV=1' "$board/board.conf" || fail "board.conf lacks CLUSTER_DATA_ENV=1"
+grep -Fq 'install -d -m0755 -o "$account_uid" -g "$account_gid" "$data_root/cluster"' \
+    "$board/packages/micropanel-data-skeleton.sh" || fail "the data skeleton does not create /data/cluster"
+for unit in can-proxy-links.service can-proxyd.service car-can-emulator.service; do
+    printf '%s\n' "$(sed -n 's/^AB_RESET_BEFORE=//p' "$ab_conf")" | grep -Fqw "$unit" || \
+        fail "$unit reads /data/cluster but is not in AB_RESET_BEFORE"
+done
+for hook in car-can-proxy-hook.sh car-can-emulator-hook.sh qt-cluster-demo-hook.sh; do
+    grep -Fq 'EnvironmentFile=-/data/cluster/$2' "$board/../qt-cluster-demo/packages/$hook" || \
+        fail "$hook does not write the /data/cluster drop-in"
+done
 for package in fonts-roboto can-utils; do
     for list in runtime-deps.txt runtime-deps-ab.txt; do
         strip_list "$board/$list" | grep -Fqx "$package" || fail "$list lacks $package (Cluster Demo V2)"
@@ -393,7 +417,8 @@ for unit in $(sed -n 's/^AB_RESET_BEFORE=//p' "$ab_conf"); do
     printf '%s\n' $os_units | grep -Fqx "$unit" && continue
     [ -f "$support/$unit" ] && continue
     grep -Eq "(systemctl (enable|link) [^|;]*${unit%.service}(\.service)?|/${unit}( |$|;))" \
-        "$board/hooks.txt" "$board/packages/"*.sh && continue
+        "$board/hooks.txt" "$board/packages/"*.sh \
+        "$board/../qt-cluster-demo/packages/"car-can-*-hook.sh && continue
     fail "AB_RESET_BEFORE names $unit, which nothing installs or enables"
 done
 # Every bind the hook writes: the finalizer keeps it, and its consumer waits

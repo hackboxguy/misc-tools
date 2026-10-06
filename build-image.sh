@@ -215,6 +215,7 @@ MICROPANEL_TOUCH_REF=""
 CLUSTER_SOURCE_ENV="${CLUSTER_SOURCE:-}"
 CLUSTER_SERVICE_ENV="${CLUSTER_SERVICE:-}"
 CLUSTER_PRUNE_ENV="${CLUSTER_PRUNE:-}"
+CLUSTER_DATA_ENV_ENV="${CLUSTER_DATA_ENV:-}"
 if [ $PROFILE_ONLY -eq 0 ]; then
     BOARD_DIR="$BOARD_CONFIGS_DIR/$BOARD"
     BOARD_CONF="$BOARD_DIR/board.conf"
@@ -246,11 +247,14 @@ case "${CLUSTER_SOURCE:-}" in
 esac
 # How the cluster hooks install (see qt-cluster-demo-hook.sh): CLUSTER_SERVICE=0
 # enables no cluster unit (a launcher starts the app), CLUSTER_PRUNE=1 strips
-# the repos to their runtime files. Empty = the hooks' defaults (1 and 0).
+# the repos to their runtime files, CLUSTER_DATA_ENV=1 lets the units read an
+# override from /data/cluster. Empty = the hooks' defaults (1, 0 and 0).
 CLUSTER_SERVICE="${CLUSTER_SERVICE_ENV:-$(resolve_cfg CLUSTER_SERVICE)}"
 CLUSTER_PRUNE="${CLUSTER_PRUNE_ENV:-$(resolve_cfg CLUSTER_PRUNE)}"
+CLUSTER_DATA_ENV="${CLUSTER_DATA_ENV_ENV:-$(resolve_cfg CLUSTER_DATA_ENV)}"
 case "${CLUSTER_SERVICE:-}" in ""|0|1) ;; *) die "CLUSTER_SERVICE must be 0 or 1, got '$CLUSTER_SERVICE'" ;; esac
 case "${CLUSTER_PRUNE:-}" in ""|0|1) ;; *) die "CLUSTER_PRUNE must be 0 or 1, got '$CLUSTER_PRUNE'" ;; esac
+case "${CLUSTER_DATA_ENV:-}" in ""|0|1) ;; *) die "CLUSTER_DATA_ENV must be 0 or 1, got '$CLUSTER_DATA_ENV'" ;; esac
 
 RUNTIME_DEPS="$(resolve_cfg RUNTIME_DEPS)"
 BUILD_DEPS="$(resolve_cfg BUILD_DEPS)"
@@ -669,6 +673,7 @@ apps_stamp_inputs() {
     # Only when set, so boards that leave them empty keep their stamp
     [ -n "${CLUSTER_SERVICE:-}" ] && in+=("cluster-service:$CLUSTER_SERVICE")
     [ -n "${CLUSTER_PRUNE:-}" ] && in+=("cluster-prune:$CLUSTER_PRUNE")
+    [ -n "${CLUSTER_DATA_ENV:-}" ] && in+=("cluster-data-env:$CLUSTER_DATA_ENV")
     [ "$HOOK_LIST" != "none" ] && [ -n "$HOOK_LIST" ] && in+=("file:$HOOK_LIST")
     local h d entry url ref
     for h in "${HOOK_SCRIPTS[@]}"; do in+=("file:$h"); done
@@ -1191,7 +1196,7 @@ run_stage_apps() {
     MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" \
     MICROPANEL_TOUCH_APP_REPO="${MICROPANEL_TOUCH_APP_REPO:-}" \
     AB_MANIFEST_PATH="$([ "$AB_LAYOUT" = "1" ] && printf '%s' "${AB_MANIFEST_PATH:-}")" \
-    CLUSTER_SOURCE="${CLUSTER_SOURCE:-}" CLUSTER_SERVICE="${CLUSTER_SERVICE:-}" CLUSTER_PRUNE="${CLUSTER_PRUNE:-}" "$IMAGER" \
+    CLUSTER_SOURCE="${CLUSTER_SOURCE:-}" CLUSTER_SERVICE="${CLUSTER_SERVICE:-}" CLUSTER_PRUNE="${CLUSTER_PRUNE:-}" CLUSTER_DATA_ENV="${CLUSTER_DATA_ENV:-}" "$IMAGER" \
         --mode=incremental \
         --baseimage="$APPS_INPUT" \
         --output="$work" \

@@ -35,7 +35,7 @@ Mechanisms, in one place:
 | `micropanel-system/` | root, `0700` | - | Update state (`AB_STATE_DIR`: `update-state`, the factory-reset marker) and `machine-id` | Wiped by a reset (a reset device looks freshly flashed) |
 | `micropanel-system/machine-id` | root; file `0444` | copied to `/etc/machine-id` and `/var/lib/dbus/machine-id` by `micropanel-machine-id.service` (sysinit, before D-Bus and journal flush; restarts journald) | One identity per flashed device, captured from systemd's random first-boot ID | New identity after a reset |
 | `micropanel-system/ssh-host-keys/` | root, `0700` | copied into `/etc/ssh` by `micropanel-ssh-host-keys.service` before `ssh.service` | Host keys, created once; `regenerate_ssh_host_keys` and `sshd-keygen` are masked | New keys after a reset |
-| `micropanel-system/var-lib-micropanel/` | root, `0755` | bind → `/var/lib/micropanel` (before `dip-switch-resolution.service`) | `dip-reboot-pending`: the DIP-switch service's reboot-loop guard. It must survive the reboot it triggers, or a persistent mismatch reboots forever | Empty |
+| `micropanel-system/var-lib-micropanel/` | root, `0755` | bind → `/var/lib/micropanel` (before `dip-switch-resolution.service` and `NetworkManager.service`) | `dip-reboot-pending`: the DIP-switch service's reboot-loop guard. It must survive the reboot it triggers, or a persistent mismatch reboots forever. `dhcp-reservations` (`0644`, dnsmasq reads it as nobody): the Network app's reserved addresses (`net-ctl.sh dhcp-reserve`), `MAC,ip` lines for every serving port, named by the image's `/etc/NetworkManager/dnsmasq-shared.d/91-micropanel-reservations.conf` (`dhcp-hostsfile=`) and re-read by a port's dnsmasq on SIGHUP | `dhcp-reservations` created empty; a reset empties both (no reservations) |
 | `disp-settings/` | pi, `0755` (the restore unit chowns it every boot) | bind → `/var/lib/disp-settings` (before `disp-settings-dual-display-restore.service`) | `dual-display-mode.json`, restored at boot | Empty |
 | `kodi/` | pi, `0755` | bind → `/home/pi/.kodi` (before `micropanel.service`) | kodi user data: database, add-ons, settings, thumbnails and caches | Seeded from the image's authored `/home/pi/.kodi` (the add-ons hook builds it), owned by pi; re-seeded by a reset |
 | `disptool-results/` | pi, `0755` | bind → `/home/pi/micropanel/share/disptool/display-test-framework/results` (before `micropanel.service`) | disptool test framework measurement runs | Empty |
@@ -43,6 +43,7 @@ Mechanisms, in one place:
 | `micropanel-system/debug/` | root, `0700` | - | Bench forensics (`micropanel-debug-journal.service`; in release images too, and inert there unless the `micropanel.debug-journal=1` cmdline token or a `debug/enabled` marker is present): per boot `boot-<NNNN>-<boot-id>` (NNNN a counter kept in the directory - no RTC) with a `.start` snapshot, a `.late` timing at 90 s, unbuffered `.dmesg` and `.journal` mirrors and a 5 s `.sample` line (load, dirty/writeback memory, SD requests in flight, update progress; PSI only with `psi=1` on the cmdline); 20 MiB each, newest 5 boots. ext4's 5 s commit bounds what a reset loses | Created on first use; a reset wipes it |
 | `system-manager/` and `system-manager/logs/` | pi, `0755` | - | System Manager (br-wrapper): the logs of its sections, the `last-install` record, `acknowledged-fallback` | Empty; a reset empties them (logs are not device state) |
 | `als-dimmer/` | root, `0755` | every installed als-dimmer config's `control.state_file` is `/data/als-dimmer/<name>` (the appliance hook rewrites the shipped `/tmp` and `/home/pi` paths; the file name is kept, e.g. `state.json`, `als-dimmer-pwm-state.json`) | als-dimmer daemon (root): operating mode (AUTO/MANUAL), manual brightness, offset. Saved on every change from the client/UI and at shutdown | Empty: a new or reset device starts in AUTO (ambient-light) mode |
+| `cluster/` | pi, `0755` | read directly: `can-proxyd.env` by `can-proxy-links.service` and `can-proxyd.service`, `car-can-emulator.env` by `car-can-emulator.service` (each through a `50-data-env.conf` drop-in, `EnvironmentFile=-/data/cluster/…` after the image's file, `After=`/`Wants=data.mount`), `qt-cluster-demo.env` by the launcher's `cluster-v2.sh` (after the image's file) | The operator, over SSH: Cluster Demo V2's overrides - the proxy's plugin and vehicle interface (a real car), the emulator's car, the cluster's `CLUSTER_ARGS`/`EXTRA_ARGS`. Only the keys that differ; the later file wins. Board switch `CLUSTER_DATA_ENV=1` | Empty: the image's defaults (bench emulator). A reset empties it |
 | `NetworkManager/system-connections/` | root, `0700` | bind → `/etc/NetworkManager/system-connections` (the engine's own line) | NetworkManager keyfiles: the Network menu's DHCP/static profiles, WiFi | The image's shipped profiles; re-seeded by a reset (`AB_RESET_SEED`) |
 
 `host-key` and DIP-guard directories live under the root-only
@@ -93,16 +94,16 @@ display file (it is not on `/data`).
   lasts until the next boot. The WiFi *profiles* (saved networks and their
   keys) persist through the NetworkManager bind above, so a saved network
   rejoins at boot.
-- Cluster Demo V2: the trees `/home/pi/qt-cluster-demo`, `/home/pi/car-can-proxy`
-  and `/home/pi/car-can-emulator` (pruned to their runtime files) and their
+- Cluster Demo V2: the trees `/home/pi/qt-cluster-demo` (the installed app:
+  `bin/`, `share/qt-cluster-demo/`, `systemd/`), `/home/pi/car-can-proxy` and
+  `/home/pi/car-can-emulator` (pruned to their runtime files) and their
   environment files - `qt-cluster-demo/systemd/qt-cluster-demo.env` (the
   cluster's arguments: proxy on vcan0, FocusDrive DMS over SOME/IP on eth0),
   `car-can-proxy/systemd/can-proxyd.env` (bench: plugin emu-hybrid on vcan1) and
   `car-can-emulator/systemd/car-can-emulator.env` (`--car=hybrid` on vcan1 with
   the demo drive cycle) - are image content, written by the hooks at build
-  time. An edit on a running device (another plugin, a real `can0`, other DMS
-  arguments) lasts until the next boot. Pointing the proxy at a real car for
-  good needs a place on `/data` (not built; see the cluster report).
+  time. An edit there lasts until the next boot; a lasting change goes into
+  `/data/cluster/` (see the durable table).
 - System journal, apt state, NetworkManager DHCP leases, dnsmasq leases, and the
   time-sync cache. The Pi has no RTC: a factory-reset device boots in the past
   until NTP syncs.
@@ -151,14 +152,18 @@ Network app's needs, br-wrapper `docs/network-manager-app-plan.md` 5.4):
 shared mode (the app's DHCP-server mode) cannot start its own dnsmasq beside
 it; the OLED menu's DHCP-server mode unmasks it when used. The hook also
 installs `/etc/NetworkManager/dnsmasq-shared.d/90-micropanel-no-gateway.conf`
-(a serving port announces no router and no DNS server) and switches WiFi on
-at boot (see "Intentionally volatile").
+(a serving port announces no router and no DNS server) and
+`91-micropanel-reservations.conf` (the reservation file above), and switches
+WiFi on at boot (see "Intentionally volatile"). Both drop-ins are image
+content; the reservations themselves are on `/data`.
 
 Enabled for every layout by the Cluster Demo V2 hooks
 (`../qt-cluster-demo/packages/`, see `hooks.txt`): `can-proxy-links.service`
 (creates vcan0 and vcan1, loads `vcan` and `can_isotp`), `can-proxyd.service`
 and `car-can-emulator.service` - always-on services that touch only the vcan
-interfaces. They are not update-health units (`AB_HEALTH_UNITS` stays the
+interfaces (until an override on `/data/cluster` points the proxy at a real
+CAN port). They read `/data/cluster`, so they are in `AB_RESET_BEFORE`; they
+are not update-health units (`AB_HEALTH_UNITS` stays the
 launcher alone). `qt-cluster-demo.service` is **not** enabled and
 `cluster-video.service` is not linked (`CLUSTER_SERVICE=0`): the launcher's
 Cluster Demo V2 page starts the cluster and gets the display back when it exits.

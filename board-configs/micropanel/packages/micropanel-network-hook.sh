@@ -29,6 +29,15 @@
 #     DHCP-server mode that comes up then asks the network first, and stops
 #     serving if another DHCP server answers - with the app closed too.
 #     br-wrapper is installed by an earlier line of the hooks list.
+#  5. Reserved addresses for the clients of a serving port (the Network app's
+#     Reserve, net-ctl.sh dhcp-reserve): a second drop-in names a dhcp-hostsfile,
+#     /var/lib/micropanel/dhcp-reservations, which net-ctl.sh writes and the
+#     port's dnsmasq re-reads on SIGHUP (a dhcp-host line in the drop-in
+#     directory itself would need the port re-activated). On the A/B image
+#     /var/lib/micropanel is bound from /data (fstab.binds, before
+#     NetworkManager), so reservations survive reboots and updates; a factory
+#     reset empties them. The file is created empty here (and on /data by the
+#     data skeleton), so dnsmasq never logs that it cannot read it.
 #
 # Why both layouts: on the A/B image /etc and /var are rebuilt from the image
 # at every boot, so these are the device's settings for good; on the
@@ -51,6 +60,8 @@ rfkill_state=/var/lib/systemd/rfkill/platform-fe300000.mmcnr:wlan
 regdom=/etc/modprobe.d/cfg80211-regdom.conf
 guard_src=${MICROPANEL_PREFIX:-/home/pi/micropanel}/share/network-manager-app/90-net-ctl-guard
 dispatcher=/etc/NetworkManager/dispatcher.d
+res_dropin=/etc/NetworkManager/dnsmasq-shared.d/91-micropanel-reservations.conf
+res_file=/var/lib/micropanel/dhcp-reservations
 
 # --- 1. The system dnsmasq off ------------------------------------------------
 systemctl disable dnsmasq.service 2>/dev/null || true
@@ -107,3 +118,15 @@ net_ctl=$(sed -n 's/^NET_CTL=\${NET_CTL:-\(.*\)}$/\1/p' "$dispatcher/90-net-ctl-
 [ "$(stat -c '%U %a' "$dispatcher/90-net-ctl-guard")" = "root 755" ] || die "the dispatcher script is not root-owned 0755"
 [ "$(readlink "$dispatcher/pre-up.d/90-net-ctl-guard")" = ../90-net-ctl-guard ] || die "pre-up.d link missing"
 say "DHCP guard: $dispatcher/90-net-ctl-guard (+ pre-up.d), calls $net_ctl"
+
+# --- 5. Reserved addresses: a hostsfile dnsmasq re-reads on SIGHUP ---------------
+cat > "$res_dropin" <<EOF
+# network-manager-app: reserved addresses (net-ctl.sh dhcp-reserve writes the file,
+# then sends SIGHUP to the serving port's dnsmasq, which re-reads it)
+dhcp-hostsfile=$res_file
+EOF
+chmod 0644 "$res_dropin"
+install -d -m0755 "$(dirname "$res_file")"
+[ -e "$res_file" ] || install -m0644 /dev/null "$res_file"
+grep -qx "dhcp-hostsfile=$res_file" "$res_dropin" || die "reservation drop-in is wrong: $res_dropin"
+say "reservations: $res_dropin -> $res_file"

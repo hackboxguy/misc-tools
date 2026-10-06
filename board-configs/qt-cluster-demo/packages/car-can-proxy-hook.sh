@@ -28,6 +28,27 @@ set -e
 # CLUSTER_PRUNE=1 (board.conf, see qt-cluster-demo-hook.sh): keep only what
 # the units run - can-proxyd, its plugin .so files, systemd/, docs, README.
 CLUSTER_PRUNE="${CLUSTER_PRUNE:-0}"
+# CLUSTER_DATA_ENV=1 (see qt-cluster-demo-hook.sh): the unit(s) also read
+# /data/cluster/<env file> after the image's.
+CLUSTER_DATA_ENV="${CLUSTER_DATA_ENV:-0}"
+
+# data_env_dropin <unit> <env file name>: CLUSTER_DATA_ENV=1's drop-in. Wants=,
+# not Requires=: without /data the unit still starts, on the image's defaults.
+data_env_dropin() {
+    install -d "/etc/systemd/system/$1.d"
+    cat > "/etc/systemd/system/$1.d/50-data-env.conf" <<EOF
+# CLUSTER_DATA_ENV=1 (board.conf): an operator's override on /data, read after
+# the image's env file - the later file wins. Survives reboots and updates; a
+# factory reset empties /data/cluster.
+[Unit]
+Wants=data.mount
+After=data.mount
+[Service]
+EnvironmentFile=-/data/cluster/$2
+EOF
+    echo "  $1: reads /data/cluster/$2 after the image's env file"
+}
+
 
 # prune_to <dir> <path>...: keep only the listed paths (relative to <dir>)
 # and delete the rest of the tree - sources, object files, tests, .git. For
@@ -92,6 +113,11 @@ systemctl enable "$DEST/systemd/can-proxy-links.service" "$DEST/systemd/can-prox
 # The battery-ECU plugins and the emulator's ev/hybrid modes use the kernel
 # ISO-TP socket; load it at boot (can-proxy-links also modprobes it).
 echo can_isotp > /etc/modules-load.d/can-isotp.conf
+
+if [ "$CLUSTER_DATA_ENV" = 1 ]; then
+    data_env_dropin can-proxy-links.service can-proxyd.env
+    data_env_dropin can-proxyd.service can-proxyd.env
+fi
 
 if [ "$CLUSTER_PRUNE" = 1 ]; then
     echo "Pruning to the runtime files (CLUSTER_PRUNE=1)..."

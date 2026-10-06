@@ -93,6 +93,16 @@ display file (it is not on `/data`).
   lasts until the next boot. The WiFi *profiles* (saved networks and their
   keys) persist through the NetworkManager bind above, so a saved network
   rejoins at boot.
+- Cluster Demo V2: the trees `/home/pi/qt-cluster-demo`, `/home/pi/car-can-proxy`
+  and `/home/pi/car-can-emulator` (pruned to their runtime files) and their
+  environment files - `qt-cluster-demo/systemd/qt-cluster-demo.env` (the
+  cluster's arguments: proxy on vcan0, FocusDrive DMS over SOME/IP on eth0),
+  `car-can-proxy/systemd/can-proxyd.env` (bench: plugin emu-hybrid on vcan1) and
+  `car-can-emulator/systemd/car-can-emulator.env` (`--car=hybrid` on vcan1 with
+  the demo drive cycle) - are image content, written by the hooks at build
+  time. An edit on a running device (another plugin, a real `can0`, other DMS
+  arguments) lasts until the next boot. Pointing the proxy at a real car for
+  good needs a place on `/data` (not built; see the cluster report).
 - System journal, apt state, NetworkManager DHCP leases, dnsmasq leases, and the
   time-sync cache. The Pi has no RTC: a factory-reset device boots in the past
   until NTP syncs.
@@ -143,6 +153,15 @@ it; the OLED menu's DHCP-server mode unmasks it when used. The hook also
 installs `/etc/NetworkManager/dnsmasq-shared.d/90-micropanel-no-gateway.conf`
 (a serving port announces no router and no DNS server) and switches WiFi on
 at boot (see "Intentionally volatile").
+
+Enabled for every layout by the Cluster Demo V2 hooks
+(`../qt-cluster-demo/packages/`, see `hooks.txt`): `can-proxy-links.service`
+(creates vcan0 and vcan1, loads `vcan` and `can_isotp`), `can-proxyd.service`
+and `car-can-emulator.service` - always-on services that touch only the vcan
+interfaces. They are not update-health units (`AB_HEALTH_UNITS` stays the
+launcher alone). `qt-cluster-demo.service` is **not** enabled and
+`cluster-video.service` is not linked (`CLUSTER_SERVICE=0`): the launcher's
+Cluster Demo V2 page starts the cluster and gets the display back when it exits.
 
 Measured on the 01.33 image: cloud-init is not installed (the hook would
 silence its key output if it were); `userconfig.service` exists but is not

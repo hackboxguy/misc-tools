@@ -259,6 +259,44 @@ fi
 grep -Fq "grep -qs 'ieee80211_regdom=' \"\$MODPROBE_DIR\"/*.conf" "$repo_root/../br-wrapper/package/network-manager-app/src/net-ctl.sh" 2>/dev/null || \
     [ ! -d "$repo_root/../br-wrapper" ] || fail "br-wrapper's net-ctl.sh no longer reads the regdom line the network hook writes"
 
+# --- Cluster Demo V2 (qt-cluster-demo + car-can-proxy + car-can-emulator) ---------------
+# The stand-alone cluster board's hooks, in both lists, after br-wrapper and before
+# the network hook; the private repo cloned host-side; the micropanel switches (no
+# cluster unit, pruned); the runtime packages in both lists.
+cluster_hooks="../qt-cluster-demo/packages/qt-cluster-demo-hook.sh|file://\${REPOBINS}/qt-cluster-demo|local|/home/pi/qt-cluster-demo
+../qt-cluster-demo/packages/car-can-proxy-hook.sh|https://github.com/hackboxguy/car-can-proxy.git|main|/home/pi/car-can-proxy|
+../qt-cluster-demo/packages/car-can-emulator-hook.sh|https://github.com/hackboxguy/car-can-emulator.git|main|/home/pi/car-can-emulator|"
+for list in hooks.txt hooks-ab.txt; do
+    printf '%s\n' "$cluster_hooks" | while IFS= read -r line; do
+        grep -Fqx "$line" "$board/$list" || fail "$list lacks the cluster hook line: $line"
+    done
+    wrapper_line=$(grep -n 'github.com/hackboxguy/br-wrapper.git' "$board/$list" | head -n 1 | cut -d: -f1)
+    cluster_line=$(grep -n 'qt-cluster-demo-hook.sh' "$board/$list" | head -n 1 | cut -d: -f1)
+    network_line=$(grep -nFx 'packages/micropanel-network-hook.sh' "$board/$list" | cut -d: -f1)
+    [ "$wrapper_line" -lt "$cluster_line" ] && [ "$cluster_line" -lt "$network_line" ] || \
+        fail "$list: the cluster hooks must come after br-wrapper and before the network hook"
+done
+for hook in qt-cluster-demo-hook.sh car-can-proxy-hook.sh car-can-emulator-hook.sh; do
+    [ -x "$board/../qt-cluster-demo/packages/$hook" ] || fail "cluster hook missing: $hook"
+    bash -n "$board/../qt-cluster-demo/packages/$hook"
+done
+grep -Fq 'qt-cluster-demo|https://github.com/hackboxguy/qt-cluster-demo.git|main' "$board/board.conf" || \
+    fail "board.conf SOURCES lacks qt-cluster-demo (private repo, cloned host-side)"
+for setting in CLUSTER_SOURCE=proxy CLUSTER_SERVICE=0 CLUSTER_PRUNE=1; do
+    grep -Fqx "$setting" "$board/board.conf" || fail "board.conf lacks $setting"
+done
+# The switch the micropanel variant relies on: CLUSTER_SERVICE=0 enables no cluster
+# unit and links no cluster-video (the launcher owns the display)
+cluster_hook="$board/../qt-cluster-demo/packages/qt-cluster-demo-hook.sh"
+awk '/^if \[ "\$CLUSTER_SERVICE" = 0 \]; then$/ { inside = 1 } inside && /^else$/ { exit found } inside && /systemctl enable|cluster-video/ { found = 1 } END { exit found }' "$cluster_hook" || \
+    fail "qt-cluster-demo-hook.sh enables the cluster in its CLUSTER_SERVICE=0 branch"
+grep -Fq 'if [ "$CLUSTER_SERVICE" = 0 ]; then' "$cluster_hook" || fail "qt-cluster-demo-hook.sh lacks the CLUSTER_SERVICE switch"
+for package in fonts-roboto can-utils; do
+    for list in runtime-deps.txt runtime-deps-ab.txt; do
+        strip_list "$board/$list" | grep -Fqx "$package" || fail "$list lacks $package (Cluster Demo V2)"
+    done
+done
+
 # --- The appliance hook and its support files --------------------------------------
 appliance="$board/packages/micropanel-appliance-hook.sh"
 support="$board/packages/micropanel-appliance-hook.d"

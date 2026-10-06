@@ -213,6 +213,8 @@ MICROPANEL_TOUCH_REF=""
 # environment, so capture the caller's choice first or the board default
 # silently wins over an explicit CLUSTER_SOURCE=... on the command line.
 CLUSTER_SOURCE_ENV="${CLUSTER_SOURCE:-}"
+CLUSTER_SERVICE_ENV="${CLUSTER_SERVICE:-}"
+CLUSTER_PRUNE_ENV="${CLUSTER_PRUNE:-}"
 if [ $PROFILE_ONLY -eq 0 ]; then
     BOARD_DIR="$BOARD_CONFIGS_DIR/$BOARD"
     BOARD_CONF="$BOARD_DIR/board.conf"
@@ -242,6 +244,13 @@ case "${CLUSTER_SOURCE:-}" in
     ""|demo|proxy) ;;
     *) die "CLUSTER_SOURCE must be demo or proxy, got '$CLUSTER_SOURCE'" ;;
 esac
+# How the cluster hooks install (see qt-cluster-demo-hook.sh): CLUSTER_SERVICE=0
+# enables no cluster unit (a launcher starts the app), CLUSTER_PRUNE=1 strips
+# the repos to their runtime files. Empty = the hooks' defaults (1 and 0).
+CLUSTER_SERVICE="${CLUSTER_SERVICE_ENV:-$(resolve_cfg CLUSTER_SERVICE)}"
+CLUSTER_PRUNE="${CLUSTER_PRUNE_ENV:-$(resolve_cfg CLUSTER_PRUNE)}"
+case "${CLUSTER_SERVICE:-}" in ""|0|1) ;; *) die "CLUSTER_SERVICE must be 0 or 1, got '$CLUSTER_SERVICE'" ;; esac
+case "${CLUSTER_PRUNE:-}" in ""|0|1) ;; *) die "CLUSTER_PRUNE must be 0 or 1, got '$CLUSTER_PRUNE'" ;; esac
 
 RUNTIME_DEPS="$(resolve_cfg RUNTIME_DEPS)"
 BUILD_DEPS="$(resolve_cfg BUILD_DEPS)"
@@ -657,6 +666,9 @@ git_remote_rev() {
 apps_stamp_inputs() {
     parse_hook_list "$HOOK_LIST"
     local in=("apps-v4" "version:$VERSION" "input:$APPS_INPUT_STAMP" "apps-extend:$APPS_EXTEND_SIZE_MB" "expand-root:$APPS_EXPAND_ROOT" "data-partition-mb:$DATA_PARTITION_MB" "ab-layout:$AB_LAYOUT" "ab-image-mb:$AB_IMAGE_SIZE_MB" "ab-boot-mb:$AB_BOOT_PARTITION_MB" "ab-root-mb:$AB_ROOT_PARTITION_MB" "ab-factory-mb:$AB_FACTORY_PARTITION_MB" "slot-boards:$SLOT_COMPATIBLE_BOARDS" "pw:$PASSWORD" "cluster-source:${CLUSTER_SOURCE:-}")
+    # Only when set, so boards that leave them empty keep their stamp
+    [ -n "${CLUSTER_SERVICE:-}" ] && in+=("cluster-service:$CLUSTER_SERVICE")
+    [ -n "${CLUSTER_PRUNE:-}" ] && in+=("cluster-prune:$CLUSTER_PRUNE")
     [ "$HOOK_LIST" != "none" ] && [ -n "$HOOK_LIST" ] && in+=("file:$HOOK_LIST")
     local h d entry url ref
     for h in "${HOOK_SCRIPTS[@]}"; do in+=("file:$h"); done
@@ -1179,7 +1191,7 @@ run_stage_apps() {
     MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" \
     MICROPANEL_TOUCH_APP_REPO="${MICROPANEL_TOUCH_APP_REPO:-}" \
     AB_MANIFEST_PATH="$([ "$AB_LAYOUT" = "1" ] && printf '%s' "${AB_MANIFEST_PATH:-}")" \
-    CLUSTER_SOURCE="${CLUSTER_SOURCE:-}" "$IMAGER" \
+    CLUSTER_SOURCE="${CLUSTER_SOURCE:-}" CLUSTER_SERVICE="${CLUSTER_SERVICE:-}" CLUSTER_PRUNE="${CLUSTER_PRUNE:-}" "$IMAGER" \
         --mode=incremental \
         --baseimage="$APPS_INPUT" \
         --output="$work" \

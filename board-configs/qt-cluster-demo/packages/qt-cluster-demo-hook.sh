@@ -18,6 +18,37 @@ REPO="${HOOK_GIT_REPO:-https://github.com/hackboxguy/qt-cluster-demo.git}"
 REF="${HOOK_GIT_TAG:-main}"
 DEST="${HOOK_INSTALL_DEST:-/home/pi/qt-cluster-demo}"
 export VSOMEIP_PREFIX="/home/pi/.codex-deps/prefix/vsomeip-3.5.11"
+# Board switches (board.conf; build-image.sh forwards them; empty = default):
+#   CLUSTER_SERVICE  1 (default): enable qt-cluster-demo.service and link
+#                    cluster-video.service - the cluster owns the display.
+#                    0: enable nothing; the app is started by the launcher
+#                    (micropanel's Cluster Demo V2 tiles, cluster-v2.sh).
+#   CLUSTER_PRUNE    0 (default): keep the whole repo and build tree.
+#                    1: keep only what runs the app (binary, DMS JSON files,
+#                    the preflight script, systemd/) - for a size-capped root.
+CLUSTER_SERVICE="${CLUSTER_SERVICE:-1}"
+CLUSTER_PRUNE="${CLUSTER_PRUNE:-0}"
+
+# prune_to <dir> <path>...: keep only the listed paths (relative to <dir>)
+# and delete the rest of the tree - sources, object files, tests, .git. For
+# images where the app is started from its build tree but nothing is rebuilt
+# on the device (micropanel: CLUSTER_PRUNE=1). The kept paths are exactly
+# what the units, the env files and the launcher script reference.
+prune_to() {
+    local dir="$1"; shift
+    local keep; keep="$(mktemp -d)"
+    for p in "$@"; do
+        [ -e "$dir/$p" ] || { echo "ERROR: prune: $dir/$p missing"; exit 1; }
+        mkdir -p "$keep/$(dirname "$p")"
+        mv "$dir/$p" "$keep/$p"
+    done
+    local before; before=$(du -sm "$dir" | cut -f1)
+    find "$dir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+    cp -a "$keep/." "$dir/"
+    rm -rf "$keep"
+    echo "  pruned $dir: ${before} MB -> $(du -sm "$dir" | cut -f1) MB"
+}
+
 
 echo "======================================"
 echo "  qt-cluster-demo Setup Hook"
@@ -71,6 +102,9 @@ SOMEIP_IFACE=eth0
 EXTRA_ARGS=
 EOF
 
+if [ "$CLUSTER_SERVICE" = 0 ]; then
+    echo "[4/4] Not enabling qt-cluster-demo.service (CLUSTER_SERVICE=0: the launcher starts the app)"
+else
 echo "[4/4] Enabling service..."
 systemctl enable "$DEST/systemd/qt-cluster-demo.service"
 
@@ -83,6 +117,14 @@ if [ -f "$DEST/systemd/cluster-video.service" ]; then
     ln -sf "$DEST/systemd/cluster-video.service" \
         /etc/systemd/system/cluster-video.service
     echo "  cluster-video.service linked (not enabled)"
+fi
+fi
+
+if [ "$CLUSTER_PRUNE" = 1 ]; then
+    echo "Pruning to the runtime files (CLUSTER_PRUNE=1)..."
+    prune_to "$DEST" build-pi-agx/src/qt-cluster-demo systemd scripts/pi-dms-production-baseline.sh \
+        docs/focusdrive-agx-ids.pi4.json docs/vsomeip-focusdrive-agx-sd.example.json \
+        docs/vsomeip-focusdrive-agx-static.example.json README.md
 fi
 
 # pi user is uid:gid 1000:1000

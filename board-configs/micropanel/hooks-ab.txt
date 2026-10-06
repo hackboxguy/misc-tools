@@ -69,6 +69,18 @@ packages/disp-report-card-hook.sh|https://github.com/hackboxguy/disp-report-card
 #kodi custom add-on(video loop button)
 packages/kodi-custom-addons-hook.sh|https://github.com/hackboxguy/kodi-custom-addons.git|main|/home/pi/kodi-custom-addons|sqlite3
 
+#Cluster Demo V2 (the launcher's "cluster-v2" page, br-wrapper's cluster-v2.sh): the
+#qt-cluster-demo repo with the FocusDrive DMS, fed by car-can-proxy on vcan0 with the
+#car-can-emulator bench vehicle on vcan1. The stand-alone board's hooks, switched by
+#board.conf: CLUSTER_SOURCE=proxy, CLUSTER_SERVICE=0 (no cluster unit: the launcher
+#owns the display), CLUSTER_PRUNE=1 (the repos stripped to their runtime files). The
+#proxy and emulator units are enabled (vcan only). qt-cluster-demo is private: cloned
+#on the build host (board.conf SOURCES). Own prefixes, not /home/pi/micropanel: both
+#repos install a qt-cluster-demo binary and a share/qt-apps/cluster-launcher.sh.
+../qt-cluster-demo/packages/qt-cluster-demo-hook.sh|file://${REPOBINS}/qt-cluster-demo|local|/home/pi/qt-cluster-demo
+../qt-cluster-demo/packages/car-can-proxy-hook.sh|https://github.com/hackboxguy/car-can-proxy.git|main|/home/pi/car-can-proxy|
+../qt-cluster-demo/packages/car-can-emulator-hook.sh|https://github.com/hackboxguy/car-can-emulator.git|main|/home/pi/car-can-emulator|
+
 #network defaults for br-wrapper's network-manager-app (plan 5.4): system dnsmasq masked,
 #shared-mode no-gateway drop-in, WiFi on at boot with country DE. No repo: nothing is cloned.
 packages/micropanel-network-hook.sh

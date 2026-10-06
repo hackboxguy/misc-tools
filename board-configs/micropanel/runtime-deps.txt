@@ -88,3 +88,11 @@ python3
 curl
 ca-certificates
 iproute2
+
+# Cluster Demo V2 (qt-cluster-demo + car-can-proxy + car-can-emulator, see
+# hooks.txt). Qt, its QML modules and the Boost/vsomeip runtime are above or in
+# the qt-bookworm profile. fonts-roboto: the harman theme's specified face (it
+# falls back to the bundled Lexend Deca without it). can-utils: candump/cansend
+# at the bench; the proxy and the emulator need only libc/libstdc++.
+fonts-roboto
+can-utils

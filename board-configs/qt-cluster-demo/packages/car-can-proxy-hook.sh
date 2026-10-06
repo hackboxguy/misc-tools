@@ -25,6 +25,30 @@ set -e
 # Environment (from the hook list): HOOK_GIT_REPO / HOOK_GIT_TAG (public
 # repo, in-chroot clone) or HOOK_LOCAL_SOURCE; HOOK_INSTALL_DEST.
 
+# CLUSTER_PRUNE=1 (board.conf, see qt-cluster-demo-hook.sh): keep only what
+# the units run - can-proxyd, its plugin .so files, systemd/, docs, README.
+CLUSTER_PRUNE="${CLUSTER_PRUNE:-0}"
+
+# prune_to <dir> <path>...: keep only the listed paths (relative to <dir>)
+# and delete the rest of the tree - sources, object files, tests, .git. For
+# images where the app is started from its build tree but nothing is rebuilt
+# on the device (micropanel: CLUSTER_PRUNE=1). The kept paths are exactly
+# what the units, the env files and the launcher script reference.
+prune_to() {
+    local dir="$1"; shift
+    local keep; keep="$(mktemp -d)"
+    for p in "$@"; do
+        [ -e "$dir/$p" ] || { echo "ERROR: prune: $dir/$p missing"; exit 1; }
+        mkdir -p "$keep/$(dirname "$p")"
+        mv "$dir/$p" "$keep/$p"
+    done
+    local before; before=$(du -sm "$dir" | cut -f1)
+    find "$dir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+    cp -a "$keep/." "$dir/"
+    rm -rf "$keep"
+    echo "  pruned $dir: ${before} MB -> $(du -sm "$dir" | cut -f1) MB"
+}
+
 REPO="${HOOK_GIT_REPO:-https://github.com/hackboxguy/car-can-proxy.git}"
 REF="${HOOK_GIT_TAG:-main}"
 DEST="${HOOK_INSTALL_DEST:-/home/pi/car-can-proxy}"
@@ -68,6 +92,14 @@ systemctl enable "$DEST/systemd/can-proxy-links.service" "$DEST/systemd/can-prox
 # The battery-ECU plugins and the emulator's ev/hybrid modes use the kernel
 # ISO-TP socket; load it at boot (can-proxy-links also modprobes it).
 echo can_isotp > /etc/modules-load.d/can-isotp.conf
+
+if [ "$CLUSTER_PRUNE" = 1 ]; then
+    echo "Pruning to the runtime files (CLUSTER_PRUNE=1)..."
+    # The plugins are loaded as $CANPROXY_PLUGIN_DIR/<name>.so (build/plugins)
+    plugins=$(cd "$DEST" && ls build/plugins/*.so)
+    # shellcheck disable=SC2086 # one path per word
+    prune_to "$DEST" build/core/can-proxyd $plugins systemd docs README.md
+fi
 
 chown -R 1000:1000 "$DEST"
 echo ""

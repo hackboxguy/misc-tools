@@ -38,6 +38,16 @@
 #     NetworkManager), so reservations survive reboots and updates; a factory
 #     reset empties them. The file is created empty here (and on /data by the
 #     data skeleton), so dnsmasq never logs that it cannot read it.
+#  6. The WiFi switch kept across boots: br-wrapper installs
+#     share/network-manager-app/micropanel-wifi-radio-restore.service (its
+#     net-ctl.sh filled in); installed here into /etc/systemd/system and
+#     enabled (wanted by NetworkManager.service, ordered before it). On the
+#     A/B image, a "off" the Network app kept in /data/network/wifi-radio.state
+#     becomes WirelessEnabled=false in NetworkManager's state file before
+#     NetworkManager starts; no file, nothing happens (the unit's condition),
+#     so section 3's "WiFi on" is the default of a new or reset device. On the
+#     single-slot image there is no /data/network and the unit never runs
+#     (NetworkManager keeps its own state on the writable root there).
 #
 # Why both layouts: on the A/B image /etc and /var are rebuilt from the image
 # at every boot, so these are the device's settings for good; on the
@@ -62,6 +72,8 @@ guard_src=${MICROPANEL_PREFIX:-/home/pi/micropanel}/share/network-manager-app/90
 dispatcher=/etc/NetworkManager/dispatcher.d
 res_dropin=/etc/NetworkManager/dnsmasq-shared.d/91-micropanel-reservations.conf
 res_file=/var/lib/micropanel/dhcp-reservations
+radio_unit=micropanel-wifi-radio-restore.service
+radio_unit_src=${MICROPANEL_PREFIX:-/home/pi/micropanel}/share/network-manager-app/$radio_unit
 
 # --- 1. The system dnsmasq off ------------------------------------------------
 systemctl disable dnsmasq.service 2>/dev/null || true
@@ -130,3 +142,13 @@ install -d -m0755 "$(dirname "$res_file")"
 [ -e "$res_file" ] || install -m0644 /dev/null "$res_file"
 grep -qx "dhcp-hostsfile=$res_file" "$res_dropin" || die "reservation drop-in is wrong: $res_dropin"
 say "reservations: $res_dropin -> $res_file"
+
+# --- 6. The WiFi switch, restored before NetworkManager ---------------------------
+[ -f "$radio_unit_src" ] || die "br-wrapper's WiFi restore unit is missing: $radio_unit_src (is br-wrapper installed first?)"
+install -o root -g root -m0644 "$radio_unit_src" "/etc/systemd/system/$radio_unit"
+# shellcheck disable=SC2016 # the unit's own ExecStart line
+radio_ctl=$(sed -n 's/^ExecStart=\(.*\) wifi-radio-restore$/\1/p' "/etc/systemd/system/$radio_unit")
+[ -x "$radio_ctl" ] || die "the WiFi restore unit calls $radio_ctl, which is not installed"
+systemctl enable "$radio_unit"
+[ -L "/etc/systemd/system/NetworkManager.service.wants/$radio_unit" ] || die "$radio_unit is not enabled"
+say "WiFi switch restore: $radio_unit (before NetworkManager), calls $radio_ctl"

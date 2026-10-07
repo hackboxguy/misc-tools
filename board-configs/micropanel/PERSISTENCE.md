@@ -32,7 +32,14 @@ Mechanisms, in one place:
   consumer; every consumer is in `ab-update.conf`
   `AB_RESET_BEFORE`. If `/data` fails to mount the paths fall back to the
   (empty, volatile) lower-root directories - the device boots, forgetfully.
-- **Restore units** copy durable identity into the volatile root early in boot.
+- **Restore units** copy durable identity, and a durable setting a system
+  service owns (the WiFi switch), into the volatile root early in boot.
+- **User settings** follow one rule (owner, 2026-10-07): anything a user sets
+  on the panel stays set across reboots, power cycles and updates, and only a
+  factory reset forgets it. The owning component writes the choice to a small
+  file on `/data` the moment it changes (one value per file, whole or not at
+  all) and applies it at the right moment; no file means the image's default.
+  The inventory is the section "User settings and where they live" below.
 
 ## Durable state on `/data`
 
@@ -50,12 +57,53 @@ Mechanisms, in one place:
 | `micropanel-system/debug/` | root, `0700` | - | Bench forensics (`micropanel-debug-journal.service`; in release images too, and inert there unless the `micropanel.debug-journal=1` cmdline token or a `debug/enabled` marker is present): per boot `boot-<NNNN>-<boot-id>` (NNNN a counter kept in the directory - no RTC) with a `.start` snapshot, a `.late` timing at 90 s, unbuffered `.dmesg` and `.journal` mirrors and a 5 s `.sample` line (load, dirty/writeback memory, SD requests in flight, update progress; PSI only with `psi=1` on the cmdline); 20 MiB each, newest 5 boots. ext4's 5 s commit bounds what a reset loses | Created on first use; a reset wipes it |
 | `system-manager/` and `system-manager/logs/` | pi, `0755` | - | System Manager (br-wrapper): the logs of its sections, the `last-install` record, `acknowledged-fallback` | Empty; a reset empties them (logs are not device state) |
 | `als-dimmer/` | root, `0755` | every installed als-dimmer config's `control.state_file` is `/data/als-dimmer/<name>` (the appliance hook rewrites the shipped `/tmp` and `/home/pi` paths; the file name is kept, e.g. `state.json`, `als-dimmer-pwm-state.json`) | als-dimmer daemon (root): operating mode (AUTO/MANUAL), manual brightness, offset. Saved on every change from the client/UI and at shutdown | Empty: a new or reset device starts in AUTO (ambient-light) mode |
-| `cluster/` | pi, `0755` | read directly: `can-proxyd.env` by `can-proxy-links.service` and `can-proxyd.service`, `car-can-emulator.env` by `car-can-emulator.service` (each through a `50-data-env.conf` drop-in, `EnvironmentFile=-/data/cluster/…` after the image's file, `After=`/`Wants=data.mount`), `qt-cluster-demo.env` by the launcher's `cluster-v2.sh` (after the image's file) | The operator, over SSH: Cluster Demo V2's overrides - the proxy's plugin and vehicle interface (a real car), the emulator's car, the cluster's `CLUSTER_ARGS`/`EXTRA_ARGS`. Only the keys that differ; the later file wins. Board switch `CLUSTER_DATA_ENV=1`. Also `dms-video-view.state` (`on`/`off`/`none`: the DMS panel on, without its camera box, or off): the cluster's DMS button, written by the app (`--dms-video-view-state=`) and read back by `cluster-v2.sh` at the next start; `map-backdrop.state` (`on`/`off`), the MAP button's, the same way (`--map-backdrop-state=`) | Empty: the image's defaults (bench emulator). A reset empties it |
+| `network/` | root, `0755` | read by `micropanel-wifi-radio-restore.service` (before NetworkManager) | `wifi-radio.state` (`on`/`off`): the Network app's WiFi switch, written by `net-ctl.sh wifi-radio` (root). A kept `off` becomes `WirelessEnabled=false` in NetworkManager's state file before it starts | Empty: WiFi on (the image's default) |
+| `system-settings/` | pi, `0755` | bind → `/home/pi/system-settings` (before `als-dimmer.service`) | The Calibration Tools' results (disp-tester's children, as pi): `white-point-calibration.json` (White Point Matching), which als-dimmer writes into the FPGA's white-point registers at every start, and the wp-cal profiles | Empty: no white point replayed |
+| `als-dimmer-calibrations/` | root, `0755` | bind → `/home/pi/als-dimmer/etc/als-dimmer/calibrations` (before `als-dimmer.service`) | als-dimmer's brightness-to-nits tables (`*.csv`); Brightness Calibration's sweep replaces the panel's table (as root) and restarts als-dimmer | Seeded from the image file by file: every table the device lacks is copied in (an update brings new tables), a table the device has - a sweep's measurement - is never overwritten. A reset re-seeds them all |
+| `cluster/` | pi, `0755` | read directly: `can-proxyd.env` by `can-proxy-links.service` and `can-proxyd.service`, `car-can-emulator.env` by `car-can-emulator.service` (each through a `50-data-env.conf` drop-in, `EnvironmentFile=-/data/cluster/…` after the image's file, `After=`/`Wants=data.mount`), `qt-cluster-demo.env` by the launcher's `cluster-v2.sh` (after the image's file) | The operator, over SSH: Cluster Demo V2's overrides - the proxy's plugin and vehicle interface (a real car), the emulator's car, the cluster's `CLUSTER_ARGS`/`EXTRA_ARGS`. Only the keys that differ; the later file wins. Board switch `CLUSTER_DATA_ENV=1`. Also `dms-video-view.state` (`on`/`off`/`none`: the DMS panel on, without its camera box, or off): the cluster's DMS button, written by the app (`--dms-video-view-state=`) and read back by `cluster-v2.sh` at the next start; `map-backdrop.state` (`on`/`off`), the MAP button's, the same way (`--map-backdrop-state=`); `telltale-min-dark-level.state` and `info-bar.state`, the T and B buttons', likewise; `classic-telltale-min-dark-level.state` and `classic-info-bar.state`, the original Cluster Demo's T and B (its `cluster-launcher.sh`); `fpga-ldpc-state.json`, the last LD/PC choice, written by every app with LD/PC buttons (both clusters, Display Settings, the gallery, the pattern generator; one shared `FpgaController`) and written into the FPGA by each when it starts - the FPGA forgets LD/PC at power loss | Empty: the image's defaults (bench emulator). A reset empties it |
 | `NetworkManager/system-connections/` | root, `0700` | bind → `/etc/NetworkManager/system-connections` (the engine's own line) | NetworkManager keyfiles: the Network menu's DHCP/static profiles, WiFi | The image's shipped profiles; re-seeded by a reset (`AB_RESET_SEED`) |
 
 `host-key` and DIP-guard directories live under the root-only
 `micropanel-system/`, not under the pi-owned `micropanel/`, so the pi account
 cannot rename them away.
+
+## User settings and where they live
+
+Everything a user can change from the panel, in the apps the launcher starts
+(inventory 2026-10-07). "Kept" is the A/B image; "No file" is what a new or
+factory-reset device does.
+
+| Setting | Set where | Kept in | Applied | No file |
+| --- | --- | --- | --- | --- |
+| WiFi switch | Network app (`net-ctl.sh wifi-radio`) | `/data/network/wifi-radio.state` | `micropanel-wifi-radio-restore.service`, before NetworkManager | WiFi on |
+| Saved WiFi networks, auto-connect per network | Network app | NetworkManager keyfiles (`/data/NetworkManager` bind) | NetworkManager | the image's profiles |
+| Wired port mode, addresses, DHCP server | Network app, OLED menu | NetworkManager keyfiles (bind) | NetworkManager | DHCP client |
+| DHCP reservations | Network app | `/var/lib/micropanel/dhcp-reservations` (bind) | the port's dnsmasq | none |
+| WiFi country | the image (`wifi-radio --on` sets DE if none) | image | cfg80211 option | DE |
+| Brightness, adaptive (auto/manual) | Display Settings, als-dimmer | `/data/als-dimmer/<state file>` | als-dimmer at start | auto |
+| Dual-display brightness mode | Display Settings | `/var/lib/disp-settings` (bind) | `disp-settings-dual-display-restore.service` | off |
+| LD / PC (local dimming, pixel compensation) | both clusters, Display Settings, gallery (Photo Gallery, Test Pictures, Reports), Pattern Generator | `/data/cluster/fpga-ldpc-state.json` (one file, one `FpgaController` in every app; `/tmp` where `/data/cluster` is absent: the stand-alone board) | by each app when it finds the FPGA (start, or the FPGA back after it stopped answering); the FPGA forgets at power loss. On the new FPGA (`0x1E`) the saved choice is written at start and the registers' readback is shown afterwards | the FPGA's power-on default (both on); nothing written |
+| DMS panel (on / camera off / off) | Cluster V2 | `/data/cluster/dms-video-view.state` | `cluster-v2.sh` → `--dms-video-view=` | on |
+| Map on/off | Cluster V2 | `/data/cluster/map-backdrop.state` | `cluster-v2.sh` → `--map-backdrop=` | the env's choice (on) |
+| T (telltale ghost) | Cluster V2 | `/data/cluster/telltale-min-dark-level.state` | `cluster-v2.sh` → `--telltale-min-dark-level=` | off (proxy source) |
+| B (info bar) | Cluster V2 | `/data/cluster/info-bar.state` | `cluster-v2.sh` → `--info-bar=` | on |
+| T, B | original Cluster Demo | `/data/cluster/classic-*.state` | `cluster-launcher.sh` → the same options | on, on |
+| Theme | Cluster V2 tiles | the tile itself | - | - |
+| Proxy, emulator, cluster overrides | SSH | `/data/cluster/*.env` | the units, `cluster-v2.sh` | the image's |
+| White point calibration | Calibration Tools: White Point Matching | `/home/pi/system-settings/white-point-calibration.json` (`/data/system-settings` bind) | als-dimmer writes it into the FPGA at start | none replayed |
+| Brightness calibration table | Calibration Tools: Brightness Calibration | `/home/pi/als-dimmer/etc/als-dimmer/calibrations/` (`/data/als-dimmer-calibrations` bind, seeded from the image) | als-dimmer at start | the image's reference tables |
+| Kodi settings, library, add-ons | Media Player | `/home/pi/.kodi` (`/data/kodi` bind) | Kodi | the image's profile |
+| USB Media playlist, autostart | USB Media | the USB stick (`micropanel-playlist.json`) | at play / boot from the stick | - |
+| System Manager: an acknowledged fallback | System Manager | `/data/system-manager/` | the app | not acknowledged |
+
+Not kept, on purpose: the Network app's ping/iperf options (a test's
+parameters), the pattern generator's current pattern and its
+"Full-/Current-Brightness" option (each run of a test starts from its
+defaults), the gallery's slideshow pause, zoom and current picture, USB
+Media's "cancel autostart" (this boot only, by its wording), and Display
+Settings' privacy and vision-booster tiles (not available in the UI).
+Measurement data (`test-reports`, `disptool-results`, the profiling
+recordings in `/home/pi/test-data`) is not a setting.
 
 ## Device-owned boot configuration
 
@@ -92,15 +140,17 @@ display file (it is not on `/data`).
 - `/tmp/micropanel.log` (the System → Transfer Logs feature copies it to USB),
   FPGA/RH850/Vivado flash logs, hdmi-patch state, ping output, `/run/als-dimmer`
   and the als-dimmer socket: per-boot diagnostics and scratch.
-- The WiFi radio state and the regulatory country: NetworkManager's
-  `WirelessEnabled` (`/var/lib/NetworkManager/NetworkManager.state`), the saved
-  rfkill state (`/var/lib/systemd/rfkill/`) and the cfg80211 regdom option
-  (`/etc/modprobe.d/cfg80211-regdom.conf`) all come from the image
+- NetworkManager's `WirelessEnabled` (`/var/lib/NetworkManager/NetworkManager.state`),
+  the saved rfkill state (`/var/lib/systemd/rfkill/`) and the cfg80211 regdom
+  option (`/etc/modprobe.d/cfg80211-regdom.conf`) come from the image
   (`packages/micropanel-network-hook.sh`: WiFi on, country DE) at every boot.
-  Switching WiFi off - from the Network app or with `nmcli radio wifi off` -
-  lasts until the next boot. The WiFi *profiles* (saved networks and their
-  keys) persist through the NetworkManager bind above, so a saved network
-  rejoins at boot.
+  The user's switch is not lost with them: the Network app's choice is kept in
+  `/data/network/wifi-radio.state` and a kept `off` is put back into
+  `NetworkManager.state` before NetworkManager starts
+  (`micropanel-wifi-radio-restore.service`). A switch made with `nmcli radio
+  wifi off` directly (not through `net-ctl.sh`) still lasts only until the next
+  boot. The WiFi *profiles* (saved networks and their keys) persist through the
+  NetworkManager bind above, so a saved network rejoins at boot.
 - Cluster Demo V2: the trees `/home/pi/qt-cluster-demo` (the installed app:
   `bin/`, `share/qt-cluster-demo/`, `systemd/`), `/home/pi/car-can-proxy` and
   `/home/pi/car-can-emulator` (pruned to their runtime files) and their
@@ -143,6 +193,7 @@ through a build variant.
 | --- | --- | --- |
 | `micropanel-machine-id.service` | created, enabled (sysinit) | restore durable identity |
 | `micropanel-ssh-host-keys.service` | created, enabled (wanted by `ssh.service`) | restore durable host keys |
+| `micropanel-wifi-radio-restore.service` | installed from br-wrapper's template and enabled (wanted by and ordered before `NetworkManager.service`) by the network hook | the Network app's WiFi switch across boots (`/data/network`); skipped without a kept state |
 | `micropanel-display-derive.service` | created, enabled | module configuration of the display type, every boot; the static `custom-drivers.conf` is removed and `/etc/modprobe.d/micropanel-no-autoload.conf` blacklists the drivers' alias autoload, so they load once, with the right options |
 | `resize2fs_once` (SysV) | removed | Pi OS's one-shot root resize; on an overlay root it failed on every boot |
 | `regenerate_ssh_host_keys.service`, `sshd-keygen.service` | disabled, masked | would regenerate keys every boot |

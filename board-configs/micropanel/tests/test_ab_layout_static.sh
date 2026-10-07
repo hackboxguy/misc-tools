@@ -241,9 +241,20 @@ for needle in \
     'country=${MICROPANEL_WIFI_COUNTRY:-DE}' \
     'guard_src=${MICROPANEL_PREFIX:-/home/pi/micropanel}/share/network-manager-app/90-net-ctl-guard' \
     'install -o root -g root -m0755 "$guard_src" "$dispatcher/90-net-ctl-guard"' \
-    'ln -sfn ../90-net-ctl-guard "$dispatcher/pre-up.d/90-net-ctl-guard"'; do
+    'ln -sfn ../90-net-ctl-guard "$dispatcher/pre-up.d/90-net-ctl-guard"' \
+    'radio_unit=micropanel-wifi-radio-restore.service' \
+    'radio_unit_src=${MICROPANEL_PREFIX:-/home/pi/micropanel}/share/network-manager-app/$radio_unit' \
+    'install -o root -g root -m0644 "$radio_unit_src" "/etc/systemd/system/$radio_unit"' \
+    'systemctl enable "$radio_unit"' \
+    '[ -L "/etc/systemd/system/NetworkManager.service.wants/$radio_unit" ]'; do
     grep -Fq -- "$needle" "$network_hook" || fail "network hook lacks: $needle"
 done
+# The WiFi switch: kept on /data (skeleton), restored before NetworkManager,
+# after a factory reset (AB_RESET_BEFORE)
+grep -Fq 'new_dir -m0755 -o root -g root "$data_root/network"' "$board/packages/micropanel-data-skeleton.sh" \
+    || fail "the data skeleton does not create /data/network (the WiFi switch)"
+printf '%s\n' "$(sed -n 's/^AB_RESET_BEFORE=//p' "$ab_conf")" | grep -Fqw micropanel-wifi-radio-restore.service \
+    || fail "micropanel-wifi-radio-restore.service reads /data but is not in AB_RESET_BEFORE"
 # The guard's script comes from br-wrapper, installed by an earlier hooks line
 for list in hooks.txt hooks-ab.txt; do
     wrapper_line=$(grep -n 'github.com/hackboxguy/br-wrapper.git' "$board/$list" | head -n 1 | cut -d: -f1)
@@ -254,6 +265,16 @@ if [ -d "$repo_root/../br-wrapper" ]; then
     grep -Fq 'DESTINATION ${CMAKE_INSTALL_DATADIR}/network-manager-app' "$repo_root/../br-wrapper/package/network-manager-app/CMakeLists.txt" \
         || fail "br-wrapper no longer installs the dispatcher script to share/network-manager-app"
     [ -f "$repo_root/../br-wrapper/package/network-manager-app/src/90-net-ctl-guard.in" ] || fail "br-wrapper lacks 90-net-ctl-guard.in"
+    unit_in="$repo_root/../br-wrapper/package/network-manager-app/src/micropanel-wifi-radio-restore.service.in"
+    [ -f "$unit_in" ] || fail "br-wrapper lacks micropanel-wifi-radio-restore.service.in"
+    for needle in 'Before=NetworkManager.service' 'ConditionPathExists=/data/network/wifi-radio.state' \
+                  'ExecStart=@NET_CTL@ wifi-radio-restore' 'WantedBy=NetworkManager.service' \
+                  'After=local-fs.target data.mount ab-factory-reset.service micropanel-data-skeleton.service'; do
+        grep -Fqx -- "$needle" "$unit_in" || fail "the WiFi restore unit lacks: $needle"
+    done
+    grep -Fq 'micropanel-wifi-radio-restore.service DESTINATION' "$repo_root/../br-wrapper/package/network-manager-app/CMakeLists.txt" 2>/dev/null \
+        || grep -Fq 'micropanel-wifi-radio-restore.service' "$repo_root/../br-wrapper/package/network-manager-app/CMakeLists.txt" \
+        || fail "br-wrapper no longer installs the WiFi restore unit"
 fi
 # The app reads the image's WiFi default from exactly this form (wifiboot=on)
 grep -Fq "grep -qs 'ieee80211_regdom=' \"\$MODPROBE_DIR\"/*.conf" "$repo_root/../br-wrapper/package/network-manager-app/src/net-ctl.sh" 2>/dev/null || \

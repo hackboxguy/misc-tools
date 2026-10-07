@@ -113,6 +113,23 @@ new_dir -m0755 -o root -g root "$data_root/als-dimmer"
 # qt-cluster-demo.env), read after the image's. Empty: the image's defaults.
 new_dir -m0755 -o "$account_uid" -g "$account_gid" "$data_root/cluster"
 
+# Calibration results the Calibration Tools write (disp-tester's children,
+# as pi): White Point Matching's white-point-calibration.json, which
+# als-dimmer writes into the FPGA at every start, and the wp-cal profiles.
+# Bound over /home/pi/system-settings. Empty: no calibration replayed.
+new_dir -m0755 -o "$account_uid" -g "$account_gid" "$data_root/system-settings"
+
+# als-dimmer's brightness-to-nits tables (calibrations/*.csv): Brightness
+# Calibration's sweep replaces the panel's file (as root, sudo). Bound over
+# /home/pi/als-dimmer/etc/als-dimmer/calibrations; seeded below with the
+# image's reference tables.
+new_dir -m0755 -o root -g root "$data_root/als-dimmer-calibrations"
+
+# The Network app's WiFi switch as the user left it (wifi-radio.state, written
+# by net-ctl.sh as root; micropanel-wifi-radio-restore.service applies it
+# before NetworkManager starts). Empty: the image's default, WiFi on.
+new_dir -m0755 -o root -g root "$data_root/network"
+
 # NetworkManager's keyfile backend requires this restrictive mode.
 new_dir -m0700 -o root -g root "$data_root/NetworkManager/system-connections"
 
@@ -125,6 +142,18 @@ if [ -d "$kodi_seed" ] && [ -z "$(ls -A "$data_root/kodi")" ]; then
     cp -a "$kodi_seed/." "$data_root/kodi/"
     chown -R "$account_uid:$account_gid" "$data_root/kodi"
 fi
+# als-dimmer's calibration tables: every image table the device lacks, file by
+# file - an update brings new tables, and a table a sweep replaced (the user's
+# measurement of this panel) is never overwritten. A reset re-seeds them all.
+calib_seed="$seed_root/home/pi/als-dimmer/etc/als-dimmer/calibrations"
+if [ -d "$calib_seed" ]; then
+    for table in "$calib_seed"/*; do
+        [ -f "$table" ] || continue
+        [ -e "$data_root/als-dimmer-calibrations/${table##*/}" ] || \
+            cp -p "$table" "$data_root/als-dimmer-calibrations/"
+    done
+fi
+
 # settings.json: the appliance hook moves an authored one (if the image ever
 # ships one) to settings.json.default and links the live path into /data.
 settings_seed="$seed_root/home/pi/micropanel/share/micropanel/settings.json.default"

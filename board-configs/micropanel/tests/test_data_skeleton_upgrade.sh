@@ -48,7 +48,14 @@ printf '%s\n' "$added" | grep -qx './cluster 1000 1000 755\|./cluster pi pi 755\
     && ok "added: cluster/ (uid 1000, 0755)" || fail "cluster/ not added as expected: $added"
 printf '%s\n' "$added" | grep -q '^./micropanel-system/var-lib-micropanel/dhcp-reservations root root 644 ' \
     && ok "added: dhcp-reservations (root, 0644)" || fail "dhcp-reservations not added as expected: $added"
-[ "$(printf '%s\n' "$added" | wc -l)" = 2 ] && ok "nothing else added" || fail "unexpected additions: $added"
+# The persistent-settings round's directories (the WiFi switch, calibration results)
+printf '%s\n' "$added" | grep -qx './network root root 755' \
+    && ok "added: network/ (root, 0755)" || fail "network/ not added as expected: $added"
+printf '%s\n' "$added" | grep -qx './system-settings [^ ]* [^ ]* 755' \
+    && ok "added: system-settings/ (the account, 0755)" || fail "system-settings/ not added as expected: $added"
+printf '%s\n' "$added" | grep -qx './als-dimmer-calibrations root root 755' \
+    && ok "added: als-dimmer-calibrations/ (root, 0755)" || fail "als-dimmer-calibrations/ not added as expected: $added"
+[ "$(printf '%s\n' "$added" | wc -l)" = 5 ] && ok "nothing else added" || fail "unexpected additions: $added"
 [ "$(stat -c %a "$data/test-reports")" = 750 ] && ok "a mode an app changed is kept (test-reports 0750)" \
     || fail "test-reports mode reset"
 
@@ -59,6 +66,18 @@ AB_SEED_ROOT=$seed bash "$new" --root "$data" --uid 1000 --gid 1000 || fail "sec
 AB_SEED_ROOT=$seed bash "$old" --root "$data" --uid 1000 --gid 1000 >/dev/null 2>&1
 [ "$(stat -c %a "$data/test-reports")" = 755 ] && ok "control: the old skeleton resets an existing mode (why new_dir is needed)" \
     || fail "control: the old skeleton did not reset the mode - the test proves less than it says"
+
+# als-dimmer's calibration tables: seeded file by file - a table the device
+# has (a sweep replaced it) is kept, one the image adds arrives
+calseed=$work/calseed; mkdir -p "$calseed/home/pi/als-dimmer/etc/als-dimmer/calibrations"
+printf 'image\n' > "$calseed/home/pi/als-dimmer/etc/als-dimmer/calibrations/panel.csv"
+printf 'new\n' > "$calseed/home/pi/als-dimmer/etc/als-dimmer/calibrations/added.csv"
+printf 'swept\n' > "$data/als-dimmer-calibrations/panel.csv"
+AB_SEED_ROOT=$calseed bash "$new" --root "$data" --uid 1000 --gid 1000 || fail "calibration seed run failed"
+[ "$(cat "$data/als-dimmer-calibrations/panel.csv")" = swept ] && ok "calibration: the device's swept table kept" \
+    || fail "calibration: the device's table was overwritten"
+[ "$(cat "$data/als-dimmer-calibrations/added.csv" 2>/dev/null)" = new ] && ok "calibration: a table the image adds arrives" \
+    || fail "calibration: the image's new table was not seeded"
 
 [ "$failures" -eq 0 ] && { echo "data skeleton upgrade: PASS"; exit 0; }
 echo "data skeleton upgrade: $failures failure(s)"; exit 1

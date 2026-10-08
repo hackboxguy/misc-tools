@@ -9,7 +9,8 @@ set -e
 # exercises the OBD-II ECU, the UDS battery ECU over ISO-TP, the driver
 # assist DID and, through --theme=auto, the third theme's badge and risk
 # glow, all in the boot state (an ev bench reaches everything but the last
-# two). The control port on 8080 changes values at runtime (README).
+# two). The control port (8080, or CLUSTER_EMULATOR_PORT) changes values at
+# runtime (README).
 # Switch the car type in /home/pi/car-can-emulator/systemd/car-can-emulator.env.
 #
 # Environment (from the hook list): HOOK_GIT_REPO / HOOK_GIT_TAG or
@@ -21,6 +22,11 @@ CLUSTER_PRUNE="${CLUSTER_PRUNE:-0}"
 # CLUSTER_DATA_ENV=1 (see qt-cluster-demo-hook.sh): the unit(s) also read
 # /data/cluster/<env file> after the image's.
 CLUSTER_DATA_ENV="${CLUSTER_DATA_ENV:-0}"
+# CLUSTER_EMULATOR_PORT (board.conf, e.g. micropanel's 8090): the control port,
+# as CAR_CAN_EMULATOR_CONTROL_PORT in the env file - apart from EMULATOR_ARGS,
+# so an operator's override of the arguments (/data/cluster) keeps it. Empty:
+# the emulator's default, 8080 (the stand-alone board).
+CLUSTER_EMULATOR_PORT="${CLUSTER_EMULATOR_PORT:-}"
 
 # data_env_dropin <unit> <env file name>: CLUSTER_DATA_ENV=1's drop-in. Wants=,
 # not Requires=: without /data the unit still starts, on the image's defaults.
@@ -95,6 +101,11 @@ EMULATOR_ARGS=--node=vcan1 --car=hybrid --drive-cycle=$DEST/cycles/demo.cycle
 #EMULATOR_ARGS=--node=vcan1 --car=ev --drive-cycle=$DEST/cycles/demo.cycle
 #EMULATOR_ARGS=--node=can0 --car=ice --debugprint=true
 ENVEOF
+if [ -n "$CLUSTER_EMULATOR_PORT" ]; then
+    printf '%s\n' "# The control port (8080 belongs to Kodi's web interface on this board)" \
+        "CAR_CAN_EMULATOR_CONTROL_PORT=$CLUSTER_EMULATOR_PORT" >> systemd/car-can-emulator.env
+    echo "  control port: $CLUSTER_EMULATOR_PORT"
+fi
 systemctl enable "$DEST/systemd/car-can-emulator.service"
 
 if [ "$CLUSTER_DATA_ENV" = 1 ]; then

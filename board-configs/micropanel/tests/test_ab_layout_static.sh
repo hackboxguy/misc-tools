@@ -348,6 +348,13 @@ grep -Fq 'install -m0644 -o root -g root /dev/null "$data_root/micropanel-system
 # CLUSTER_DATA_ENV=1: the units read /data/cluster, which the data skeleton
 # creates (pi-owned: the operator writes it over SSH), so they wait for a reset
 grep -Fqx 'CLUSTER_DATA_ENV=1' "$board/board.conf" || fail "board.conf lacks CLUSTER_DATA_ENV=1"
+# Kodi's web interface (the deck's media keys) and the pattern generator own
+# port 8080: the bench emulator's control port moves (CAR_CAN_EMULATOR_CONTROL_PORT)
+grep -Fqx 'CLUSTER_EMULATOR_PORT=8090' "$board/board.conf" || fail "board.conf does not move the emulator's control port off 8080"
+grep -Fq 'CAR_CAN_EMULATOR_CONTROL_PORT=$CLUSTER_EMULATOR_PORT' "$board/../qt-cluster-demo/packages/car-can-emulator-hook.sh" \
+    || fail "the emulator hook does not write the control port"
+grep -Fq 'CLUSTER_EMULATOR_PORT="${CLUSTER_EMULATOR_PORT:-}" "$IMAGER"' "$repo_root/build-image.sh" \
+    || fail "build-image.sh does not pass CLUSTER_EMULATOR_PORT to the hooks"
 grep -Fq 'new_dir -m0755 -o "$account_uid" -g "$account_gid" "$data_root/cluster"' \
     "$board/packages/micropanel-data-skeleton.sh" || fail "the data skeleton does not create /data/cluster"
 for unit in can-proxy-links.service can-proxyd.service car-can-emulator.service; do

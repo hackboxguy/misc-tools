@@ -216,6 +216,7 @@ CLUSTER_SOURCE_ENV="${CLUSTER_SOURCE:-}"
 CLUSTER_SERVICE_ENV="${CLUSTER_SERVICE:-}"
 CLUSTER_PRUNE_ENV="${CLUSTER_PRUNE:-}"
 CLUSTER_DATA_ENV_ENV="${CLUSTER_DATA_ENV:-}"
+CLUSTER_EMULATOR_PORT_ENV="${CLUSTER_EMULATOR_PORT:-}"
 if [ $PROFILE_ONLY -eq 0 ]; then
     BOARD_DIR="$BOARD_CONFIGS_DIR/$BOARD"
     BOARD_CONF="$BOARD_DIR/board.conf"
@@ -255,6 +256,17 @@ CLUSTER_DATA_ENV="${CLUSTER_DATA_ENV_ENV:-$(resolve_cfg CLUSTER_DATA_ENV)}"
 case "${CLUSTER_SERVICE:-}" in ""|0|1) ;; *) die "CLUSTER_SERVICE must be 0 or 1, got '$CLUSTER_SERVICE'" ;; esac
 case "${CLUSTER_PRUNE:-}" in ""|0|1) ;; *) die "CLUSTER_PRUNE must be 0 or 1, got '$CLUSTER_PRUNE'" ;; esac
 case "${CLUSTER_DATA_ENV:-}" in ""|0|1) ;; *) die "CLUSTER_DATA_ENV must be 0 or 1, got '$CLUSTER_DATA_ENV'" ;; esac
+# The bench emulator's TCP control port (car-can-emulator-hook.sh). Empty = the
+# emulator's own default, 8080; micropanel moves it, because Kodi's web
+# interface (the Stream Deck's media keys) and the pattern generator's remote
+# control own 8080 there.
+CLUSTER_EMULATOR_PORT="${CLUSTER_EMULATOR_PORT_ENV:-$(resolve_cfg CLUSTER_EMULATOR_PORT)}"
+case "${CLUSTER_EMULATOR_PORT:-}" in
+    "") ;;
+    *[!0-9]*) die "CLUSTER_EMULATOR_PORT must be a port number, got '$CLUSTER_EMULATOR_PORT'" ;;
+    *) [ "$CLUSTER_EMULATOR_PORT" -ge 1 ] && [ "$CLUSTER_EMULATOR_PORT" -le 65535 ] || \
+           die "CLUSTER_EMULATOR_PORT must be 1..65535, got '$CLUSTER_EMULATOR_PORT'" ;;
+esac
 
 RUNTIME_DEPS="$(resolve_cfg RUNTIME_DEPS)"
 BUILD_DEPS="$(resolve_cfg BUILD_DEPS)"
@@ -674,6 +686,7 @@ apps_stamp_inputs() {
     [ -n "${CLUSTER_SERVICE:-}" ] && in+=("cluster-service:$CLUSTER_SERVICE")
     [ -n "${CLUSTER_PRUNE:-}" ] && in+=("cluster-prune:$CLUSTER_PRUNE")
     [ -n "${CLUSTER_DATA_ENV:-}" ] && in+=("cluster-data-env:$CLUSTER_DATA_ENV")
+    [ -n "${CLUSTER_EMULATOR_PORT:-}" ] && in+=("cluster-emulator-port:$CLUSTER_EMULATOR_PORT")
     [ "$HOOK_LIST" != "none" ] && [ -n "$HOOK_LIST" ] && in+=("file:$HOOK_LIST")
     local h d entry url ref
     for h in "${HOOK_SCRIPTS[@]}"; do in+=("file:$h"); done
@@ -1196,7 +1209,7 @@ run_stage_apps() {
     MICROPANEL_TOUCH_REVISION="$MICROPANEL_TOUCH_REVISION" \
     MICROPANEL_TOUCH_APP_REPO="${MICROPANEL_TOUCH_APP_REPO:-}" \
     AB_MANIFEST_PATH="$([ "$AB_LAYOUT" = "1" ] && printf '%s' "${AB_MANIFEST_PATH:-}")" \
-    CLUSTER_SOURCE="${CLUSTER_SOURCE:-}" CLUSTER_SERVICE="${CLUSTER_SERVICE:-}" CLUSTER_PRUNE="${CLUSTER_PRUNE:-}" CLUSTER_DATA_ENV="${CLUSTER_DATA_ENV:-}" "$IMAGER" \
+    CLUSTER_SOURCE="${CLUSTER_SOURCE:-}" CLUSTER_SERVICE="${CLUSTER_SERVICE:-}" CLUSTER_PRUNE="${CLUSTER_PRUNE:-}" CLUSTER_DATA_ENV="${CLUSTER_DATA_ENV:-}" CLUSTER_EMULATOR_PORT="${CLUSTER_EMULATOR_PORT:-}" "$IMAGER" \
         --mode=incremental \
         --baseimage="$APPS_INPUT" \
         --output="$work" \

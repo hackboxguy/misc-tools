@@ -1,0 +1,13 @@
+# micropanel A/B: udisks2 must not mount the boot medium's own partitions.
+# Kodi (and anything else that asks udisks2) mounts every partition it sees
+# unmounted under /media/<user>/ - on this layout that is the inactive slot
+# (MP_ROOT_B or _A, MP_BOOT_B or _A), the factory partition and /data's,
+# read-write; an update then writes into a slot that is mounted. Matched by
+# the layout's labels (ab-finalize-layout.sh), not by device name, so USB
+# sticks - whatever their label - are mounted as before.
+# UDISKS_IGNORE alone is only a hint for desktops: Kodi's explicit mount
+# request still succeeded (rig 1, 2026-10-08). UDISKS_SYSTEM makes them
+# system devices - mounting one needs administrator authorisation (polkit
+# auth_admin), which Kodi does not have - and UDISKS_AUTO=0 tells clients
+# not to automount them.
+SUBSYSTEM=="block", ENV{ID_FS_LABEL}=="MP_ROOT_A|MP_ROOT_B|MP_BOOT_A|MP_BOOT_B|MP_FACTORY|MICROPANEL_DATA", ENV{UDISKS_SYSTEM}="1", ENV{UDISKS_IGNORE}="1", ENV{UDISKS_AUTO}="0"

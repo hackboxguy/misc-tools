@@ -348,6 +348,18 @@ grep -Fq 'install -m0644 -o root -g root /dev/null "$data_root/micropanel-system
 # CLUSTER_DATA_ENV=1: the units read /data/cluster, which the data skeleton
 # creates (pi-owned: the operator writes it over SSH), so they wait for a reset
 grep -Fqx 'CLUSTER_DATA_ENV=1' "$board/board.conf" || fail "board.conf lacks CLUSTER_DATA_ENV=1"
+# udisks2 must not mount the A/B layout's own partitions (the inactive slot,
+# the factory partition) - every label the layout writes is in the rule
+udisks_rule="$board/packages/micropanel-appliance-hook.d/90-micropanel-udisks-ignore.rules"
+grep -Fq 'install -Dm0644 "$support/90-micropanel-udisks-ignore.rules" /etc/udev/rules.d/90-micropanel-udisks-ignore.rules' \
+    "$board/packages/micropanel-appliance-hook.sh" || fail "the appliance hook does not install the udisks ignore rule"
+for label in MP_ROOT_A MP_ROOT_B MP_BOOT_A MP_BOOT_B MP_FACTORY MICROPANEL_DATA; do
+    grep -q "ID_FS_LABEL}==\"[^\"]*$label" "$udisks_rule" || fail "the udisks ignore rule lacks $label"
+    grep -Fq "$label" "$repo_root/packages/pi-ab-update/ab-finalize-layout.sh" || fail "the layout no longer writes $label (rule out of date?)"
+done
+for prop in 'ENV{UDISKS_SYSTEM}="1"' 'ENV{UDISKS_IGNORE}="1"' 'ENV{UDISKS_AUTO}="0"'; do
+    grep -Fq "$prop" "$udisks_rule" || fail "the udisks ignore rule lacks $prop (UDISKS_SYSTEM is what refuses a user's mount)"
+done
 # Kodi's web interface (the deck's media keys) and the pattern generator own
 # port 8080: the bench emulator's control port moves (CAR_CAN_EMULATOR_CONTROL_PORT)
 grep -Fqx 'CLUSTER_EMULATOR_PORT=8090' "$board/board.conf" || fail "board.conf does not move the emulator's control port off 8080"

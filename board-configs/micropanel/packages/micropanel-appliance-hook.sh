@@ -329,6 +329,10 @@ rm -f /etc/modules-load.d/custom-drivers.conf
 # the DP source does not retrain (the 02.00 bench: a black panel). An explicit
 # modprobe - the derive unit's, the DIP-switch service's - ignores the blacklist.
 install -Dm0644 "$support/micropanel-no-autoload.conf" /etc/modprobe.d/micropanel-no-autoload.conf
+
+# udisks2 leaves the boot medium's own partitions alone (Kodi mounted the
+# inactive slot and the factory partition read-write under /media/pi)
+install -Dm0644 "$support/90-micropanel-udisks-ignore.rules" /etc/udev/rules.d/90-micropanel-udisks-ignore.rules
 say "display: micropanel-display-derive enabled; static custom-drivers.conf removed; driver autoload blacklisted"
 modprobe_config=$(modprobe -c -S "$release" 2>/dev/null || true)
 for module in hh983_serializer himax_mmi himax_oled; do

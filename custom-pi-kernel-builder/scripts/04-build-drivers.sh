@@ -102,6 +102,8 @@ if [[ -n "$CUSTOM_DRIVERS" ]]; then
     HIMAX_DTS="$DRIVER_PKG_DIR/himax-touch/dts/himax-touch-overlay.dts"
     HIMAX_OLED_SRC="$DRIVER_PKG_DIR/himax-touch-oled/src"
     HIMAX_OLED_DTS="$DRIVER_PKG_DIR/himax-touch-oled/dts/himax-touch-oled-overlay.dts"
+    HIMAX_OLEDIB_SRC="$DRIVER_PKG_DIR/himax-touch-oledib/src"
+    HIMAX_OLEDIB_DTS="$DRIVER_PKG_DIR/himax-touch-oledib/dts/himax-touch-oledib-overlay.dts"
     log_info "Using custom drivers directory: $DRIVER_PKG_DIR"
 fi
 
@@ -293,6 +295,44 @@ if [[ -d "$HIMAX_OLED_SRC" ]]; then
     echo ""
 else
     log_info "himax-touch-oled source not present, skipping (optional)"
+fi
+
+# ------------------------------------------------------------------------------
+# Build himax-touch-oledib Driver (HX8530, 17" OLED-IB, Himax A09.23) - optional
+# ------------------------------------------------------------------------------
+if [[ -d "$HIMAX_OLEDIB_SRC" ]]; then
+    echo "=============================================================================="
+    log_info "Building himax-touch-oledib (HX8530, OLED-IB) driver..."
+    echo "=============================================================================="
+
+    cd "$HIMAX_OLEDIB_SRC"
+
+    if [[ $DO_CLEAN -eq 1 ]]; then
+        log_info "Cleaning previous build..."
+        make -C "$KERNEL_SRC" M="$(pwd)" clean || true
+    fi
+
+    log_info "Compiling kernel module..."
+    make -C "$KERNEL_SRC" M="$(pwd)" modules
+
+    if [[ ! -f "himax_oledib.ko" ]]; then
+        log_error "Failed to build himax_oledib.ko"
+        exit 1
+    fi
+    log_success "himax_oledib.ko built successfully!"
+    cp himax_oledib.ko "$BUILD_OUTPUT/modules/"
+    modinfo himax_oledib.ko 2>/dev/null | grep -E "^(filename|version|description|author|vermagic):" || true
+
+    log_info "Compiling device tree overlay..."
+    if [[ -f "$HIMAX_OLEDIB_DTS" ]]; then
+        dtc -@ -I dts -O dtb -o "$BUILD_OUTPUT/overlays/himax-touch-oledib.dtbo" "$HIMAX_OLEDIB_DTS"
+        log_success "himax-touch-oledib.dtbo built successfully!"
+    else
+        log_warn "DTS file not found: $HIMAX_OLEDIB_DTS"
+    fi
+    echo ""
+else
+    log_info "himax-touch-oledib source not present, skipping (optional)"
 fi
 
 # ------------------------------------------------------------------------------

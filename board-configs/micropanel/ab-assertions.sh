@@ -67,7 +67,7 @@ require grep -Fqx 'MICROPANEL_BOOT_CONFIG=/boot/firmware/micropanel-display.txt'
 # became the firmware's own gpio=22=ip,pu in micropanel's template.
 known_missing_overlays=" "
 overlay_names=$( { grep -h '^[[:space:]]*dtoverlay=' "$template" "$display_file";
-                   printf 'dtoverlay=%s\n' vc4-kms-v3d vc4-fkms-v3d himax-touch himax-touch-oled hh983-serializer; } |
+                   printf 'dtoverlay=%s\n' vc4-kms-v3d vc4-fkms-v3d himax-touch himax-touch-oled himax-touch-oledib hh983-serializer; } |
                  sed 's/^[[:space:]]*dtoverlay=//; s/[,[:space:]].*//' | sed '/^$/d' | sort -u)
 for slot in A B; do
     for overlay in $overlay_names; do
@@ -79,7 +79,7 @@ done
 # custom kernel's out-of-tree module set.
 release=$(grep -a -o -m1 'Linux version [^ ]*' "$boot_mount/A/Image" | awk '{print $3}')
 require test -n "$release"
-for module in hh983-serializer himax_mmi himax_oled; do
+for module in hh983-serializer himax_mmi himax_oled himax_oledib; do
     require sh -c "ls '$root_mount/lib/modules/$release/extra/$module'.ko* >/dev/null 2>&1"
 done
 # The derived module configuration is regenerated every boot; nothing loads the
@@ -95,7 +95,7 @@ if [ -e "$root_mount/etc/systemd/system/multi-user.target.wants/usb-media-autost
 fi
 require test ! -e "$root_mount/etc/modules-load.d/custom-drivers.conf"
 # ...nor by alias: a driver loaded before the derive unit would need a reload.
-for module in hh983_serializer himax_mmi himax_oled; do
+for module in hh983_serializer himax_mmi himax_oled himax_oledib; do
     require grep -Fqx "blacklist $module" "$root_mount/etc/modprobe.d/micropanel-no-autoload.conf"
 done
 # Pi OS's one-shot root resize would fail on every boot of an overlay root.

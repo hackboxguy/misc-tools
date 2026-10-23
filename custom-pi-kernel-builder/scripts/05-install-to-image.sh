@@ -282,6 +282,12 @@ if [[ -f "$BUILD_OUTPUT/modules/himax_oled.ko" ]]; then
     log_success "Installed himax_oled.ko"
 fi
 
+# Install himax_oledib (HX8530, 17" OLED-IB, Himax A09.23) - optional
+if [[ -f "$BUILD_OUTPUT/modules/himax_oledib.ko" ]]; then
+    cp "$BUILD_OUTPUT/modules/himax_oledib.ko" "$EXTRA_MOD_DIR/"
+    log_success "Installed himax_oledib.ko"
+fi
+
 # ------------------------------------------------------------------------------
 # Install Custom Overlays
 # ------------------------------------------------------------------------------
@@ -303,6 +309,11 @@ fi
 if [[ -f "$BUILD_OUTPUT/overlays/himax-touch-oled.dtbo" ]]; then
     cp "$BUILD_OUTPUT/overlays/himax-touch-oled.dtbo" "$MNT_BOOT/overlays/"
     log_success "Installed himax-touch-oled.dtbo"
+fi
+
+if [[ -f "$BUILD_OUTPUT/overlays/himax-touch-oledib.dtbo" ]]; then
+    cp "$BUILD_OUTPUT/overlays/himax-touch-oledib.dtbo" "$MNT_BOOT/overlays/"
+    log_success "Installed himax-touch-oledib.dtbo"
 fi
 
 # ------------------------------------------------------------------------------

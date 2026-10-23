@@ -335,7 +335,7 @@ install -Dm0644 "$support/micropanel-no-autoload.conf" /etc/modprobe.d/micropane
 install -Dm0644 "$support/90-micropanel-udisks-ignore.rules" /etc/udev/rules.d/90-micropanel-udisks-ignore.rules
 say "display: micropanel-display-derive enabled; static custom-drivers.conf removed; driver autoload blacklisted"
 modprobe_config=$(modprobe -c -S "$release" 2>/dev/null || true)
-for module in hh983_serializer himax_mmi himax_oled; do
+for module in hh983_serializer himax_mmi himax_oled himax_oledib; do
     grep -Fqx "blacklist $module" <<< "$modprobe_config" || \
         die "modprobe does not see the autoload blacklist for $module"
 done

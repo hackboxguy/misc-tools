@@ -436,7 +436,7 @@ done
 grep -Fq 'systemctl enable micropanel-display-derive.service' "$appliance" || fail 'appliance hook does not enable the derive unit'
 grep -Fq 'rm -f /etc/modules-load.d/custom-drivers.conf' "$appliance" || fail 'appliance hook keeps the static driver list'
 # No alias autoload of the display drivers (the 02.00 black-panel finding).
-for module in hh983_serializer himax_mmi himax_oled; do
+for module in hh983_serializer himax_mmi himax_oled himax_oledib; do
     grep -Fqx "blacklist $module" "$support/micropanel-no-autoload.conf" || fail "no autoload blacklist for $module"
 done
 grep -Fq '"$support/micropanel-no-autoload.conf" /etc/modprobe.d/micropanel-no-autoload.conf' "$appliance" || \

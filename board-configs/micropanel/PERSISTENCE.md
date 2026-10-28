@@ -54,6 +54,7 @@ Mechanisms, in one place:
 | `kodi/` | pi, `0755` | bind → `/home/pi/.kodi` (before `micropanel.service`) | kodi user data: database, add-ons, settings, thumbnails and caches | Seeded from the image's authored `/home/pi/.kodi` (the add-ons hook builds it), owned by pi; re-seeded by a reset |
 | `disptool-results/` | pi, `0755` | bind → `/home/pi/micropanel/share/disptool/display-test-framework/results` (before `micropanel.service`) | disptool test framework measurement runs | Empty |
 | `test-reports/` | pi, `0755` | bind → `/home/pi/test-reports` (before `qt-demo-launcher.service`) | the launcher's display-analysis reports (Analyze Color Gamut, Local Dimming APL): report PNGs, per suite and combined, and each run's measurement data. File names start with the display IOC's short chip serial | Empty |
+| `display-profiles/` | pi, `0755` | bind → `/home/pi/display-profiles` (before `qt-demo-launcher.service`) | the launcher's HDR Display Profile flow (Calibration Tools → HDR Display Profile): `<serial>_profile-<date>-<time>.png` cards and their `-data` folders (the profile JSON, the measurement session) | Empty |
 | `micropanel-system/debug/` | root, `0700` | - | Bench forensics (`micropanel-debug-journal.service`; in release images too, and inert there unless the `micropanel.debug-journal=1` cmdline token or a `debug/enabled` marker is present): per boot `boot-<NNNN>-<boot-id>` (NNNN a counter kept in the directory - no RTC) with a `.start` snapshot, a `.late` timing at 90 s, unbuffered `.dmesg` and `.journal` mirrors and a 5 s `.sample` line (load, dirty/writeback memory, SD requests in flight, update progress; PSI only with `psi=1` on the cmdline); 20 MiB each, newest 5 boots. ext4's 5 s commit bounds what a reset loses | Created on first use; a reset wipes it |
 | `system-manager/` and `system-manager/logs/` | pi, `0755` | - | System Manager (br-wrapper): the logs of its sections, the `last-install` record, `acknowledged-fallback` | Empty; a reset empties them (logs are not device state) |
 | `als-dimmer/` | root, `0755` | every installed als-dimmer config's `control.state_file` is `/data/als-dimmer/<name>` (the appliance hook rewrites the shipped `/tmp` and `/home/pi` paths; the file name is kept, e.g. `state.json`, `als-dimmer-pwm-state.json`) | als-dimmer daemon (root): operating mode (AUTO/MANUAL), manual brightness, offset. Saved on every change from the client/UI and at shutdown | Empty: a new or reset device starts in AUTO (ambient-light) mode |
@@ -102,7 +103,7 @@ parameters), the pattern generator's current pattern and its
 defaults), the gallery's slideshow pause, zoom and current picture, USB
 Media's "cancel autostart" (this boot only, by its wording), and Display
 Settings' privacy and vision-booster tiles (not available in the UI).
-Measurement data (`test-reports`, `disptool-results`, the profiling
+Measurement data (`test-reports`, `display-profiles`, `disptool-results`, the profiling
 recordings in `/home/pi/test-data`) is not a setting.
 
 ## Device-owned boot configuration

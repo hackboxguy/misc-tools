@@ -102,6 +102,9 @@ new_dir -m0755 -o "$account_uid" -g "$account_gid" "$data_root/disptool-results"
 # Bound to /home/pi/test-reports: the launcher's display-analysis reports
 # (Analyze Color Gamut, Local Dimming APL) - report PNGs and their data.
 new_dir -m0755 -o "$account_uid" -g "$account_gid" "$data_root/test-reports"
+# Bound to /home/pi/display-profiles: the launcher's HDR Display Profile flow -
+# profile cards (PNG) and each profile's JSON with its measurement session.
+new_dir -m0755 -o "$account_uid" -g "$account_gid" "$data_root/display-profiles"
 
 # als-dimmer's state (mode, manual brightness): every installed als-dimmer config
 # names its state_file in here (the appliance hook rewrites them). root: the

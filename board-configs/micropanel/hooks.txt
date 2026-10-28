@@ -56,6 +56,9 @@ packages/streamdeck-ctrl-hook.sh|https://github.com/hackboxguy/streamdeck-ctrl.g
 #those come from runtime-deps.txt and are reinstalled after the build-dep purge by the imager.
 packages/disp-report-card-hook.sh|https://github.com/hackboxguy/disp-report-card.git|main|/home/pi/micropanel|python3-matplotlib,python3-numpy
 
+#display-profile-tools - make-display-profile.py for the launcher's HDR Display Profile (sdr-hdr-shootout-demo, private: from SOURCES)
+packages/display-profile-tools-hook.sh|file://${REPOBINS}/sdr-hdr|local|/home/pi/micropanel|
+
 #kodi custom add-on(video loop button)
 packages/kodi-custom-addons-hook.sh|https://github.com/hackboxguy/kodi-custom-addons.git|main|/home/pi/kodi-custom-addons|sqlite3
 

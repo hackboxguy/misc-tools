@@ -141,6 +141,10 @@ phases under QEMU are normal, not hangs.
   argument scheme changes) and `systemctl enable`s the unit.
   RULE: private repos are always SOURCES + file://${REPOBINS}/...; only
   public repos may be in-chroot git-source hooks.
+- `sdr-hdr` = `sdr-hdr-shootout-demo.git` (PRIVATE, `main`): micropanel's
+  `display-profile-tools-hook.sh` installs only `tools/make-display-profile.py`
+  (stdlib) to `/home/pi/micropanel/share/display-profile/`, where the
+  launcher's HDR Display Profile worker looks first.
 
 Network policy pattern (qt-cluster-demo, reusable for other boards):
 DHCP-with-static-fallback is done declaratively with NetworkManager's

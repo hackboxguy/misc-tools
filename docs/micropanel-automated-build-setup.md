@@ -86,7 +86,8 @@ Jobs, all `runs-on: [self-hosted, micropanel-build]`, all sequential:
      kodi-custom-addons, streamdeck-ctrl `display-control`, xc3sprog,
      openFPGALoader `v1.0.0`),
    - every `SOURCES` entry of `board.conf` (br-wrapper, sp6bins,
-     rh850-flash-tools, space6-architecture, media-files),
+     rh850-flash-tools, space6-architecture, media-files, qt-cluster-demo,
+     sdr-hdr-shootout-demo),
    - the vanilla image filename from the base profile.
    Compares with `last-built.lock` in the workspace. Equal and not
    `force` → the workflow ends with the summary "no input changed since
@@ -198,8 +199,8 @@ month and a fresh clone of media-files alone is 86 MB).
   (plus `ab-release-key.sh verify` and the retention script). Nothing else
   needs root.
 - `gh auth login` as `ci` with a fine-grained token that can read
-  `sp6bins`, `media-files`, `space6-architecture`, `rh850-flash-tools`
-  (the private sources) and can *write* nothing — the SD-card build never
+  `sp6bins`, `media-files`, `space6-architecture`, `rh850-flash-tools`,
+  `qt-cluster-demo`, `sdr-hdr-shootout-demo` (the private sources) and can *write* nothing — the SD-card build never
   pushes. `git lfs install`. `git config --global credential.helper` via
   `gh auth setup-git`.
 - Workspace `WORKSPACE=/home/ci/pi-image-workspace` on the large disk

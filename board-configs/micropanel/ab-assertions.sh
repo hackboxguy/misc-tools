@@ -146,6 +146,17 @@ if [ -n "$(ls -A "$root_mount/home/pi/.kodi" 2>/dev/null)" ]; then
     require test -z "$(find "$data_mount/kodi" ! -user "${app_account%%:*}" -print -quit)"
 fi
 
+# --- The launcher's HDR Display Profile flow -------------------------------------
+# The profile creator comes from a private repo through its own hook
+# (display-profile-tools, sdr-hdr in SOURCES); an image built from a checkout
+# that predated the hook shipped the launcher page without it (2.31). The gate
+# needs disp-tester's placement outline and the entries' --initial-pattern too.
+require test -f "$root_mount/home/pi/micropanel/share/display-profile/make-display-profile.py"
+require test -x "$root_mount/home/pi/micropanel/share/qt-apps/hdr-profile-start-child.sh"
+require test -x "$root_mount/home/pi/micropanel/share/qt-apps/display-analysis-common.sh"
+require grep -Fq -- '--initial-pattern' "$root_mount/home/pi/micropanel/share/qt-apps/qt-demo-launcher.json"
+require grep -Eq '^SDR_HDR_REVISION=[0-9a-f]{40}$' "$image_manifest"
+
 # --- The appliance conversion (micropanel-appliance-hook.sh) --------------------
 # Every persistence bind the hook appends survived the finalizer's fstab rewrite.
 while IFS= read -r bind_line; do

@@ -157,6 +157,16 @@ require test -x "$root_mount/home/pi/micropanel/share/qt-apps/display-analysis-c
 require grep -Fq -- '--initial-pattern' "$root_mount/home/pi/micropanel/share/qt-apps/qt-demo-launcher.json"
 require grep -Eq '^SDR_HDR_REVISION=[0-9a-f]{40}$' "$image_manifest"
 
+# --- dual-video-player (USB Media playlist mode, Dual Video, --sync) -----------
+# CMake builds the player only where its pkg-config modules resolve (gstreamer,
+# gstreamer-net, gio, libdrm, json-glib): a missing dev package drops the binary
+# from the image silently. --sync needs libgstnet at run time and avahi-utils
+# (avahi-publish / avahi-browse) to find the other rig.
+require test -x "$root_mount/home/pi/micropanel/bin/dual-video-player"
+require grep -q 'libgstnet-1.0.so' "$root_mount/home/pi/micropanel/bin/dual-video-player"
+require test -x "$root_mount/usr/bin/avahi-publish"
+require test -x "$root_mount/usr/bin/avahi-browse"
+
 # --- The appliance conversion (micropanel-appliance-hook.sh) --------------------
 # Every persistence bind the hook appends survived the finalizer's fstab rewrite.
 while IFS= read -r bind_line; do

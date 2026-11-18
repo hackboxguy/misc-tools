@@ -104,13 +104,17 @@ umount "$lower_root_mount"
 mount -o ro "${loop}p5" "$lower_root_mount"
 
 install -d "$boot_mount/A" "$boot_mount/B"
+# The running slot's cmdline carries the device's display mode (micropanel's
+# pi-config-txt.sh writes it for a 3x QVue); the candidate must inherit it.
+printf '%s\n' 'console=tty1 root=LABEL=MP_ROOT_A rootfstype=ext4 rootwait overlayroot=tmpfs:recurse=0 video=HDMI-A-1:4500x298-32@60' \
+    > "$boot_mount/A/cmdline.txt"
 
 # ---------------------------------------------------------------------------
 # Build one format=2 bundle exactly as the release generator publishes it.
 # ---------------------------------------------------------------------------
 install -d "$work/bundle" "$work/payload-boot"
 printf '%s\n' \
-    'console=tty1 root=LABEL=@MICROPANEL_SLOT@ rootfstype=ext4 rootwait overlayroot=tmpfs:recurse=0' \
+    'console=tty1 root=LABEL=@MICROPANEL_SLOT@ video=HDMI-A-1:1920x1080@60 rootfstype=ext4 rootwait overlayroot=tmpfs:recurse=0' \
     > "$work/payload-boot/cmdline.txt.template"
 printf '%s\n' 'fixture kernel' > "$work/payload-boot/kernel8.img"
 tar --format=posix --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 \
@@ -282,6 +286,10 @@ assert_candidate_armed() { # $1=case label
     grep -Fqx 'handler integration root marker' "$target_root_mount/payload-marker"
     unmount_if_mounted "$target_root_mount"
     grep -Fqx 'root=LABEL=MP_ROOT_B' <(tr ' ' '\n' < "$boot_mount/B/cmdline.txt")
+    # The device's display mode carried over; a mode an older release's
+    # template carried dropped; nothing else of the template changed.
+    [ "$(cat "$boot_mount/B/cmdline.txt")" = "$expected_b_cmdline" ] || {
+        echo "ERROR: $1: candidate cmdline is '$(cat "$boot_mount/B/cmdline.txt")'" >&2; exit 1; }
     test ! -e "$boot_mount/B/cmdline.txt.template"
     test ! -e "$boot_mount/B/obsolete"
     grep -Fqx 'state=candidate-armed' "$state_dir/update-state"
@@ -362,9 +370,20 @@ record_usb() { # remaining args are loop devices with a vfat/exfat filesystem
 mkfs_vfat32() { mkfs.vfat -F32 "$1"; }
 
 # --- 1. the pipe path (OTA in miniature) -----------------------------------
+plain_b_cmdline='console=tty1 root=LABEL=MP_ROOT_B rootfstype=ext4 rootwait overlayroot=tmpfs:recurse=0'
+expected_b_cmdline="$plain_b_cmdline video=HDMI-A-1:4500x298-32@60"
 reset_target
 run_handler stdin < "$bundle"
 assert_candidate_armed 'bundle streamed through a pipe armed candidate B'
+# A device whose display needs no mode: the candidate carries none either.
+sed -i 's/ video=HDMI-A-1:[^ ]*//' "$boot_mount/A/cmdline.txt"
+expected_b_cmdline=$plain_b_cmdline
+reset_target
+run_handler stdin < "$bundle"
+assert_candidate_armed 'a device without a display mode armed candidate B'
+printf '%s\n' 'console=tty1 root=LABEL=MP_ROOT_A rootfstype=ext4 rootwait overlayroot=tmpfs:recurse=0 video=HDMI-A-1:4500x298-32@60' \
+    > "$boot_mount/A/cmdline.txt"
+expected_b_cmdline="$plain_b_cmdline video=HDMI-A-1:4500x298-32@60"
 
 # --- 2. integrity refusal on the pipe path --------------------------------
 reset_target

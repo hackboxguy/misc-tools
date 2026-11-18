@@ -201,13 +201,24 @@ done
 root_count=$(tr ' ' '\n' < "$boot_mount/A/cmdline.txt" | awk '/^root=/{count++} END {print count+0}')
 [ "$root_count" -eq 1 ] || { echo 'ERROR: A cmdline must contain exactly one root= token' >&2; exit 1; }
 cp -a "$boot_mount/A/." "$work/boot-tree/"
+# Nor its display mode: video= is device-owned (a board's display tooling
+# writes it for the display the device drives, e.g. a 32 bpp framebuffer mode),
+# and the device-side renderer carries the device's own over. A release cut on
+# one bench must not force that bench's display mode on every device.
 sed -E 's#(^|[[:space:]])root=[^[:space:]]+#\1root=LABEL=@MICROPANEL_SLOT@#' \
-    "$boot_mount/A/cmdline.txt" > "$work/boot-tree/cmdline.txt.template"
+    "$boot_mount/A/cmdline.txt" | \
+    awk '{ out = ""
+           for (i = 1; i <= NF; i++) if (index($i, "video=") != 1) out = out (out == "" ? "" : " ") $i
+           print out }' > "$work/boot-tree/cmdline.txt.template"
 rm -f "$work/boot-tree/cmdline.txt"
 grep -Fqx "root=LABEL=@MICROPANEL_SLOT@" <(tr ' ' '\n' < "$work/boot-tree/cmdline.txt.template") || {
     echo 'ERROR: unable to create slot-neutral cmdline template' >&2
     exit 1
 }
+if grep -q '^video=' <<< "$(tr ' ' '\n' < "$work/boot-tree/cmdline.txt.template")"; then
+    echo 'ERROR: the cmdline template still carries a device display mode' >&2
+    exit 1
+fi
 
 # Published names carry no version: the manifest is the authority on which
 # release this is, and stable names give Stage 4 a stable download URL.

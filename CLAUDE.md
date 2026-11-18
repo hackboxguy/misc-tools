@@ -227,6 +227,11 @@ credential store; env vars by design, never CLI flags).
   - The commit service must never be `After=` its health units: an
     application unit is `After=multi-user.target`, the service is
     `WantedBy=` it, and systemd deletes the commit job to break the cycle.
+  - The fb0 depth (16 bpp RGB565 by default) is a kernel cmdline option, not
+    a config.txt one: `video=HDMI-A-1:<mode>-32@<hz>`, device-owned (written by
+    pi-config-txt.sh for the 3x QVue). The payload template strips every
+    `video=` and the update handler carries the running slot's into the
+    candidate (the engine stays product-neutral: no "micropanel" in ab-*).
   - USB sticks may be FAT32, exFAT or NTFS (Windows sticks are NTFS; the
     custom kernel has ntfs3).
   - The apps stage clones br-wrapper `main` when it starts, so two builds of

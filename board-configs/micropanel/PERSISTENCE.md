@@ -114,6 +114,7 @@ recordings in `/home/pi/test-data`) is not a setting.
 | --- | --- | --- | --- |
 | `MP_BOOT_A:/micropanel-display.txt` | root (vfat) | `pi-config-txt.sh --type=` (DIP-switch service, OLED HDMI Timing, streamdeck-ctrl, anything passing `--input=/boot/firmware/config.txt`) | reboots, updates, commits; **not** a reflash |
 | `MP_BOOT_A:/micropanel-display.txt.bak` | root | the same, one rolling copy | as above |
+| `video=HDMI-A-1:…` in `MP_BOOT_A:/{,A/,B/}cmdline.txt` | root | the same (`pi-config-txt.sh --type=`), and `--apply-derived` every boot; `ab-system-update` carries it into the candidate slot | reboots, updates, commits; **not** a reflash |
 
 The display type (type marker, timings, touch overlay) is the one piece of
 state on the boot partition. `config.txt` there is the slot selector's
@@ -122,6 +123,17 @@ state on the boot partition. `config.txt` there is the slot selector's
 (`MICROPANEL_BOOT_CONFIG=/boot/firmware/micropanel-display.txt`) is what makes
 `pi-config-txt.sh` read and write that file instead of `config.txt`. The boot
 partition is mounted `ro`; `pi-config-txt.sh` remounts it for the write.
+
+One display setting cannot live in `micropanel-display.txt`: the depth of the
+kernel's fbdev (`/dev/fb0`, which the Qt apps draw on through linuxfb) is a
+kernel command-line option. For the 3x QVue, `pi-config-txt.sh` puts
+`video=HDMI-A-1:4500x298-32@60` (a 32 bpp fb0 instead of RGB565) into every
+`cmdline.txt` on the boot partition, and every other type takes it out.
+A slot's `cmdline.txt` is otherwise release-owned, so the update path keeps it
+device-owned: `ab-make-payload.sh` strips every `video=` from the release
+template, and `ab-system-update` copies the running slot's `video=` tokens into
+the candidate's. `--apply-derived` restores a missing token at boot (for the next
+boot; it never reboots, a trial boot must not be rebooted).
 
 `micropanel-display-derive.service` regenerates, every boot and before the
 DIP-switch service, micropanel, als-dimmer and the launcher start, what the

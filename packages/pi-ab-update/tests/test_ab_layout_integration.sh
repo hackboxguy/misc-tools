@@ -87,7 +87,7 @@ mount "${source_loop}p2" "$source_root_mount"
 
 printf '%s\n' 'dtoverlay=vc4-kms-v3d' > "$source_boot_mount/config.txt"
 printf '%s\n' \
-    'console=serial0,115200 root=PARTUUID=fixture-root rootfstype=ext4 fsck.repair=yes rootwait overlayroot=tmpfs:recurse=0 init=/usr/lib/raspberrypi-sys-mods/firstboot' \
+    'console=serial0,115200 root=PARTUUID=fixture-root video=HDMI-A-1:4500x298-32@60 rootfstype=ext4 fsck.repair=yes rootwait overlayroot=tmpfs:recurse=0 init=/usr/lib/raspberrypi-sys-mods/firstboot' \
     > "$source_boot_mount/cmdline.txt"
 printf '%s\n' 'fixture kernel payload' > "$source_boot_mount/kernel8.img"
 install -d "$source_boot_mount/overlays"
@@ -237,6 +237,8 @@ for cmdline in cmdline.txt A/cmdline.txt B/cmdline.txt; do
         umount "$work/finalized-boot"; losetup -d "$fixture_boot"; exit 1
     fi
     grep -Eq 'overlayroot=tmpfs:recurse=0$' "$work/finalized-boot/$cmdline"
+    # The image keeps the display mode the authored cmdline set (device-owned).
+    grep -Fqx 'video=HDMI-A-1:4500x298-32@60' <(tr ' ' '\n' < "$work/finalized-boot/$cmdline")
 done
 umount "$work/finalized-boot"
 losetup -d "$fixture_boot"
@@ -428,6 +430,13 @@ if tar -tf "$boot_tar" | grep -Fqx './cmdline.txt'; then
 fi
 tar -xOf "$boot_tar" ./cmdline.txt.template | tr ' ' '\n' | \
     grep -Fqx 'root=LABEL=@MICROPANEL_SLOT@'
+# ...but the release template does not: a display mode is the device's.
+template_tokens=$(tar -xOf "$boot_tar" ./cmdline.txt.template | tr ' ' '\n')
+if grep -Fq 'video=' <<< "$template_tokens"; then
+    echo 'ERROR: the release cmdline template carries the source device display mode' >&2
+    exit 1
+fi
+grep -Fqx 'rootfstype=ext4' <<< "$template_tokens"
 
 # O-05: version-less asset names mean a second release in the same directory
 # would silently replace the first. Run this last: a republish legitimately

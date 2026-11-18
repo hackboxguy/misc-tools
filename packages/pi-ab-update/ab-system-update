@@ -707,8 +707,38 @@ check_boot_archive() {
 # constants whose names are historical. They are deliberately not renamed: like
 # the labels, a rename would buy nothing and would silently invalidate every
 # already-published bundle.
+#
+# Device-owned kernel options: the display mode (video=<connector>:<mode>, which
+# also sets the fbdev depth). A board's display tooling writes it into every
+# slot's cmdline for the display the device drives. The release template must
+# not decide that - it was cut on some other device - so its own video= tokens
+# are dropped and the running slot's are carried over; the candidate then
+# boots its trial boot with the device's display mode.
+DEVICE_CMDLINE_PREFIX='video='
+carry_device_cmdline_tokens() { # $1=rendered cmdline (rewritten) $2=running slot cmdline
+    local rendered=$1 running=$2 carried=''
+    if [ -f "$running" ]; then
+        # Space-separated (mawk, the device's awk, takes no newline in -v).
+        carried=$(head -n 1 "$running" | awk -v owned="$DEVICE_CMDLINE_PREFIX" '{
+            for (i = 1; i <= NF; i++) if (index($i, owned) == 1) printf "%s ", $i }')
+    fi
+    if ! awk -v owned="$DEVICE_CMDLINE_PREFIX" -v carried="$carried" '{
+        out = ""
+        for (i = 1; i <= NF; i++) {
+            if (index($i, owned) == 1) continue
+            out = out (out == "" ? "" : " ") $i
+        }
+        n = split(carried, c, " ")
+        for (i = 1; i <= n; i++) out = out (out == "" ? "" : " ") c[i]
+        print out
+    }' "$rendered" > "$rendered.carry"; then
+        die boot 'unable to carry the device cmdline options'
+    fi
+    mv -f "$rendered.carry" "$rendered" || die boot 'unable to carry the device cmdline options'
+}
+
 render_target_cmdline() {
-    local target_boot=$1 target_slot=$2 template temporary root_count
+    local target_boot=$1 target_slot=$2 running_cmdline=$3 template temporary root_count
     template="$target_boot/cmdline.txt.template"
     [ -f "$template" ] && [ ! -L "$template" ] || die boot 'boot archive template is missing'
     [ "$(wc -l < "$template")" -eq 1 ] || die boot 'boot cmdline template must contain exactly one line'
@@ -716,6 +746,7 @@ render_target_cmdline() {
     [ "$root_count" -eq 1 ] || die boot 'boot cmdline template must contain exactly one slot placeholder'
     temporary="$target_boot/.cmdline.txt.new"
     sed "s/@MICROPANEL_SLOT@/MP_ROOT_${target_slot}/g" "$template" > "$temporary"
+    carry_device_cmdline_tokens "$temporary" "$running_cmdline"
     grep -Fqx "root=LABEL=MP_ROOT_${target_slot}" <(tr ' ' '\n' < "$temporary") || die boot 'unable to render the target root label'
     grep -Eq '(^|[[:space:]])overlayroot=tmpfs:recurse=0([[:space:]]|$)' "$temporary" || die boot 'payload cmdline lacks non-recursive overlayroot'
     mv -f "$temporary" "$target_boot/cmdline.txt"
@@ -1011,7 +1042,7 @@ esac
 rm -rf -- "$target_boot"
 install -d -m0755 "$target_boot"
 tar --extract --file "$boot_archive" --directory "$target_boot" --no-same-owner --no-same-permissions
-render_target_cmdline "$target_boot" "$target_slot"
+render_target_cmdline "$target_boot" "$target_slot" "$boot_dir/$running_slot/cmdline.txt"
 sync "$target_boot"
 
 # The source media is no longer needed once every byte has been consumed and

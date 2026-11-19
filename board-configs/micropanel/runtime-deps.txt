@@ -96,3 +96,11 @@ iproute2
 # at the bench; the proxy and the emulator need only libc/libstdc++.
 fonts-roboto
 can-utils
+# qvue-warpd (br-wrapper, 3x QVue realtime warp): GBM, EGL and GLES on V3D.
+# Present as Qt/Mesa dependencies; pinned so the build-dep purge's autoremove
+# cannot take them.
+libgbm1
+libegl1
+libgles2
+libegl-mesa0
+libgl1-mesa-dri

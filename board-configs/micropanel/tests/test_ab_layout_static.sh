@@ -565,4 +565,30 @@ if [ "$(id -u)" -eq 0 ]; then
     rm -rf "$seeded"
 fi
 
+# --- 3x QVue realtime warp (br-wrapper qvue-warp) ---------------------------------------
+# its build deps on the br-wrapper line, its unit enabled there, /data/qvue-warp in the
+# skeleton, the unit in AB_RESET_BEFORE, its runtime libraries pinned
+for list in hooks.txt hooks-ab.txt; do
+    wrapper=$(grep 'github.com/hackboxguy/br-wrapper.git' "$board/$list" | head -n 1)
+    for needle in libgbm-dev libegl-dev libgles-dev 'systemctl enable /home/pi/micropanel/lib/systemd/system/qvue-warpd.service'; do
+        case "$wrapper" in *"$needle"*) ;; *) fail "$list: the br-wrapper line lacks $needle" ;; esac
+    done
+done
+grep -Fq '"$data_root/qvue-warp"' "$board/packages/micropanel-data-skeleton.sh" \
+    || fail "the data skeleton does not create /data/qvue-warp"
+printf '%s\n' "$(sed -n 's/^AB_RESET_BEFORE=//p' "$ab_conf")" | grep -Fqw qvue-warpd.service \
+    || fail "qvue-warpd.service reads /data but is not in AB_RESET_BEFORE"
+for deps in runtime-deps.txt runtime-deps-ab.txt; do
+    for pkg in libgbm1 libegl1 libgles2 libegl-mesa0 libgl1-mesa-dri; do
+        grep -Fqx "$pkg" "$board/$deps" || fail "$deps lacks $pkg (qvue-warpd)"
+    done
+done
+if [ -d "$repo_root/../br-wrapper/package/qvue-warp" ]; then
+    unit_in="$repo_root/../br-wrapper/package/qvue-warp/data/qvue-warpd.service.in"
+    for needle in 'User=pi' 'RuntimeDirectory=qvue-warp' 'WantedBy=multi-user.target'; do
+        grep -Fqx -- "$needle" "$unit_in" || fail "qvue-warpd.service.in lacks: $needle"
+    done
+    grep -Fq 'micropanel-display-type: 3x-qvue' "$unit_in" || fail "qvue-warpd.service.in: no 3x-qvue ExecCondition"
+fi
+
 echo "micropanel A/B static contract: ok"

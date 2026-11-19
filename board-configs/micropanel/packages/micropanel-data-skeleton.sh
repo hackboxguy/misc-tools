@@ -133,6 +133,12 @@ new_dir -m0755 -o root -g root "$data_root/als-dimmer-calibrations"
 # before NetworkManager starts). Empty: the image's default, WiFi on.
 new_dir -m0755 -o root -g root "$data_root/network"
 
+# 3x QVue realtime warp (br-wrapper qvue-warpd, runs as pi): warp.conf (the
+# warp on/off setting, a layer over the image's defaults) and trim.json (the
+# fine tuning on top of the factory calibration). qvue-warpd.service creates
+# it too (ExecStartPre) when missing. Empty: the image's defaults, no trim.
+new_dir -m0755 -o "$account_uid" -g "$account_gid" "$data_root/qvue-warp"
+
 # NetworkManager's keyfile backend requires this restrictive mode.
 new_dir -m0700 -o root -g root "$data_root/NetworkManager/system-connections"
 

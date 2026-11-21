@@ -28,9 +28,17 @@ ls /proc/sys/fs/binfmt_misc/qemu-aarch64 || sudo systemctl restart systemd-binfm
 ### 2. Install sdm (Raspberry Pi image customizer)
 
 ```bash
-sudo curl -L https://raw.githubusercontent.com/gitbls/sdm/master/EZsdmInstaller | sudo bash
+sudo ./custom-pi-imager/install-sdm-arch.sh    # latest sdm release -> /usr/local/sdm
 sdm --version
 ```
+
+Upstream's installers don't work on Arch: `EZsdmInstaller` is deprecated
+(it only prints a pointer to `install-sdm`), and `install-sdm` refuses to
+run without `apt`. `install-sdm-arch.sh` is upstream `install-sdm` with the
+apt steps swapped for pacman (`systemd-container` is part of `systemd`,
+`binfmt-support` → `qemu-user-static-binfmt`, `gdisk` → `gptfdisk`); it
+installs the same official release tarball. Optional args are upstream's:
+`install-sdm-arch.sh [release] [install-dir] [repo] [local-tarball]`.
 
 ### 3. Kernel cross-toolchain (only for boards with KERNEL=1)
 

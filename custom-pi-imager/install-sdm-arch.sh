@@ -1,0 +1,217 @@
+#!/bin/bash
+# install-sdm-arch.sh - Arch Linux port of sdm's install-sdm (apt -> pacman); otherwise unchanged.
+# Upstream: https://github.com/gitbls/sdm/blob/master/install-sdm
+# Copyright (c) 2021 gitbls - MIT License (https://github.com/gitbls/sdm/blob/master/LICENSE)
+#
+# V14.1
+#
+# install-sdm Run from the bash command line:
+#
+#    curl -L https://raw.githubusercontent.com/gitbls/sdm/master/install-sdm | bash
+#
+# $1: Release to install from (D:latest)
+# $2: Target install directory (D:/usr/local/sdm)
+# $3: Source GitHub repo (D:gitbls/sdm)
+# $4: /path/to/local/sdm.tar.xz (D:"")
+# ** To use any of these arguments you must download this script to your system
+#    and start it from the command line:
+#    e.g., bash$ install-sdm                               # Install latest release to /usr/local/sdm
+#          bash$ install-sdm "" /home/$(whoami)/sdm        # Install latest release to /home/$(whoami)/sdm
+#
+# Any/all required packages are installed via pacman
+#
+
+function errexit() {
+    echo "$1"
+    exit 1
+}
+
+function stripquotes() {
+    #
+    # Remove leading/trailing single and double quotes
+    # If $2 != "" then quote $ character
+    #
+    local str="$1" qd="$2" snolq
+    [[ "$qd" != "" ]] && [[ "$str" =~ "$" ]] && str=${str//$/\\$}    # Replace $ with \$
+    str="${str%"${str##*[^[:blank:]]}"}"  # Del trailing spaces/tabs
+    snolq="${str#\"}"         # Get string without open quote
+    if [ "$snolq" != "$str" ] # if lq was there, then update string and also del close quote
+    then
+	str="$snolq"
+	str="${str%\"}"
+    fi
+    snolq="${str#\'}"         # Get string without open quote
+    if [ "$snolq" != "$str" ] # Ditto double quote comment
+    then
+	str="$snolq"
+	str="${str%\'}"
+    fi
+    echo "$str"
+}
+
+function getosinfo() {
+    #
+    # extract an element from /etc/os-release
+    #
+    local item="$1" where="$2"
+    str="$( { IFS="=" read id name ; echo $name ;} <<< $(grep ^$item= $where/etc/os-release))"
+    echo $(stripquotes "$str")
+}
+
+#
+# Check OS Distro and version
+#
+myscript="$0 $@"
+[ "$(type -p pacman)" == "" ] && errexit "? pacman not found; this is the Arch Linux variant of install-sdm"
+#
+# Create directories and download sdm
+#
+[ "$1" == "" ] && release="latest" || release="$1"
+[ "$2" != "" ] && dir="$2" || dir="/usr/local/sdm"
+[ "$3" != "" ] && repo="$3" || repo="gitbls/sdm"
+[ "$4" != "" ] && tarball="$4" || tarball=""
+
+[ "$1" == "help" ] && echo $"install-sdm help:
+$0 release-name install-directory repo-name saved-local-tarball
+  release-name: Release to install (D:latest)
+  install-directory: Target install directory (D:/usr/local/sdm)
+  repo-name: Source GitHub repo (D:gitbls/sdm)
+  saved-local-tarball: /path/to/local/sdm.tar.xz (D:"")" && exit
+sudo=""
+if [ -d $dir ]
+then
+    [ ! -w $dir ] && sudo="sudo"      # Directory exists; do we have write access?
+else
+    [ ! -w ${dir%/*} ] && sudo="sudo" # Directory does not exist; do we have write access to where it will be created?
+fi
+
+if [ "$(type -p curl)" == "" ]
+then
+    echo "* Install curl"
+    $sudo pacman -S --needed --noconfirm curl
+fi
+
+echo "* Make sdm install directory '$dir'"
+$sudo mkdir -p $dir/{1piboot,plugins,local-plugins}
+
+#v="--verbose" # list files as they're extracted
+if [ "$tarball" == "" ]
+then
+    [ "$release" == "latest" ] && src="https://github.com/$repo/releases/latest/download/sdm.tar.xz" || src="https://github.com/$repo/releases/download/$release/sdm.tar.xz"
+    echo "* Download sdm tarball from '$src' and install in '$dir'"
+    curl --fail --silent --show-error -L $src | $sudo tar --extract --xz $v --file - --overwrite -C $dir || errexit "? Error ($?) downloading/untarring the sdm tarball"
+else
+    echo "* Install sdm from tarball '$tarball' to '$dir'"
+    $sudo tar --extract --xz $v --file $tarball --overwrite -C $dir || errexit "? Error ($?) untarring sdm tarball '$tarball'"
+fi
+
+[ compgen "$dir/sdm.version-*" > /dev/null 2>&1 ] && rm -f $dir/sdm.version-*
+
+etc="/etc"
+
+if [ "$dir" == "/usr/local/sdm" ]
+then
+    echo "* Create link for sdm: /usr/local/bin/sdm"
+    [ -L /usr/local/bin/sdm ] && $sudo rm -f /usr/local/bin/sdm
+    $sudo ln -s /usr/local/sdm/sdm /usr/local/bin/sdm
+    [ -d /etc/bash_completion.d ] && $sudo cp /usr/local/sdm/completion.sdm /etc/bash_completion.d/sdm
+fi
+
+$sudo chmod -R 755 $dir/*
+$sudo chmod 644 $dir/{sdm-apps-example,sdm-xapps-example} $dir/1piboot/1piboot.conf
+$sudo mkdir -p $etc/sdm/{0piboot,1piboot,xpiboot,zzpiboot,assets,local-assets}
+$sudo chmod 700 $etc/sdm
+$sudo touch $etc/sdm/history
+$sudo rm -f $etc/sdm/sdm-readparams
+$sudo cp -a $dir/sdm-readparams $etc/sdm
+if [ "$($sudo bash -c '[ -f $etc/sdm/cparams ] || echo "no"')" == "no" ]
+then
+    myuser=$(whoami)
+    hostname=$(hostname)
+    raspiosver="$(getosinfo VERSION_ID $SDMPT)"
+    cat <<EOF | $sudo tee $etc/sdm/cparams >/dev/null
+# Written by install-sdm $(date +'%Y-%m-%d %H:%M:%S')
+version:"V12.6"
+thishost:""
+aptcache:""
+aptdistupgrade:""
+autologin:"0"
+fbatch:"0"
+b0script:""
+b1script:""
+bootscripts:"0"
+burnplugins:""
+cscript:""
+csrc:""
+datefmt:"%Y-%m-%d %H:%M:%S"
+debugs:""
+dimg:""
+dimgdev:"0"
+dimgdevname:""
+domain:""
+ecolors:"blue:gray:red"
+expandroot:""
+exports:""
+fchroot:"0"
+fdirtree:"0"
+fnoexpandroot:"0"
+hname:""
+hostname:"$hostname"
+loadlocal:""
+logwidth:"192"
+dgroups:"dialout,cdrom,floppy,audio,video,plugdev,users,adm,sudo,users,input,netdev,spi,i2c,gpio"
+myuser:"$myuser"
+nowaittimesync:"0"
+os:""
+pi1bootconf:""
+plugindebug:"0"
+poptions:""
+raspiosver:"$raspiosver"
+reboot:""
+fredact:"0"
+regensshkeys:""
+noreboot:"0"
+rebootwait:"20"
+redocustomize:"0"
+sdmdir:"$dir"
+sdmflist:"sdm sdm-phase0 sdm-phase1 sdm-cparse sdm-readparams sdm-cmdsubs sdm-firstboot sdm-apt sdm-apt-cacher sdm-cportal sdm-logmsg sdm-gburn"
+showapt:"0"
+src:"$dir"
+swapsize:"0"
+timezone:""
+virtmode:"nspawn"
+vqemu:""
+custom1:""
+custom2:""
+custom3:""
+custom4:""
+plugins:""
+allplugins:""
+EOF
+else
+    echo "* $etc/sdm/cparams exists; Not overwriting"
+fi
+[[ $EUID -ne 0 ]] && sudo="sudo"
+# Arch equivalents: systemd-container->systemd (nspawn), binfmt-support->qemu-user-static-binfmt+systemd-binfmt,
+# fdisk->util-linux, gdisk->gptfdisk. uuid (only used by sdm-make-luks-usb-key) and keyboard-configuration are not packaged.
+pkgs="coreutils file util-linux gptfdisk parted qemu-user-static qemu-user-static-binfmt rsync systemd usbutils"
+echo "* Ensure required packages are installed: $pkgs"
+echo "> Install any needed packages"
+$sudo pacman -S --needed --noconfirm $pkgs
+$sudo systemctl restart systemd-binfmt
+
+echo ""
+if [ "$dir" == "/usr/local/sdm" -a "$(type -p sdm)" != "" ]
+then
+    echo "* Invoke sdm with 'sdm'"
+else
+    echo "* Invoke sdm with '$dir/sdm'"
+    echo "* You can make an ease-of-use link with: sudo ln -s $dir/sdm /usr/local/bin/sdm"
+    echo "    (or anywhere else in your PATH)"
+    echo "  so you can invoke sdm with 'sdm'"
+fi
+
+echo $"
+  sdm documentation: https://github.com/$repo/tree/master/Docs
+
+"
